@@ -1,5 +1,5 @@
 # weber-hello-world
 
-# let's  the brnach in how git system
+# let's  the branncch in how git system
 
 tiantianchijiu
