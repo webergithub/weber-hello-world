@@ -63,8 +63,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 选择 Xcode 16
-        run: sudo xcode-select -s /Applications/Xcode_16.app || sudo xcode-select -s /Applications/Xcode.app
+      - name: 显示 Xcode / iOS 运行时（诊断）
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes || true
 
       - uses: actions/setup-node@v4
         with:
