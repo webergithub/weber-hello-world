@@ -6,6 +6,8 @@ import { colorFor } from '../../lib/id'
 import { useChannel } from '../../lib/useChannel'
 import { watchPosition } from '../../lib/geo'
 import { useKeepAwake, useNetwork } from '../../lib/useNetwork'
+import { platform } from '../../lib/native'
+import { PRESETS, VoiceFX, type VoicePreset } from '../../lib/voicefx'
 
 interface PeerLoc {
   from: string
@@ -13,6 +15,12 @@ interface PeerLoc {
   lat: number
   lng: number
   ts: number
+  platform?: string // 'ios' | 'android' | 'web'，不区分机型均可互联
+}
+
+const PLAT_LABEL: Record<string, string> = { ios: 'iPhone', android: '安卓', web: '网页' }
+function platLabel(p?: string): string {
+  return PLAT_LABEL[p ?? ''] ?? '设备'
 }
 
 // 彩色圆点头像图标，避免默认图标资源缺失问题
@@ -49,6 +57,7 @@ export function ConvoyApp() {
   const me = activeGroup?.members.find((m) => m.id === activeGroup.myMemberId)
   const myName = me?.nickname ?? '我'
   const net = useNetwork()
+  const [pttPreset, setPttPreset] = useState<VoicePreset>(PRESETS[0])
   useKeepAwake(!!activeGroup) // 跟车时保持屏幕常亮
 
   const { send } = useChannel(activeGroup?.code ?? null, activeGroup?.myMemberId ?? 'me', (m) => {
@@ -70,7 +79,14 @@ export function ConvoyApp() {
       ({ lat, lng }) => {
         setGeoErr('')
         setMyPos([lat, lng])
-        send('location', { from: activeGroup.myMemberId, nickname: myName, lat, lng, ts: Date.now() })
+        send('location', {
+          from: activeGroup.myMemberId,
+          nickname: myName,
+          lat,
+          lng,
+          ts: Date.now(),
+          platform: platform(),
+        })
       },
       (msg) => setGeoErr(msg),
     )
@@ -115,7 +131,7 @@ export function ConvoyApp() {
           {peerList.map((p) => (
             <Marker key={p.from} position={[p.lat, p.lng]} icon={dotIcon(colorFor(p.from), p.nickname.slice(0, 1))}>
               <Popup>
-                {p.nickname}
+                {p.nickname}（{platLabel(p.platform)}）
                 <br />
                 {new Date(p.ts).toLocaleTimeString()}
               </Popup>
@@ -132,6 +148,11 @@ export function ConvoyApp() {
             <div className="small muted">
               验证码 {activeGroup.code} · 在线 {peerList.length + 1} 人 · {net}
             </div>
+            {peerList.length > 0 && (
+              <div className="small muted">
+                同行设备：{deviceBreakdown(peerList, platform())}
+              </div>
+            )}
           </div>
           <div className="layer-toggle">
             <button className={layer === 'road' ? 'on' : ''} onClick={() => setLayer('road')}>道路</button>
@@ -145,30 +166,85 @@ export function ConvoyApp() {
         )}
       </div>
 
-      {/* 底部对讲机 */}
+      {/* 底部对讲机（含变声扩展选项） */}
       <div className="map-overlay bottom" style={{ textAlign: 'center' }}>
-        <PttButton onClip={(audio) => send('ptt', { audio })} />
+        <PttVoicePicker preset={pttPreset} onPick={setPttPreset} />
+        <PttButton preset={pttPreset} onClip={(audio) => send('ptt', { audio, preset: pttPreset.id })} />
       </div>
     </div>
   )
 }
 
-// 按住说话：录音，松开发送。类似对讲机。
-function PttButton({ onClip }: { onClip: (audioDataUrl: string) => void }) {
+// 统计同行设备的机型分布，直观体现"iOS/安卓不区分机型都能连"
+function deviceBreakdown(peers: PeerLoc[], mine: string): string {
+  const counts: Record<string, number> = {}
+  for (const p of peers) counts[p.platform ?? 'web'] = (counts[p.platform ?? 'web'] ?? 0) + 1
+  counts[mine] = (counts[mine] ?? 0) + 1 // 含自己
+  return Object.entries(counts)
+    .map(([k, n]) => `${platLabel(k)}×${n}`)
+    .join(' · ')
+}
+
+// 对讲机变声选项：折叠式，默认原声
+function PttVoicePicker({ preset, onPick }: { preset: VoicePreset; onPick: (p: VoicePreset) => void }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <button
+        className="pill"
+        onClick={() => setOpen((v) => !v)}
+        style={{ border: 'none', background: 'rgba(19,28,46,0.85)' }}
+      >
+        🎭 变声：{preset.emoji} {preset.name} {open ? '▾' : '▸'}
+      </button>
+      {open && (
+        <div
+          className="glass"
+          style={{ padding: 8, marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center' }}
+        >
+          {PRESETS.map((p) => (
+            <button
+              key={p.id}
+              className={`chk ${preset.id === p.id ? 'on' : ''}`}
+              onClick={() => {
+                onPick(p)
+                setOpen(false)
+              }}
+            >
+              {p.emoji} {p.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 按住说话：录音，松开发送。类似对讲机。可叠加变声。
+function PttButton({ preset, onClip }: { preset: VoicePreset; onClip: (audioDataUrl: string) => void }) {
   const [talking, setTalking] = useState(false)
   const [err, setErr] = useState('')
   const recRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const streamRef = useRef<MediaStream | null>(null)
+  const fxRef = useRef<VoiceFX | null>(null)
 
   const supported = useMemo(() => typeof MediaRecorder !== 'undefined', [])
 
   async function start() {
     try {
       setErr('')
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream
-      const rec = new MediaRecorder(stream)
+      const mic = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = mic
+      let recStream = mic
+      if (preset.id !== 'off') {
+        const fx = new VoiceFX()
+        fx.resume()
+        fx.setPreset(preset)
+        recStream = fx.connectMic(mic)
+        fxRef.current = fx
+      }
+      const rec = new MediaRecorder(recStream)
       chunksRef.current = []
       rec.ondataavailable = (e) => e.data.size && chunksRef.current.push(e.data)
       rec.onstop = () => {
@@ -177,6 +253,8 @@ function PttButton({ onClip }: { onClip: (audioDataUrl: string) => void }) {
         reader.onload = () => onClip(reader.result as string)
         reader.readAsDataURL(blob)
         streamRef.current?.getTracks().forEach((t) => t.stop())
+        fxRef.current?.dispose()
+        fxRef.current = null
       }
       rec.start()
       recRef.current = rec
