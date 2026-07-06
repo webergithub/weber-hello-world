@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useStore } from '../../store'
 import { colorFor } from '../../lib/id'
 import { toYuan } from '../../lib/settle'
+import { shareText } from '../../lib/nativeShare'
 import type { Expense } from '../../types'
 import { AddExpense } from './AddExpense'
 import { settlements, summarize, totalSpent } from './split'
@@ -11,6 +12,7 @@ export function LedgerApp() {
   const [showAdd, setShowAdd] = useState(false)
   const [editing, setEditing] = useState<Expense | undefined>()
   const [tab, setTab] = useState<'list' | 'settle'>('list')
+  const [shareMsg, setShareMsg] = useState('')
 
   const summ = useMemo(
     () => (activeGroup ? summarize(activeGroup.members, activeGroup.expenses) : []),
@@ -29,6 +31,20 @@ export function LedgerApp() {
 
   const name = (id: string) => activeGroup.members.find((m) => m.id === id)?.nickname ?? '?'
   const total = totalSpent(activeGroup.expenses)
+
+  async function shareBill() {
+    const lines = [`【${activeGroup!.name}】AA 账单`, `总支出 ¥${toYuan(total)} · ${activeGroup!.members.length} 人`, '', '各家账单：']
+    for (const s of summ) {
+      lines.push(`· ${name(s.memberId)}：${s.net >= 0 ? '应收' : '应付'} ¥${toYuan(Math.abs(s.net))}`)
+    }
+    lines.push('', '转账方案：')
+    if (transfers.length === 0) lines.push('· 账目已平，无需转账')
+    else for (const t of transfers) lines.push(`· ${name(t.from)} → ${name(t.to)} ¥${toYuan(t.amount)}`)
+    lines.push('', '—— TrailMate 出游助手')
+    const res = await shareText(`${activeGroup!.name} 账单`, lines.join('\n'))
+    setShareMsg(res === 'shared' ? '已打开分享' : res === 'copied' ? '账单已复制到剪贴板' : '分享失败')
+    setTimeout(() => setShareMsg(''), 2500)
+  }
 
   return (
     <div>
@@ -117,6 +133,10 @@ export function LedgerApp() {
             <p className="small muted" style={{ marginTop: 10 }}>
               已用最少转账笔数算法，家庭/成员间按上表付款即可全部结清。
             </p>
+            <button className="btn block" style={{ marginTop: 10 }} onClick={shareBill}>
+              📤 分享账单
+            </button>
+            {shareMsg && <div className="small muted" style={{ marginTop: 6 }}>{shareMsg}</div>}
           </div>
         </>
       )}

@@ -4,8 +4,8 @@ import L from 'leaflet'
 import { useStore } from '../../store'
 import { colorFor } from '../../lib/id'
 import { useChannel } from '../../lib/useChannel'
-import { preferredLink } from '../../lib/transport'
 import { watchPosition } from '../../lib/geo'
+import { useKeepAwake, useNetwork } from '../../lib/useNetwork'
 
 interface PeerLoc {
   from: string
@@ -48,6 +48,8 @@ export function ConvoyApp() {
 
   const me = activeGroup?.members.find((m) => m.id === activeGroup.myMemberId)
   const myName = me?.nickname ?? '我'
+  const net = useNetwork()
+  useKeepAwake(!!activeGroup) // 跟车时保持屏幕常亮
 
   const { send } = useChannel(activeGroup?.code ?? null, activeGroup?.myMemberId ?? 'me', (m) => {
     if (m.kind === 'location') {
@@ -128,7 +130,7 @@ export function ConvoyApp() {
           <div className="grow">
             <strong>{activeGroup.name}</strong>
             <div className="small muted">
-              验证码 {activeGroup.code} · 在线 {peerList.length + 1} 人 · 链路 {linkLabel()}
+              验证码 {activeGroup.code} · 在线 {peerList.length + 1} 人 · {net}
             </div>
           </div>
           <div className="layer-toggle">
@@ -149,11 +151,6 @@ export function ConvoyApp() {
       </div>
     </div>
   )
-}
-
-function linkLabel(): string {
-  const l = preferredLink()
-  return { bluetooth: '蓝牙', wifi: 'WiFi直连', cellular: '移动网络', local: '本机演示' }[l]
 }
 
 // 按住说话：录音，松开发送。类似对讲机。

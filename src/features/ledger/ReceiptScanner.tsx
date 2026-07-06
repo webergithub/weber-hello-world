@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { capturePhotoNative, isNativePlatform } from '../../lib/nativeCamera'
 
 // 拍照/选图 -> OCR 识别小票 -> 猜测总金额与商户
 export interface ReceiptResult {
@@ -60,9 +61,24 @@ export function ReceiptScanner({
   const [preview, setPreview] = useState<string | null>(null)
 
   async function handleFile(file: File) {
-    setBusy(true)
-    setStatus('读取图片…')
     const image = await fileToDataUrl(file)
+    await runOcr(image)
+  }
+
+  async function handleNativeCamera() {
+    setBusy(true)
+    setStatus('打开相机…')
+    const image = await capturePhotoNative()
+    if (!image) {
+      setStatus('')
+      setBusy(false)
+      return
+    }
+    await runOcr(image)
+  }
+
+  async function runOcr(image: string) {
+    setBusy(true)
     setPreview(image)
     try {
       setStatus('识别中（首次需下载中文语言包，请稍候）…')
@@ -95,20 +111,26 @@ export function ReceiptScanner({
           拍摄或选择小票照片，自动识别总金额并生成账单。识别在本机完成，图片不外传。
         </p>
 
-        <label className="btn primary block" style={{ marginTop: 12 }}>
-          📷 拍照 / 选择小票
-          <input
-            type="file"
-            accept="image/*"
-            capture="environment"
-            hidden
-            disabled={busy}
-            onChange={(e) => {
-              const f = e.target.files?.[0]
-              if (f) handleFile(f)
-            }}
-          />
-        </label>
+        {isNativePlatform() ? (
+          <button className="btn primary block" style={{ marginTop: 12 }} disabled={busy} onClick={handleNativeCamera}>
+            📷 拍照识别小票
+          </button>
+        ) : (
+          <label className="btn primary block" style={{ marginTop: 12 }}>
+            📷 拍照 / 选择小票
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              hidden
+              disabled={busy}
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                if (f) handleFile(f)
+              }}
+            />
+          </label>
+        )}
 
         {preview && <img className="receipt-preview" src={preview} alt="小票预览" />}
         {status && <div className="scan-status">{status}</div>}
