@@ -1,0 +1,9 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+dev-dist
+.DS_Store
+_smoke*.mjs
+_*.png
