@@ -1,0 +1,115 @@
+name: 构建移动端 App (Android APK / iOS IPA)
+
+# 自动编译 iOS 与 Android 原生包，产物可在 Actions run 的 Artifacts 中下载。
+# - Android: app-debug.apk —— 直接可安装到安卓真机，蓝牙 Mesh 可用。
+# - iOS:     app-unsigned.ipa —— 未签名，需用你自己的 Apple 账号重签
+#            (AltStore / Sideloadly) 后安装到 iPhone 真机测试。
+# 同时充当原生代码(含蓝牙插件 Kotlin/Java 与 Swift)的编译校验。
+
+on:
+  push:
+    branches: ['**']
+    paths-ignore:
+      - '**/*.md'
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装所需 SDK 组件 (compileSdk 36)
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: 安装依赖并构建 Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 同步到原生工程
+        run: npx cap sync android
+
+      - name: 打包 Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS (未签名 IPA)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装依赖并构建 Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 同步到原生工程
+        run: npx cap sync ios
+
+      - name: 解析 Swift Package 依赖
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App || \
+          xcodebuild -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj -target App
+
+      - name: 编译 (设备架构，不签名)
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -target App \
+            -configuration Debug \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            ONLY_ACTIVE_ARCH=NO \
+            build
+
+      - name: 打包未签名 IPA
+        run: |
+          APP=$(find build/Build/Products -name 'App.app' -type d | head -1)
+          echo "App bundle: $APP"
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr app-unsigned.ipa Payload
+          ls -la app-unsigned.ipa
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-unsigned-ipa
+          path: app-unsigned.ipa
+          if-no-files-found: error

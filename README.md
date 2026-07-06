@@ -47,7 +47,15 @@ capacitor.config.ts
 
 权限文案已配置：Android 见 `android/app/src/main/AndroidManifest.xml`，iOS 见 `ios/App/App/Info.plist`。
 
-### 构建与运行
+### 云端自动出包（GitHub Actions，无需本地 IDE）
+仓库内置 `.github/workflows/build-mobile.yml`，每次 push 或手动触发即自动编译：
+- **Android**：`app-debug-apk` —— 直接安装到安卓真机，蓝牙 Mesh 可用。
+- **iOS**：`app-unsigned-ipa` —— **未签名**，需用你自己的 Apple 账号（AltStore / Sideloadly）重签后装到 iPhone。
+- 产物在对应 Actions run 的 **Artifacts** 里下载。该 CI 同时充当原生代码（蓝牙插件 Kotlin/Java 与 Swift）的编译校验。
+
+> iOS 若要 CI 直接产出**可直接安装**的签名包，需在仓库 Secrets 里配置 Apple 证书与描述文件；未配置时产出未签名包供本地重签。
+
+### 本地构建与运行
 > 需要在 **本机**（能访问 Google Maven / Android SDK 的网络）操作，并安装对应 IDE。
 
 ```bash
