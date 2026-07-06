@@ -5,6 +5,7 @@ import { useStore } from '../../store'
 import { colorFor } from '../../lib/id'
 import { useChannel } from '../../lib/useChannel'
 import { preferredLink } from '../../lib/transport'
+import { watchPosition } from '../../lib/geo'
 
 interface PeerLoc {
   from: string
@@ -60,24 +61,18 @@ export function ConvoyApp() {
     }
   })
 
-  // 定位并广播
+  // 定位并广播（原生用 Capacitor GPS，Web 用浏览器定位）
   useEffect(() => {
     if (!activeGroup) return
-    if (!('geolocation' in navigator)) {
-      setGeoErr('设备不支持定位')
-      return
-    }
-    const id = navigator.geolocation.watchPosition(
-      (pos) => {
-        const lat = pos.coords.latitude
-        const lng = pos.coords.longitude
+    const stop = watchPosition(
+      ({ lat, lng }) => {
+        setGeoErr('')
         setMyPos([lat, lng])
         send('location', { from: activeGroup.myMemberId, nickname: myName, lat, lng, ts: Date.now() })
       },
-      (err) => setGeoErr('无法获取定位：' + err.message),
-      { enableHighAccuracy: true, maximumAge: 3000, timeout: 10000 },
+      (msg) => setGeoErr(msg),
     )
-    return () => navigator.geolocation.clearWatch(id)
+    return stop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeGroup?.id, myName])
 

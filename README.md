@@ -25,6 +25,53 @@ npm run preview  # 预览生产包
 - 局域网真机测试：`npm run dev:all` 后，多部手机连同一 WiFi，浏览器打开电脑的 `http://<电脑IP>:5173`，进同一群组即可通过 **WebRTC P2P** 互通。
 - 摄像头、定位、麦克风等能力需要 **HTTPS 或 localhost** 才能授权。跨机测试建议部署到 https 站点，或用本机 https 代理。
 
+## 📱 原生 App（iOS / Android）
+
+本项目已用 **Capacitor** 封装为真正的 iOS / Android 原生 App —— 同一套 React 代码跑在原生
+WebView 里，并通过原生插件访问 GPS、摄像头、麦克风、蓝牙等能力。原生工程已生成并纳入版本库：
+
+```
+android/   Android Studio 工程（Gradle）
+ios/       Xcode 工程（Swift Package Manager，无需 CocoaPods）
+capacitor.config.ts
+```
+
+### 已接入的原生能力
+| 能力 | 插件 / 实现 | 用途 |
+| --- | --- | --- |
+| GPS 定位 | `@capacitor/geolocation`（`src/lib/geo.ts` 自动在原生/Web 间切换） | 跟车实时位置，支持后台 |
+| 摄像头 / 麦克风 | WebView `getUserMedia` + 原生权限 | 拍照小票、语音/视频、变声、对讲机 |
+| 网络状态 | `@capacitor/network` | 链路判断 |
+| 状态栏 / 键盘 | `@capacitor/status-bar` `@capacitor/keyboard` | 原生外观 |
+| 蓝牙 / 局域网 | 权限已在 Manifest / Info.plist 声明 | 预留给营地无信号 Mesh 适配器 |
+
+权限文案已配置：Android 见 `android/app/src/main/AndroidManifest.xml`，iOS 见 `ios/App/App/Info.plist`。
+
+### 构建与运行
+> 需要在 **本机**（能访问 Google Maven / Android SDK 的网络）操作，并安装对应 IDE。
+
+```bash
+npm install
+npm run build          # 产出 dist/
+npx cap sync           # 同步 Web 资源与插件到原生工程
+
+# Android（需 Android Studio + SDK，compileSdk 36）
+npm run android        # = build + cap sync android + 打开 Android Studio
+#  或命令行直接打包： cd android && ./gradlew assembleDebug
+#  产物： android/app/build/outputs/apk/debug/app-debug.apk
+
+# iOS（需 macOS + Xcode）
+npm run ios            # = build + cap sync ios + 打开 Xcode
+#  在 Xcode 里选择签名团队后 Run 到真机 / 模拟器
+```
+
+真机热重载调试：把 `capacitor.config.ts` 里的 `server.url` 注释打开、填电脑局域网 IP，
+配合 `npm run dev:all`，即可边改边看。
+
+> 说明：本仓库的 `android/` `ios/` 已由 `npx cap add` 官方模板生成并通过 `npx cap sync`
+> 校验；由于本次开发环境的出网策略屏蔽了 Google 域名（Android SDK / Google Maven 不可达），
+> 未在此环境内编译出 APK/IPA——在你本机执行上面命令即可一键打包。
+
 ## 各模块细节
 
 ### 👥 群组（多群组持久化）

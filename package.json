@@ -10,9 +10,19 @@
     "dev:all": "concurrently -n web,sig -c cyan,magenta \"vite --host\" \"node server/signaling.js\"",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "typecheck": "tsc -b --noEmit"
+    "typecheck": "tsc -b --noEmit",
+    "sync": "npm run build && cap sync",
+    "android": "npm run build && cap sync android && cap open android",
+    "ios": "npm run build && cap sync ios && cap open ios"
   },
   "dependencies": {
+    "@capacitor/app": "^8.1.0",
+    "@capacitor/camera": "^8.2.0",
+    "@capacitor/core": "^8.4.1",
+    "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/keyboard": "^8.0.5",
+    "@capacitor/network": "^8.0.1",
+    "@capacitor/status-bar": "^8.0.2",
     "html5-qrcode": "^2.3.8",
     "leaflet": "^1.9.4",
     "qrcode.react": "^4.2.0",
@@ -23,6 +33,9 @@
     "tesseract.js": "^5.1.1"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/cli": "^8.4.1",
+    "@capacitor/ios": "^8.4.1",
     "@types/leaflet": "^1.9.20",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",

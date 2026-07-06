@@ -5,6 +5,9 @@ import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import { App } from './App'
 import { StoreProvider } from './store'
+import { initNative } from './lib/native'
+
+void initNative()
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
