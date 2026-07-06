@@ -28,7 +28,7 @@ export function CampApp() {
   const myId = activeGroup?.myMemberId ?? 'me'
   const myName = activeGroup?.members.find((m) => m.id === myId)?.nickname ?? '我'
 
-  const { send } = useChannel(authorized ? activeGroup?.id ?? null : null, myId, (m) => {
+  const { send } = useChannel(authorized ? activeGroup?.code ?? null : null, myId, (m) => {
     if (m.kind === 'chat') {
       const msg = m.payload as ChatMsg
       if (msg.from === myId) return

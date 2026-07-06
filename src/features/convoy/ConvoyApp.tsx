@@ -48,7 +48,7 @@ export function ConvoyApp() {
   const me = activeGroup?.members.find((m) => m.id === activeGroup.myMemberId)
   const myName = me?.nickname ?? '我'
 
-  const { send } = useChannel(activeGroup?.id ?? null, activeGroup?.myMemberId ?? 'me', (m) => {
+  const { send } = useChannel(activeGroup?.code ?? null, activeGroup?.myMemberId ?? 'me', (m) => {
     if (m.kind === 'location') {
       const p = m.payload as PeerLoc
       if (p.from === activeGroup?.myMemberId) return

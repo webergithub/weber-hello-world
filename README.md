@@ -14,12 +14,16 @@
 
 ```bash
 npm install
-npm run dev      # 本地开发（手机可通过局域网 IP 访问，便于真机测试摄像头/定位/麦克风）
+npm run dev:all  # 同时启动 Web + 信令服务器（推荐：跨设备真联通）
+# 或分开跑：
+npm run dev      # 仅前端（同设备多标签演示）
+npm run server   # 仅信令服务器（默认 :8787）
 npm run build    # 生产构建
 npm run preview  # 预览生产包
 ```
 
-> 摄像头、定位、麦克风等能力需要 **HTTPS 或 localhost** 才能授权。真机测试请用 `npm run dev -- --host` 并配合本机 https 代理，或部署到 https 站点。
+- 局域网真机测试：`npm run dev:all` 后，多部手机连同一 WiFi，浏览器打开电脑的 `http://<电脑IP>:5173`，进同一群组即可通过 **WebRTC P2P** 互通。
+- 摄像头、定位、麦克风等能力需要 **HTTPS 或 localhost** 才能授权。跨机测试建议部署到 https 站点，或用本机 https 代理。
 
 ## 各模块细节
 
@@ -53,11 +57,13 @@ npm run preview  # 预览生产包
 ## 技术架构
 
 ```
+server/
+└─ signaling.js         # 极简 WebRTC 信令服务器（房间转发 SDP/ICE，数据走 P2P）
 src/
 ├─ store.tsx            # 全局状态（多群组 + 账目），localStorage 持久化
 ├─ types.ts             # 领域模型
 ├─ lib/
-│  ├─ transport.ts      # 可插拔对等传输层（Web: BroadcastChannel；原生: BLE/WiFi 适配器）
+│  ├─ transport.ts      # 可插拔对等传输层（Broadcast + WebRTC 组合；原生 BLE/WiFi 可再加）
 │  ├─ useChannel.ts     # 订阅群组频道的 Hook
 │  ├─ settle.ts         # AA 净额计算 + 最小转账算法
 │  ├─ voicefx.ts        # 实时变声引擎（Jungle 音高偏移 + 效果链）
@@ -71,14 +77,22 @@ src/
    └─ voice/            # 独立变声 App
 ```
 
-### 关于联网与「自组网」
-浏览器沙箱**无法直接使用蓝牙 Mesh / WiFi Direct**。因此 Web 版的对等通信统一走
-`BroadcastTransport`（`BroadcastChannel`，可在同一设备的多个标签页/PWA 实例间实时互通，用于演示与本机联调）。
-`src/lib/transport.ts` 定义了统一的 `Transport` 接口，将本项目用
-**Capacitor / React Native** 打包为原生 App 后，只需实现一个真实的 BLE / WiFi Direct
-适配器替换单例，上层跟车、营地、记账同步逻辑无需改动，即可实现真正的无信号自组网。
+### 关于联网与「自组网」（已实现跨设备）
+`src/lib/transport.ts` 定义统一的 `Transport` 接口，默认用 `CompositeTransport` 同时挂载两条链路，业务层（跟车/营地/对讲机）完全无感：
 
-## 已知限制（Web 版）
-- 跨设备实时同步依赖原生传输适配器；Web 演示为同设备多标签互通。
+1. **`BroadcastTransport`**（`BroadcastChannel`）——同一设备多标签/多 PWA 实例互通，免服务器。
+2. **`WebRTCTransport`**——**真正的跨设备 P2P 全网状连接**。位置、语音、聊天走设备之间的 WebRTC 直连，只需一个极小的信令服务器（`server/signaling.js`，约 60 行）帮忙牵线交换 SDP/ICE，业务数据不经过服务器。
+   - 频道以群组的 **6 位验证码** 为房间 key，因此不同手机「输入同一验证码」即进入同一网状网。
+   - 断线自动重连、ICE 候选缓冲、按 peerId 去重发起以避免 glare，均已处理。
+   - 信令地址：开发环境默认 `ws://<当前主机>:8787`；生产环境用 `VITE_SIGNALING_URL` 配置（见 `.env.example`）。公网穿透如遇对称型 NAT，可在 `WebRTCTransport` 的 `iceServers` 里补一个 TURN。
+
+> 已用两个独立浏览器实例（不共享 BroadcastChannel）实测：加入同一验证码后消息经 WebRTC 双向互通。
+
+**演进为原生无信号 Mesh**：浏览器沙箱无法直接用蓝牙 Mesh / WiFi Direct。用
+**Capacitor / React Native** 打包后，只需再写一个真实的 BLE / WiFi Direct 适配器加入
+`CompositeTransport`，即可在完全无移动网络的营地实现自组网——上层代码零改动。
+
+## 已知限制
+- 无信号（连 WiFi 都没有）的真·蓝牙 Mesh 需原生适配器；Web 版跨设备走 WebRTC（需能互通的网络 + 信令服务器）。
 - 地图瓦片、OCR 语言包首次加载需要网络（之后由 Service Worker 缓存离线可用）。
 - 变声为风格化处理，非明星声音克隆。
