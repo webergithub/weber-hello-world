@@ -3,6 +3,7 @@ import { useStore } from '../../store'
 import { uid } from '../../lib/id'
 import { useChannel } from '../../lib/useChannel'
 import { PRESETS, VoiceFX, type VoicePreset } from '../../lib/voicefx'
+import { transport } from '../../lib/transport'
 
 type ChatKind = 'text' | 'voice' | 'video'
 interface ChatMsg {
@@ -91,6 +92,7 @@ export function CampApp() {
       <div className="page-head" style={{ marginBottom: 10 }}>
         <h1>营地群聊 · {activeGroup.name}</h1>
         <p>已开启自组网 · 文字 / 语音 / 视频 · 变声可选</p>
+        <MeshStatus />
       </div>
 
       <div className="card" style={{ marginBottom: 10 }}>
@@ -158,6 +160,35 @@ export function CampApp() {
 
 function presetName(id: string): string {
   return PRESETS.find((p) => p.id === id)?.name ?? ''
+}
+
+const LINK_LABEL: Record<string, string> = {
+  bluetooth: '蓝牙自组网',
+  wifi: 'WiFi/网络直连',
+  cellular: '移动网络',
+  local: '本机',
+}
+
+// 实时显示当前生效链路与直连邻居数
+function MeshStatus() {
+  const [link, setLink] = useState('local')
+  const [peers, setPeers] = useState(0)
+  useEffect(() => {
+    const tick = () => {
+      setLink(transport.link)
+      setPeers(transport.peerCount?.() ?? 0)
+    }
+    tick()
+    const id = setInterval(tick, 2000)
+    return () => clearInterval(id)
+  }, [])
+  const color = peers > 0 ? 'var(--ok)' : 'var(--text-dim)'
+  return (
+    <div className="pill" style={{ marginTop: 8 }}>
+      <span className="dot" style={{ background: color }} />
+      链路 {LINK_LABEL[link] ?? link} · 邻居 {peers} 台
+    </div>
+  )
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

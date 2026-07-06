@@ -10,7 +10,9 @@
 // 打包成原生 App（Capacitor / React Native）时，再新增一个真实的 BLE / WiFi Direct
 // 适配器加入组合即可，上层业务（跟车、营地、记账同步）无需改动。
 
+import { Capacitor } from '@capacitor/core'
 import { uid } from './id'
+import { BleTransport } from './bleTransport'
 
 export type LinkType = 'bluetooth' | 'wifi' | 'cellular' | 'local'
 
@@ -281,7 +283,9 @@ export class CompositeTransport implements Transport {
     this.parts = parts
   }
   get link(): LinkType {
-    // 有真实跨设备连接时报告 wifi，否则 local
+    // 按需求优先级报告当前生效链路：蓝牙 > WiFi直连 > 本机
+    const ble = this.parts.find((p) => p.link === 'bluetooth')
+    if (ble && (ble.peerCount?.() ?? 0) > 0) return 'bluetooth'
     const rtc = this.parts.find((p) => p.link === 'wifi')
     if (rtc && (rtc.peerCount?.() ?? 0) > 0) return 'wifi'
     return 'local'
@@ -326,6 +330,8 @@ function buildTransport(): Transport {
   const parts: Transport[] = [new BroadcastTransport()]
   const url = signalingUrl()
   if (url) parts.push(new WebRTCTransport(url))
+  // 原生 App(iOS/Android) 追加真实蓝牙自组网链路，实现无网营地互通
+  if (Capacitor.isNativePlatform()) parts.push(new BleTransport())
   return new CompositeTransport(parts)
 }
 

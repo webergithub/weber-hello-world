@@ -124,6 +124,18 @@ src/
    └─ voice/            # 独立变声 App
 ```
 
+### 🔵 真实蓝牙自组网（BLE Mesh，原生）
+在完全没有移动网络、也没有 WiFi 的营地，用**手机自带的蓝牙**让大家互联互通。已实现为一个
+自定义 Capacitor 原生插件 `BleMesh`：每台手机**同时**扮演两个 BLE 角色 —— 外围(广播 +
+GATT 服务) 与 中心(扫描 + 连接)，因此蓝牙范围内的任意两台手机都能直接互发消息，无需任何服务器。
+
+- 原生实现：Android `android/app/src/main/java/com/trailmate/app/BleMeshPlugin.java`（`BluetoothLeAdvertiser` + `BluetoothGattServer` + `BluetoothLeScanner` + `BluetoothGatt`）；iOS `ios/App/App/BleMeshPlugin.swift`（`CBPeripheralManager` + `CBCentralManager`）。两端使用**相同的 Service/Characteristic UUID 与分片协议**，iOS 与 Android 互通。
+- JS 侧 `src/lib/bleTransport.ts` 把它接入统一的 `Transport`，与 BroadcastChannel、WebRTC 组成 `CompositeTransport`：**有蓝牙走蓝牙，没蓝牙自动用网络**，业务层无感。链路优先级按需求实现为 **蓝牙 > WiFi直连 > 移动网络**，营地页顶部实时显示当前链路与邻居数。
+- 消息按群组验证码分房间（JS 层过滤）；蓝牙带宽有限，文字/位置直接走蓝牙，语音/视频等大消息自动改走网络链路。
+- 权限已配置好：Android 见 `AndroidManifest.xml`（`BLUETOOTH_SCAN/ADVERTISE/CONNECT`、旧系统定位）；iOS 见 `Info.plist`（`NSBluetoothAlwaysUsageDescription` 等）。插件已在 `MainActivity`（Android）与 Xcode 工程（iOS，`CAPBridgedPlugin` 自动注册，已写入 `project.pbxproj`）中登记，`npx cap sync` 后即随 App 编译。
+- 使用：进「营地」点「授权并开启自组网」即触发真实蓝牙初始化；两台真机进同一验证码群组即可蓝牙互聊。**需在真机上测试**（模拟器无蓝牙硬件）。
+- 说明：当前为「直连邻居广播」的单跳 Mesh，营地小队通常都在蓝牙范围内已够用；如需更大范围可在 `BleMeshPlugin` 的收帧处加 TTL 转发做多跳中继（已预留位置）。
+
 ### 关于联网与「自组网」（已实现跨设备）
 `src/lib/transport.ts` 定义统一的 `Transport` 接口，默认用 `CompositeTransport` 同时挂载两条链路，业务层（跟车/营地/对讲机）完全无感：
 
@@ -135,11 +147,11 @@ src/
 
 > 已用两个独立浏览器实例（不共享 BroadcastChannel）实测：加入同一验证码后消息经 WebRTC 双向互通。
 
-**演进为原生无信号 Mesh**：浏览器沙箱无法直接用蓝牙 Mesh / WiFi Direct。用
-**Capacitor / React Native** 打包后，只需再写一个真实的 BLE / WiFi Direct 适配器加入
-`CompositeTransport`，即可在完全无移动网络的营地实现自组网——上层代码零改动。
+**原生无信号 Mesh 已实现**：见上文「真实蓝牙自组网」。`CompositeTransport` 在原生 App 里
+自动加入 `BleTransport`，与 WebRTC / BroadcastChannel 组合，上层代码零改动。
 
 ## 已知限制
-- 无信号（连 WiFi 都没有）的真·蓝牙 Mesh 需原生适配器；Web 版跨设备走 WebRTC（需能互通的网络 + 信令服务器）。
+- 蓝牙 Mesh 需真机测试（模拟器无蓝牙硬件），当前为单跳直连广播。
+- Web 版跨设备走 WebRTC（需能互通的网络 + 信令服务器）；蓝牙自组网仅原生 App 可用。
 - 地图瓦片、OCR 语言包首次加载需要网络（之后由 Service Worker 缓存离线可用）。
 - 变声为风格化处理，非明星声音克隆。
