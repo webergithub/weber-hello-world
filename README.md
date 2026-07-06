@@ -134,7 +134,7 @@ GATT 服务) 与 中心(扫描 + 连接)，因此蓝牙范围内的任意两台�
 - 消息按群组验证码分房间（JS 层过滤）；蓝牙带宽有限，文字/位置直接走蓝牙，语音/视频等大消息自动改走网络链路。
 - 权限已配置好：Android 见 `AndroidManifest.xml`（`BLUETOOTH_SCAN/ADVERTISE/CONNECT`、旧系统定位）；iOS 见 `Info.plist`（`NSBluetoothAlwaysUsageDescription` 等）。插件已在 `MainActivity`（Android）与 Xcode 工程（iOS，`CAPBridgedPlugin` 自动注册，已写入 `project.pbxproj`）中登记，`npx cap sync` 后即随 App 编译。
 - 使用：进「营地」点「授权并开启自组网」即触发真实蓝牙初始化；两台真机进同一验证码群组即可蓝牙互聊。**需在真机上测试**（模拟器无蓝牙硬件）。
-- 说明：当前为「直连邻居广播」的单跳 Mesh，营地小队通常都在蓝牙范围内已够用；如需更大范围可在 `BleMeshPlugin` 的收帧处加 TTL 转发做多跳中继（已预留位置）。
+- **多跳中继（Flooding Mesh）**：每条消息带 8 字节全局 msgId + TTL（默认 4 跳）。节点收到未见过的消息会**去重后转发给其它邻居**，因此不在你蓝牙直连范围、但在「朋友的朋友」范围内的同伴也能收到——覆盖范围随人数自然扩大。msgId 去重（保留 30s）避免转发风暴，源头自标记己见避免回环。
 
 ### 关于联网与「自组网」（已实现跨设备）
 `src/lib/transport.ts` 定义统一的 `Transport` 接口，默认用 `CompositeTransport` 同时挂载两条链路，业务层（跟车/营地/对讲机）完全无感：
@@ -151,7 +151,7 @@ GATT 服务) 与 中心(扫描 + 连接)，因此蓝牙范围内的任意两台�
 自动加入 `BleTransport`，与 WebRTC / BroadcastChannel 组合，上层代码零改动。
 
 ## 已知限制
-- 蓝牙 Mesh 需真机测试（模拟器无蓝牙硬件），当前为单跳直连广播。
+- 蓝牙 Mesh 需真机测试（模拟器无蓝牙硬件）；多跳中继为 TTL 泛洪(默认 4 跳)。
 - Web 版跨设备走 WebRTC（需能互通的网络 + 信令服务器）；蓝牙自组网仅原生 App 可用。
 - 地图瓦片、OCR 语言包首次加载需要网络（之后由 Service Worker 缓存离线可用）。
 - 变声为风格化处理，非明星声音克隆。

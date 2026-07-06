@@ -73,9 +73,11 @@ public class BleMeshPlugin extends Plugin {
     private static final UUID CHAR_UUID = UUID.fromString("7b2f9a11-4c3d-4b8e-9f21-0a1b2c3d4e5f");
     private static final UUID CCC_UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    private static final int HEADER = 12;      // 8字节msgId + 2字节seq + 2字节total
+    private static final int HEADER = 13;      // 8字节msgId + 1字节ttl + 2字节seq + 2字节total
     private static final int PAYLOAD = 180;     // 每帧负载，兼容默认MTU
     private static final long REASM_TTL = 10_000L;
+    private static final long SEEN_TTL = 30_000L;   // 去重记录保留时长
+    private static final int MAX_TTL = 4;           // 多跳中继最大跳数
 
     private BluetoothAdapter adapter;
     private BluetoothLeAdvertiser advertiser;
@@ -87,6 +89,7 @@ public class BleMeshPlugin extends Plugin {
     private final Map<String, BluetoothGatt> clients = new ConcurrentHashMap<>();            // 我作为中心连接的对端
     private final Map<String, BluetoothGattCharacteristic> clientChars = new ConcurrentHashMap<>();
     private final Map<String, Reasm> reasm = new HashMap<>();
+    private final Map<String, Long> seen = new ConcurrentHashMap<>();   // 多跳去重：已处理过的 msgId
 
     private HandlerThread bgThread;
     private Handler bg;
@@ -97,6 +100,8 @@ public class BleMeshPlugin extends Plugin {
         byte[][] chunks;
         int received;
         long ts;
+        int ttl;
+        byte[] msgId;
     }
 
     // ---------- 权限 ----------
@@ -190,7 +195,10 @@ public class BleMeshPlugin extends Plugin {
         String data = call.getString("data");
         if (data == null) { call.reject("no data"); return; }
         byte[] payload = data.getBytes(StandardCharsets.UTF_8);
-        broadcast(payload);
+        byte[] msgId = new byte[8];
+        rnd.nextBytes(msgId);
+        markSeen(bytesToHex(msgId, 0, 8));   // 自己是源头，避免回环时重复处理
+        broadcast(payload, msgId, MAX_TTL);
         call.resolve();
     }
 
@@ -345,11 +353,9 @@ public class BleMeshPlugin extends Plugin {
         try { gatt.discoverServices(); } catch (SecurityException ignored) {}
     }
 
-    // ---------- 分片发送 / 重组 ----------
-    private void broadcast(byte[] payload) {
+    // ---------- 分片发送 / 重组 / 多跳中继 ----------
+    private void broadcast(byte[] payload, byte[] msgId, int ttl) {
         if (bg == null) return;
-        final byte[] msgId = new byte[8];
-        rnd.nextBytes(msgId);
         final int total = Math.max(1, (int) Math.ceil(payload.length / (double) PAYLOAD));
         for (int seq = 0; seq < total; seq++) {
             final int s = seq;
@@ -357,8 +363,9 @@ public class BleMeshPlugin extends Plugin {
             final int len = Math.min(PAYLOAD, payload.length - off);
             final byte[] frame = new byte[HEADER + len];
             System.arraycopy(msgId, 0, frame, 0, 8);
-            frame[8] = (byte) (s >> 8); frame[9] = (byte) s;
-            frame[10] = (byte) (total >> 8); frame[11] = (byte) total;
+            frame[8] = (byte) (ttl & 0xFF);
+            frame[9] = (byte) (s >> 8); frame[10] = (byte) s;
+            frame[11] = (byte) (total >> 8); frame[12] = (byte) total;
             System.arraycopy(payload, off, frame, HEADER, len);
             // 轻量节流，避免拥塞（尽力而为的营地 Mesh）
             bg.postDelayed(() -> sendFrameToAll(frame), s * 15L);
@@ -390,10 +397,14 @@ public class BleMeshPlugin extends Plugin {
     private void onFrameReceived(byte[] frame) {
         if (frame == null || frame.length < HEADER) return;
         String id = bytesToHex(frame, 0, 8);
-        int seq = ((frame[8] & 0xFF) << 8) | (frame[9] & 0xFF);
-        int total = ((frame[10] & 0xFF) << 8) | (frame[11] & 0xFF);
+        if (seen.containsKey(id)) return;   // 多跳去重：已处理过的消息直接丢弃
+        int ttl = frame[8] & 0xFF;
+        int seq = ((frame[9] & 0xFF) << 8) | (frame[10] & 0xFF);
+        int total = ((frame[11] & 0xFF) << 8) | (frame[12] & 0xFF);
         if (total <= 0 || seq < 0 || seq >= total) return;
         byte[] chunk = Arrays.copyOfRange(frame, HEADER, frame.length);
+        byte[] full = null;
+        int relayTtl = 0;
         synchronized (reasm) {
             cleanupReasm();
             Reasm r = reasm.get(id);
@@ -401,6 +412,8 @@ public class BleMeshPlugin extends Plugin {
                 r = new Reasm();
                 r.chunks = new byte[total][];
                 r.ts = System.currentTimeMillis();
+                r.ttl = ttl;
+                r.msgId = Arrays.copyOfRange(frame, 0, 8);
                 reasm.put(id, r);
             }
             if (r.chunks[seq] == null) {
@@ -409,14 +422,27 @@ public class BleMeshPlugin extends Plugin {
             }
             if (r.received == total) {
                 reasm.remove(id);
+                markSeen(id);
                 int size = 0;
                 for (byte[] c : r.chunks) size += c.length;
-                byte[] full = new byte[size];
+                full = new byte[size];
                 int off = 0;
                 for (byte[] c : r.chunks) { System.arraycopy(c, 0, full, off, c.length); off += c.length; }
-                emitMessage(new String(full, StandardCharsets.UTF_8));
+                relayTtl = r.ttl;
             }
         }
+        if (full != null) {
+            emitMessage(new String(full, StandardCharsets.UTF_8));
+            // 多跳中继：跳数递减后仍 > 0，则转发给其它邻居（去重保证不会风暴）
+            if (relayTtl > 1) {
+                byte[] msgId = Arrays.copyOfRange(frame, 0, 8);
+                broadcast(full, msgId, relayTtl - 1);
+            }
+        }
+    }
+
+    private void markSeen(String id) {
+        seen.put(id, System.currentTimeMillis());
     }
 
     private void cleanupReasm() {
@@ -426,6 +452,11 @@ public class BleMeshPlugin extends Plugin {
             if (now - e.getValue().ts > REASM_TTL) drop.add(e.getKey());
         }
         for (String k : drop) reasm.remove(k);
+        List<String> ds = new ArrayList<>();
+        for (Map.Entry<String, Long> e : seen.entrySet()) {
+            if (now - e.getValue() > SEEN_TTL) ds.add(e.getKey());
+        }
+        for (String k : ds) seen.remove(k);
     }
 
     private static String bytesToHex(byte[] b, int off, int len) {
@@ -455,6 +486,8 @@ public class BleMeshPlugin extends Plugin {
         for (BluetoothGatt g : clients.values()) { try { g.close(); } catch (Exception ignored) {} }
         clients.clear(); clientChars.clear();
         subscribers.clear();
+        synchronized (reasm) { reasm.clear(); }
+        seen.clear();
         try { if (gattServer != null) gattServer.close(); } catch (Exception ignored) {}
         gattServer = null;
         if (bgThread != null) { bgThread.quitSafely(); bgThread = null; bg = null; }
