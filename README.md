@@ -49,11 +49,11 @@ capacitor.config.ts
 
 ### 云端自动出包（GitHub Actions，无需本地 IDE）
 仓库内置 `.github/workflows/build-mobile.yml`，每次 push 或手动触发即自动编译：
-- **Android**：`app-debug-apk` —— 直接安装到安卓真机，蓝牙 Mesh 可用。
-- **iOS**：`app-unsigned-ipa` —— **未签名**，需用你自己的 Apple 账号（AltStore / Sideloadly）重签后装到 iPhone。
-- 产物在对应 Actions run 的 **Artifacts** 里下载。该 CI 同时充当原生代码（蓝牙插件 Kotlin/Java 与 Swift）的编译校验。
+- **Android**：`app-debug-apk` —— **直接安装到安卓真机**，蓝牙 Mesh 可用。
+- **iOS**：`app-ios-simulator-build` —— iOS 模拟器编译产物，用于**校验原生 Swift 代码**（含蓝牙插件）能否编译通过。
+- 产物在对应 Actions run 的 **Artifacts** 里下载。
 
-> iOS 若要 CI 直接产出**可直接安装**的签名包，需在仓库 Secrets 里配置 Apple 证书与描述文件；未配置时产出未签名包供本地重签。
+> **iOS 真机安装**：CI 环境无 Apple 签名证书、也未预装 iOS 设备平台，故 CI 只做「模拟器编译校验」。要装到 iPhone 真机（含测试蓝牙 Mesh），在本机 `npm run ios` 打开 Xcode，选好签名团队后直接 Run 即可（Xcode 会用你的 Apple ID 自动签名）。如需 CI 直接产出签名 IPA，可在仓库 Secrets 配置 Apple 证书与描述文件后改用 device 归档。
 
 ### 本地构建与运行
 > 需要在 **本机**（能访问 Google Maven / Android SDK 的网络）操作，并安装对应 IDE。
