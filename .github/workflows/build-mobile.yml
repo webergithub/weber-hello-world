@@ -9,8 +9,17 @@ name: 构建移动端 App (Android APK / iOS IPA)
 on:
   push:
     branches: ['**']
-    paths-ignore:
-      - '**/*.md'
+    paths:   # 只在 Capacitor 网页/原生工程相关改动时构建；ios12/ 原生工程有独立工作流
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'capacitor.config.ts'
+      - 'android/**'
+      - 'ios/**'
+      - 'server/**'
+      - '.github/workflows/build-mobile.yml'
   workflow_dispatch:
 
 jobs:
