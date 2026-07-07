@@ -34,5 +34,9 @@
 	</array>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>用于在地图上显示你的位置，并与同行好友共享，实现跟车不走散。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近同伴自组网互发消息。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近同伴自组网互发消息。</string>
 </dict>
 </plist>

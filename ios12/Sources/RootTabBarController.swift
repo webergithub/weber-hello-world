@@ -10,7 +10,7 @@ final class RootTabBarController: UITabBarController {
 
         let convoy = wrap(ConvoyMapViewController(), title: "跟车")
         let ledger = wrap(LedgerViewController(), title: "记账")
-        let camp = wrap(PlaceholderViewController(name: "营地", note: "蓝牙自组网 · 无信号互通\n（即将上线）"), title: "营地")
+        let camp = wrap(CampViewController(), title: "营地")
         let voice = wrap(PlaceholderViewController(name: "变声", note: "趣味变声\n（即将上线）"), title: "变声")
 
         viewControllers = [convoy, ledger, camp, voice]
