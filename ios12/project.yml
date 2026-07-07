@@ -1,0 +1,32 @@
+# XcodeGen 工程描述 —— 原生 iOS 12+ 出行 App（TrailMate Native）
+# 生成工程：  brew install xcodegen && cd ios12 && xcodegen generate && open TrailMate.xcodeproj
+# 纯 UIKit / Swift 5，无第三方依赖，最低部署 iOS 12.0（可装到 iPhone 5s/6 等老机），向上兼容至最新 iOS。
+
+name: TrailMate
+options:
+  bundleIdPrefix: cc.trailmate
+  deploymentTarget:
+    iOS: "12.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1"          # iPhone
+    IPHONEOS_DEPLOYMENT_TARGET: "12.0"
+
+targets:
+  TrailMate:
+    type: application
+    platform: iOS
+    deploymentTarget: "12.0"
+    sources:
+      - Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: cc.trailmate.app
+        INFOPLIST_FILE: Sources/Info.plist
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic

@@ -1,0 +1,57 @@
+name: 原生 iOS12 App 构建 (TrailMate Native)
+
+# 编译原生 iOS 12+ 出行 App（ios12/），产出模拟器包用于校验 + 供本地 Xcode 真机安装到 iOS 12 老机。
+on:
+  push:
+    branches: [master, 'claude/**']
+    paths:
+      - 'ios12/**'
+      - '.github/workflows/ios12-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: iOS12 编译校验
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境诊断
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes || true
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: cd ios12 && xcodegen generate
+
+      - name: 编译（iOS 模拟器，部署目标 iOS 12）
+        run: |
+          cd ios12
+          xcodebuild \
+            -project TrailMate.xcodeproj \
+            -scheme TrailMate \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 打包模拟器 App
+        run: |
+          cd ios12
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          echo "App bundle: $APP"
+          cd "$(dirname "$APP")"
+          zip -qr "$GITHUB_WORKSPACE/trailmate-ios12-sim.zip" "$(basename "$APP")"
+          ls -la "$GITHUB_WORKSPACE/trailmate-ios12-sim.zip"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: trailmate-ios12-sim
+          path: trailmate-ios12-sim.zip
+          if-no-files-found: error
