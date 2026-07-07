@@ -2,8 +2,12 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// GitHub Pages 部署到 /<repo>/ 子路径；原生 App 与本地开发仍用根路径 /
+const base = process.env.GH_PAGES === 'true' ? '/weber-hello-world/' : '/'
+
 // https://vite.dev/config/
 export default defineConfig({
+  base,
   plugins: [
     react(),
     VitePWA({
