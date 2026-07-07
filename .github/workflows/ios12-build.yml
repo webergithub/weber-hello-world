@@ -1,6 +1,9 @@
 name: 原生 iOS12 App 构建 (TrailMate Native)
 
-# 编译原生 iOS 12+ 出行 App（ios12/），产出模拟器包用于校验 + 供本地 Xcode 真机安装到 iOS 12 老机。
+# 编译原生 iOS 12+ 出行 App（ios12/）并产出 **未签名 IPA**。
+# 安装到 iOS 12 真机：用 Sideloadly / AltStore 以你自己的 Apple ID 重签后安装
+#   （免费 Apple ID 即可；Sideloadly 支持 iOS 8+，适配老机）。
+# 若你有 Apple 开发者证书，可改用签名归档直接产出可安装 IPA（见 workflow 底部注释）。
 on:
   push:
     branches: [master, 'claude/**']
@@ -11,7 +14,7 @@ on:
 
 jobs:
   build:
-    name: iOS12 编译校验
+    name: iOS12 编译 + 未签名 IPA
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
@@ -19,7 +22,7 @@ jobs:
       - name: 环境诊断
         run: |
           xcodebuild -version
-          xcrun simctl list runtimes || true
+          xcodebuild -showsdks | grep -i iphoneos || true
 
       - name: 安装 XcodeGen
         run: brew install xcodegen
@@ -27,31 +30,39 @@ jobs:
       - name: 生成 Xcode 工程
         run: cd ios12 && xcodegen generate
 
-      - name: 编译（iOS 模拟器，部署目标 iOS 12）
+      - name: 编译（真机架构，不签名，部署目标 iOS 12）
         run: |
           cd ios12
           xcodebuild \
             -project TrailMate.xcodeproj \
             -scheme TrailMate \
-            -configuration Debug \
-            -sdk iphonesimulator \
-            -destination 'generic/platform=iOS Simulator' \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
             build
 
-      - name: 打包模拟器 App
+      - name: 打包未签名 IPA
         run: |
           cd ios12
           APP=$(find build/Build/Products -name '*.app' -type d | head -1)
           echo "App bundle: $APP"
-          cd "$(dirname "$APP")"
-          zip -qr "$GITHUB_WORKSPACE/trailmate-ios12-sim.zip" "$(basename "$APP")"
-          ls -la "$GITHUB_WORKSPACE/trailmate-ios12-sim.zip"
+          rm -rf Payload && mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr "$GITHUB_WORKSPACE/trailmate-ios12-unsigned.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/trailmate-ios12-unsigned.ipa"
 
-      - name: 上传产物
+      - name: 上传 IPA
         uses: actions/upload-artifact@v4
         with:
-          name: trailmate-ios12-sim
-          path: trailmate-ios12-sim.zip
+          name: trailmate-ios12-unsigned-ipa
+          path: trailmate-ios12-unsigned.ipa
           if-no-files-found: error
+
+# —— 如需 CI 直接产出「可直接安装」的签名 IPA ——
+# 在仓库 Secrets 配置 Apple 证书(.p12)与描述文件(.mobileprovision)，
+# 用 apple-actions/import-codesign-certs 导入后，把上面 build 换成 archive + exportArchive
+# （exportOptionsPlist 指定 method: development / ad-hoc 与你的 teamID）。

@@ -9,7 +9,7 @@ final class RootTabBarController: UITabBarController {
         tabBar.tintColor = brand
 
         let convoy = wrap(ConvoyMapViewController(), title: "跟车")
-        let ledger = wrap(PlaceholderViewController(name: "记账", note: "AA 记账分摊 · 拍照小票\n（即将上线）"), title: "记账")
+        let ledger = wrap(LedgerViewController(), title: "记账")
         let camp = wrap(PlaceholderViewController(name: "营地", note: "蓝牙自组网 · 无信号互通\n（即将上线）"), title: "营地")
         let voice = wrap(PlaceholderViewController(name: "变声", note: "趣味变声\n（即将上线）"), title: "变声")
 
