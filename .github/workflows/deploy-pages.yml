@@ -37,6 +37,8 @@ jobs:
         env:
           GH_PAGES: 'true'
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true  # 自动开启仓库 Pages（无需手动去 Settings 打开）
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
