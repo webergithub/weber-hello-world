@@ -1,0 +1,38 @@
+<!-- ============================================================
+  CityTwin 主页「孪生」模块卡片
+  用法：把下面 <a class="ct-card">…</a> 整段（含 <style>）粘贴到你
+  主页孪生模块的卡片栅格中；href 按你的挂载路径调整（默认 /citytwin/）。
+  卡片自适应容器宽度，深浅背景都可用。
+============================================================ -->
+<style>
+  .ct-card { display:block; position:relative; text-decoration:none; border-radius:16px; overflow:hidden;
+    background:linear-gradient(135deg,#0e1a2e 0%,#14304a 55%,#0d5c4a 100%);
+    border:1px solid rgba(255,255,255,.14); color:#eef2f7;
+    padding:22px 22px 18px; min-height:150px; transition:transform .15s, box-shadow .15s;
+    font-family:"PingFang SC","Microsoft YaHei",system-ui,sans-serif; }
+  .ct-card:hover { transform:translateY(-3px); box-shadow:0 14px 38px rgba(0,0,0,.35); }
+  .ct-card .ct-tag { position:absolute; top:14px; right:14px; font-size:11px; font-weight:800;
+    background:#ffd166; color:#0b1220; border-radius:6px; padding:2px 8px; }
+  .ct-card h3 { font-size:20px; margin:0 0 6px; letter-spacing:1px; }
+  .ct-card h3 .ct-emoji { margin-right:8px; }
+  .ct-card p { font-size:13px; line-height:1.7; color:#b8c6da; margin:0 0 12px; }
+  .ct-card .ct-meta { display:flex; gap:8px; flex-wrap:wrap; }
+  .ct-card .ct-chip { font-size:11.5px; border:1px solid rgba(255,255,255,.25); border-radius:20px;
+    padding:2px 10px; color:#9fdcce; }
+  .ct-card .ct-go { position:absolute; right:18px; bottom:14px; font-size:13px; font-weight:700; color:#ffd166; }
+</style>
+
+<a class="ct-card" href="/citytwin/" target="_blank" rel="noopener">
+  <span class="ct-tag">LIVE</span>
+  <h3><span class="ct-emoji">🏙🙈</span>CityTwin · 城市孪生躲猫猫</h3>
+  <p>在按真实地图数据构建的 3D 城市孪生世界里玩藏猫猫：n 人藏、m 人找。
+     感官线索 + 悬赏博弈，乘地铁/巴士/出租车追踪目标，雷达三角定位一锤定音。</p>
+  <div class="ct-meta">
+    <span class="ct-chip">🇬🇧 伦敦真实地铁网</span>
+    <span class="ct-chip">🚇 拟真交通到站停靠</span>
+    <span class="ct-chip">🕵️ 线索推理</span>
+    <span class="ct-chip">👥 好友热座</span>
+    <span class="ct-chip">中 / EN</span>
+  </div>
+  <span class="ct-go">进入游戏 →</span>
+</a>
