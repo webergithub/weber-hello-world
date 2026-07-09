@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>躲猫猫小镇 · 3D Hide &amp; Seek</title>
+<title>CityTwin · 城市孪生躲猫猫</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html,body { width:100%; height:100%; overflow:hidden; background:#0b1220;
@@ -34,6 +34,14 @@
   #menu h1 { font-size:34px; letter-spacing:2px; margin-bottom:4px;
     background:linear-gradient(90deg,#ffd166,#22c1a3); -webkit-background-clip:text; background-clip:text; color:transparent; }
   #menu .sub { color:#9fb0c8; font-size:14px; margin-bottom:18px; }
+  .cityRow { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; margin:2px 0 12px; }
+  .cityCard { padding:8px 13px; border-radius:10px; cursor:pointer; font-size:14px; font-weight:600;
+    border:2px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); transition:.15s; position:relative; }
+  .cityCard.sel { border-color:#22c1a3; background:rgba(34,193,163,.14); }
+  .cityCard.locked { opacity:.45; cursor:not-allowed; }
+  .cityCard small { display:block; font-size:10.5px; color:#9fb0c8; font-weight:400; }
+  .cityCard .new { position:absolute; top:-8px; right:-6px; background:#ffd166; color:#0b1220;
+    font-size:9.5px; font-weight:800; border-radius:6px; padding:1px 5px; }
   .cfgRow { display:flex; flex-wrap:wrap; gap:10px 18px; justify-content:center; align-items:center; margin:10px 0; }
   .cfgItem { display:flex; align-items:center; gap:8px; }
   .modeBtns { display:flex; gap:12px; justify-content:center; margin:14px 0 6px; }
@@ -53,8 +61,19 @@
     padding:8px 14px; font-size:16px; font-weight:700; backdrop-filter:blur(6px); }
   .stat small { display:block; font-size:11px; font-weight:400; color:#9fb0c8; }
   #minimapWrap { position:absolute; top:14px; right:14px; border-radius:12px; overflow:hidden;
-    border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 24px rgba(0,0,0,.4); }
+    border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 24px rgba(0,0,0,.4);
+    background:rgba(13,20,35,.85); pointer-events:auto; }
+  #minimapBar { display:flex; justify-content:space-between; align-items:center;
+    padding:5px 6px 5px 12px; font-size:12.5px; font-weight:700; color:#c8d2e0;
+    border-bottom:1px solid rgba(255,255,255,.1); cursor:default; user-select:none; }
+  .mmBtn { width:22px; height:22px; border:none; border-radius:6px; margin-left:4px; cursor:pointer;
+    background:rgba(255,255,255,.12); color:#eef2f7; font-size:13px; line-height:1; font-family:inherit; }
+  .mmBtn:hover { background:rgba(255,255,255,.28); }
   #minimap { display:block; }
+  #mmReopen { position:absolute; top:14px; right:14px; width:42px; height:42px; border-radius:12px;
+    border:1px solid rgba(255,255,255,.22); background:rgba(13,20,35,.85); color:#eef2f7;
+    font-size:20px; cursor:pointer; pointer-events:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  #mmReopen:hover { border-color:#ffd166; }
   #cluePanel { position:absolute; left:14px; top:96px; width:300px; max-height:calc(100% - 220px);
     background:rgba(13,20,35,.82); border:1px solid rgba(255,255,255,.12); border-radius:12px;
     backdrop-filter:blur(6px); pointer-events:auto; display:flex; flex-direction:column; }
@@ -76,7 +95,7 @@
   .abtn { background:rgba(13,20,35,.82); border:1px solid rgba(255,255,255,.18); color:#eef2f7;
     border-radius:10px; padding:8px 13px; font-size:13.5px; cursor:pointer; font-family:inherit; transition:.12s; }
   .abtn:hover { border-color:#ffd166; color:#ffd166; }
-  #toasts { position:absolute; top:96px; right:14px; width:280px; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+  #toasts { position:absolute; top:296px; right:14px; width:280px; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
   .toast { background:rgba(13,20,35,.9); border:1px solid rgba(255,255,255,.2); border-left:4px solid #22c1a3;
     border-radius:10px; padding:9px 13px; font-size:13.5px; max-width:280px; animation:tin .25s ease-out; line-height:1.5; }
   .toast.gold { border-left-color:#ffd166; }
@@ -142,7 +161,17 @@
       <div class="stat">🔎 <span id="found">0/0</span><small>已找到</small></div>
       <div class="stat" id="seekerStat">🧢 <span id="seekerName">-</span><small>当前寻找者</small></div>
     </div>
-    <div id="minimapWrap"><canvas id="minimap" width="220" height="220"></canvas></div>
+    <div id="minimapWrap">
+      <div id="minimapBar">
+        <span>🗺 小地图</span>
+        <span>
+          <button class="mmBtn" id="mmMin" title="最小化">–</button>
+          <button class="mmBtn" id="mmClose" title="关闭">×</button>
+        </span>
+      </div>
+      <canvas id="minimap" width="220" height="220"></canvas>
+    </div>
+    <button id="mmReopen" class="hidden" title="打开小地图">🗺</button>
     <div id="cluePanel">
       <header id="panelToggle"><span>🕵️ 躲藏者线索</span><span id="panelArrow">▾</span></header>
       <div id="clueList"></div>
@@ -168,8 +197,16 @@
   <!-- 主菜单 -->
   <div id="menu" class="overlay">
     <div class="panel">
-      <h1>躲猫猫小镇</h1>
-      <div class="sub">3D 模拟城市 · n 人藏，m 人找 · 线索 + 悬赏 + 信用点</div>
+      <h1>CityTwin</h1>
+      <div class="sub">城市孪生躲猫猫 · 真实地图数据 3D 城市 · n 人藏，m 人找 · 线索 + 悬赏 + 信用点</div>
+      <div class="cityRow" id="cityRow">
+        <div class="cityCard sel" data-city="town">🏙 随机小镇<small>程序生成</small></div>
+        <div class="cityCard" data-city="london">🇬🇧 伦敦<small>真实地图数据</small><span class="new">NEW</span></div>
+        <div class="cityCard locked" data-city="istanbul">🇹🇷 伊斯坦布尔<small>敬请期待</small></div>
+        <div class="cityCard locked" data-city="dubai">🇦🇪 迪拜<small>敬请期待</small></div>
+        <div class="cityCard locked" data-city="shanghai">🇨🇳 上海<small>敬请期待</small></div>
+        <div class="cityCard locked" data-city="newyork">🇺🇸 纽约<small>敬请期待</small></div>
+      </div>
       <div class="modeBtns">
         <div class="modeCard sel" id="modeAI">
           <h3>🤖 快速游戏</h3>
@@ -189,6 +226,14 @@
           <select id="difficulty"><option value="easy">简单</option><option value="normal" selected>普通</option><option value="hard">困难</option></select></div>
         <div class="cfgItem"><label>时限</label>
           <select id="timeLimit"><option value="300">5 分钟</option><option value="480" selected>8 分钟</option><option value="720">12 分钟</option></select></div>
+      </div>
+      <div class="cfgRow" style="background:rgba(255,255,255,.04); border-radius:10px; padding:8px 14px; margin:8px auto; max-width:430px;">
+        <div class="cfgItem" style="flex:1;">
+          <label>⚙️ 管理员 · 世界倍速</label>
+          <input type="range" id="simSpeed" min="1" max="8" step="1" value="3" style="flex:1; accent-color:#ffd166;">
+          <b id="simSpeedVal" style="color:#ffd166; min-width:70px;">3× 现实</b>
+        </div>
+        <small style="color:#8fa2bc; width:100%; text-align:center;">人物与交通工具的移动速度 = 现实速度 × n（默认 3）</small>
       </div>
       <button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
       <div id="controlsHelp">
@@ -257,6 +302,7 @@
   <div id="fade"></div>
 
   <script src="lib/three.min.js"></script>
+  <script src="cities.js"></script>
   <script src="game.js"></script>
 </body>
 </html>
