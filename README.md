@@ -48,6 +48,20 @@ python3 -m http.server 8000   # → http://localhost:8000
 | 🚕 出租车 | 15💰 + 里程 |
 | 📡 雷达测距 | 12💰 |
 
+## 🚀 部署到自己的服务器
+
+**方式 A · 服务器上拉取（最简单）**——SSH 登录服务器后一行命令：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/webergithub/weber-hello-world/claude/3d-hideandseek-game-8vw4y9/deploy/deploy-on-server.sh | bash
+```
+
+脚本会克隆/更新代码，检测 nginx 给出配置片段，或帮你用 `python3 -m http.server` 起静态服务（Oracle Cloud `opc` 用户记得在安全列表和 firewalld 放行端口）。
+
+**方式 B · GitHub Actions 自动部署**——在仓库 Settings → Secrets 配置 `DEPLOY_HOST` / `DEPLOY_USER` / `DEPLOY_SSH_KEY` / `DEPLOY_PATH` 四个 secret，之后每次推送自动 rsync 到服务器（见 `.github/workflows/deploy.yml`）。
+
+游戏是纯静态文件（`index.html` + `game.js` + `cities.js` + `lib/`），任何能托管静态文件的服务器都能跑，无后端依赖。
+
 ## ⚙️ 管理员设置
 
 主菜单可调 **世界倍速 n×（默认 3）**：模拟世界中所有人物与交通工具的移动速度 = 现实速度 × n（1~8 档，本地保存）。
