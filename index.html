@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>躲猫猫小镇 · 3D Hide &amp; Seek</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:100%; height:100%; overflow:hidden; background:#0b1220;
+    font-family:"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",system-ui,sans-serif;
+    color:#eef2f7; user-select:none; -webkit-user-select:none; }
+  #gl { position:absolute; inset:0; }
+  #gl canvas { display:block; }
+  .overlay { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; z-index:20; }
+  .hidden { display:none !important; }
+
+  /* ---------- 通用面板 ---------- */
+  .panel { background:rgba(13,20,35,.88); border:1px solid rgba(255,255,255,.12);
+    border-radius:16px; padding:26px 30px; box-shadow:0 18px 60px rgba(0,0,0,.55);
+    backdrop-filter: blur(8px); }
+  .btn { display:inline-block; border:none; border-radius:10px; padding:10px 22px; margin:4px;
+    font-size:16px; font-weight:600; cursor:pointer; color:#0b1220; background:#ffd166;
+    transition:transform .08s, filter .15s; font-family:inherit; }
+  .btn:hover { filter:brightness(1.1); transform:translateY(-1px); }
+  .btn.secondary { background:rgba(255,255,255,.14); color:#eef2f7; }
+  .btn.teal { background:#22c1a3; }
+  select, input[type=text], textarea { font-family:inherit; font-size:15px; color:#eef2f7;
+    background:rgba(255,255,255,.08); border:1px solid rgba(255,255,255,.2); border-radius:8px; padding:7px 10px; }
+  select option { color:#0b1220; }
+  label { font-size:14px; color:#c8d2e0; }
+
+  /* ---------- 主菜单 ---------- */
+  #menu .panel { width:min(560px, 92vw); text-align:center; }
+  #menu h1 { font-size:34px; letter-spacing:2px; margin-bottom:4px;
+    background:linear-gradient(90deg,#ffd166,#22c1a3); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  #menu .sub { color:#9fb0c8; font-size:14px; margin-bottom:18px; }
+  .cfgRow { display:flex; flex-wrap:wrap; gap:10px 18px; justify-content:center; align-items:center; margin:10px 0; }
+  .cfgItem { display:flex; align-items:center; gap:8px; }
+  .modeBtns { display:flex; gap:12px; justify-content:center; margin:14px 0 6px; }
+  .modeCard { flex:1; max-width:230px; padding:12px; border-radius:12px; cursor:pointer;
+    border:2px solid rgba(255,255,255,.15); background:rgba(255,255,255,.05); transition:.15s; }
+  .modeCard.sel { border-color:#ffd166; background:rgba(255,209,102,.12); }
+  .modeCard h3 { font-size:17px; margin-bottom:4px; }
+  .modeCard p { font-size:12.5px; color:#9fb0c8; line-height:1.5; }
+  #controlsHelp { margin-top:16px; font-size:12.5px; color:#8fa2bc; line-height:1.9; text-align:center; }
+  kbd { background:rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.25); border-radius:5px;
+    padding:1px 6px; font-size:12px; font-family:inherit; }
+
+  /* ---------- HUD ---------- */
+  #hud { position:absolute; inset:0; pointer-events:none; z-index:10; }
+  #topbar { position:absolute; top:14px; left:14px; display:flex; gap:10px; }
+  .stat { background:rgba(13,20,35,.78); border:1px solid rgba(255,255,255,.12); border-radius:10px;
+    padding:8px 14px; font-size:16px; font-weight:700; backdrop-filter:blur(6px); }
+  .stat small { display:block; font-size:11px; font-weight:400; color:#9fb0c8; }
+  #minimapWrap { position:absolute; top:14px; right:14px; border-radius:12px; overflow:hidden;
+    border:1px solid rgba(255,255,255,.18); box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  #minimap { display:block; }
+  #cluePanel { position:absolute; left:14px; top:96px; width:300px; max-height:calc(100% - 220px);
+    background:rgba(13,20,35,.82); border:1px solid rgba(255,255,255,.12); border-radius:12px;
+    backdrop-filter:blur(6px); pointer-events:auto; display:flex; flex-direction:column; }
+  #cluePanel header { padding:10px 14px; font-weight:700; font-size:14px; display:flex; justify-content:space-between;
+    align-items:center; border-bottom:1px solid rgba(255,255,255,.1); cursor:pointer; }
+  #clueList { overflow-y:auto; padding:8px 10px; }
+  .clueCard { border:1px solid rgba(255,255,255,.1); border-radius:10px; padding:9px 11px; margin-bottom:8px;
+    background:rgba(255,255,255,.04); font-size:13px; }
+  .clueCard .who { font-weight:700; font-size:14px; }
+  .clueCard .bounty { float:right; color:#ffd166; font-weight:700; }
+  .clueCard .clue { color:#c8d2e0; margin-top:4px; line-height:1.55; }
+  .clueCard.found { opacity:.45; }
+  .clueCard.found .who::after { content:" ✅ 已找到"; color:#22c1a3; font-size:12px; }
+  #prompt { position:absolute; bottom:110px; left:50%; transform:translateX(-50%);
+    background:rgba(13,20,35,.85); border:1px solid #ffd166; color:#ffd166; border-radius:10px;
+    padding:9px 20px; font-size:17px; font-weight:700; }
+  #actionbar { position:absolute; bottom:16px; left:50%; transform:translateX(-50%);
+    display:flex; gap:8px; pointer-events:auto; }
+  .abtn { background:rgba(13,20,35,.82); border:1px solid rgba(255,255,255,.18); color:#eef2f7;
+    border-radius:10px; padding:8px 13px; font-size:13.5px; cursor:pointer; font-family:inherit; transition:.12s; }
+  .abtn:hover { border-color:#ffd166; color:#ffd166; }
+  #toasts { position:absolute; top:96px; right:14px; width:280px; display:flex; flex-direction:column; gap:8px; align-items:flex-end; }
+  .toast { background:rgba(13,20,35,.9); border:1px solid rgba(255,255,255,.2); border-left:4px solid #22c1a3;
+    border-radius:10px; padding:9px 13px; font-size:13.5px; max-width:280px; animation:tin .25s ease-out; line-height:1.5; }
+  .toast.gold { border-left-color:#ffd166; }
+  .toast.red { border-left-color:#ef6b6b; }
+  @keyframes tin { from { opacity:0; transform:translateX(20px);} to { opacity:1; transform:none; } }
+  #staminaWrap { position:absolute; bottom:70px; left:50%; transform:translateX(-50%); width:180px; height:7px;
+    background:rgba(255,255,255,.15); border-radius:4px; overflow:hidden; }
+  #staminaBar { height:100%; width:100%; background:#22c1a3; border-radius:4px; transition:width .1s linear; }
+
+  /* ---------- 躲藏阶段 ---------- */
+  #hideBanner { position:absolute; top:14px; left:50%; transform:translateX(-50%);
+    background:rgba(13,20,35,.88); border:1px solid #22c1a3; border-radius:12px; padding:10px 24px;
+    text-align:center; z-index:15; }
+  #hideBanner b { color:#22c1a3; font-size:17px; }
+  #hideBanner div { font-size:12.5px; color:#9fb0c8; margin-top:3px; }
+
+  /* ---------- 线索弹窗 ---------- */
+  #clueModal .panel { width:min(540px, 94vw); }
+  #clueModal h2 { font-size:20px; margin-bottom:6px; color:#ffd166; }
+  #spotDesc { font-size:14px; color:#c8d2e0; margin-bottom:12px; line-height:1.6; }
+  #hintChips { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px; }
+  .chip { font-size:12.5px; background:rgba(34,193,163,.15); border:1px solid rgba(34,193,163,.5);
+    color:#7de8d2; border-radius:20px; padding:4px 12px; cursor:pointer; }
+  .chip:hover { background:rgba(34,193,163,.3); }
+  #clueInput { width:100%; height:76px; resize:none; line-height:1.5; }
+  #clueError { color:#ef6b6b; font-size:13px; min-height:20px; margin:6px 0; }
+  .bountyRow { display:flex; align-items:center; gap:12px; margin:8px 0 14px; }
+  .bountyRow input[type=range] { flex:1; accent-color:#ffd166; }
+  #bountyVal { font-weight:800; color:#ffd166; font-size:18px; min-width:64px; }
+
+  /* ---------- 大地图 ---------- */
+  #bigMapWrap .panel { text-align:center; padding:18px; }
+  #bigMap { border-radius:10px; cursor:crosshair; display:block; }
+  #mapHint { margin:10px 0 4px; font-size:14px; color:#c8d2e0; }
+  #mapCost { color:#ffd166; font-weight:700; }
+
+  /* ---------- 轮换 / 遮挡 ---------- */
+  #turnOverlay { background:rgba(5,9,18,.96); z-index:40; flex-direction:column; }
+  #turnText { font-size:40px; font-weight:800; color:#ffd166; letter-spacing:3px; }
+  #turnSub { margin-top:12px; color:#9fb0c8; font-size:15px; }
+  #fade { position:absolute; inset:0; background:#000; opacity:0; pointer-events:none; transition:opacity .45s; z-index:35; }
+
+  /* ---------- 结算 ---------- */
+  #endScreen .panel { width:min(640px, 94vw); max-height:88vh; overflow-y:auto; text-align:center; }
+  #endTitle { font-size:30px; margin-bottom:6px; }
+  #endSub { color:#9fb0c8; margin-bottom:16px; }
+  table.result { width:100%; border-collapse:collapse; margin:10px 0 18px; font-size:14px; }
+  table.result th, table.result td { padding:7px 10px; border-bottom:1px solid rgba(255,255,255,.1); text-align:left; }
+  table.result th { color:#9fb0c8; font-weight:600; font-size:12.5px; }
+  .gold { color:#ffd166; }
+  .teal { color:#22c1a3; }
+  .redt { color:#ef6b6b; }
+</style>
+</head>
+<body>
+  <div id="gl"></div>
+
+  <!-- HUD -->
+  <div id="hud" class="hidden">
+    <div id="topbar">
+      <div class="stat">💰 <span id="credits">0</span><small>信用点</small></div>
+      <div class="stat">⏱ <span id="timer">0:00</span><small>剩余时间</small></div>
+      <div class="stat">🔎 <span id="found">0/0</span><small>已找到</small></div>
+      <div class="stat" id="seekerStat">🧢 <span id="seekerName">-</span><small>当前寻找者</small></div>
+    </div>
+    <div id="minimapWrap"><canvas id="minimap" width="220" height="220"></canvas></div>
+    <div id="cluePanel">
+      <header id="panelToggle"><span>🕵️ 躲藏者线索</span><span id="panelArrow">▾</span></header>
+      <div id="clueList"></div>
+    </div>
+    <div id="toasts"></div>
+    <div id="prompt" class="hidden"></div>
+    <div id="staminaWrap"><div id="staminaBar"></div></div>
+    <div id="actionbar">
+      <button class="abtn" data-act="radar">📡 雷达 <kbd>R</kbd></button>
+      <button class="abtn" data-act="map">🚕 打车 <kbd>M</kbd></button>
+      <button class="abtn" data-act="bike">🚲 单车 <kbd>B</kbd></button>
+      <button class="abtn" data-act="view">🎥 视角 <kbd>V</kbd></button>
+      <button class="abtn" data-act="pause">⏸ 菜单 <kbd>Esc</kbd></button>
+    </div>
+  </div>
+
+  <!-- 躲藏阶段横幅 -->
+  <div id="hideBanner" class="hidden">
+    <b id="hideBannerText">躲藏阶段</b>
+    <div>WASD 飞行 · <kbd>空格</kbd> 上升 · <kbd>Z</kbd> 下降 · 拖动鼠标转视角 · 点击地上的 <span style="color:#22c1a3">青色圆环</span> 选择藏身点</div>
+  </div>
+
+  <!-- 主菜单 -->
+  <div id="menu" class="overlay">
+    <div class="panel">
+      <h1>躲猫猫小镇</h1>
+      <div class="sub">3D 模拟城市 · n 人藏，m 人找 · 线索 + 悬赏 + 信用点</div>
+      <div class="modeBtns">
+        <div class="modeCard sel" id="modeAI">
+          <h3>🤖 快速游戏</h3>
+          <p>AI 躲藏者藏进城市各处，发布线索和悬赏，你来找！</p>
+        </div>
+        <div class="modeCard" id="modeHot">
+          <h3>👥 好友同乐</h3>
+          <p>轮流传键盘：躲的人飞行选点、写线索、设悬赏，找的人轮流上场。</p>
+        </div>
+      </div>
+      <div class="cfgRow">
+        <div class="cfgItem"><label>躲藏 n =</label>
+          <select id="numHiders"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></div>
+        <div class="cfgItem"><label>寻找 m =</label>
+          <select id="numSeekers"><option selected>1</option><option>2</option><option>3</option><option>4</option></select></div>
+        <div class="cfgItem"><label>难度</label>
+          <select id="difficulty"><option value="easy">简单</option><option value="normal" selected>普通</option><option value="hard">困难</option></select></div>
+        <div class="cfgItem"><label>时限</label>
+          <select id="timeLimit"><option value="300">5 分钟</option><option value="480" selected>8 分钟</option><option value="720">12 分钟</option></select></div>
+      </div>
+      <button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
+      <div id="controlsHelp">
+        <kbd>W A S D</kbd> 移动 · <kbd>Shift</kbd> 奔跑 · 按住鼠标拖动转视角 · <kbd>E</kbd> 抓人 / 上下公交<br>
+        <kbd>B</kbd> 在站点借还单车 (8💰) · <kbd>M</kbd> 打车 (15💰+里程) · <kbd>R</kbd> 雷达测距 (12💰) · <kbd>V</kbd> 切换视角 · <kbd>C</kbd> 收起线索
+      </div>
+    </div>
+  </div>
+
+  <!-- 线索编辑弹窗（好友模式） -->
+  <div id="clueModal" class="overlay hidden">
+    <div class="panel">
+      <h2>✍️ 发布你的线索</h2>
+      <div id="spotDesc"></div>
+      <div style="font-size:13px;color:#9fb0c8;margin-bottom:6px;">点击灵感标签可以直接加进线索：</div>
+      <div id="hintChips"></div>
+      <textarea id="clueInput" placeholder="写一条不暴露地点的线索，比如：我能听到流水声，身边有一股淡淡的青草味…"></textarea>
+      <div id="clueError"></div>
+      <div class="bountyRow">
+        <label>悬赏</label>
+        <input type="range" id="bountyRange" min="10" max="100" step="5" value="40">
+        <span id="bountyVal">40 💰</span>
+      </div>
+      <div style="text-align:right;">
+        <button class="btn secondary" id="clueCancel">↩ 重新选点</button>
+        <button class="btn teal" id="clueOk">✅ 藏好了！</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 大地图 / 打车 -->
+  <div id="bigMapWrap" class="overlay hidden">
+    <div class="panel">
+      <canvas id="bigMap" width="560" height="560"></canvas>
+      <div id="mapHint">🚕 点击地图任意位置打车前往 —— 预计费用 <span id="mapCost">--</span></div>
+      <button class="btn secondary" id="mapClose">取消 (M)</button>
+    </div>
+  </div>
+
+  <!-- 轮换遮挡 -->
+  <div id="turnOverlay" class="overlay hidden">
+    <div id="turnText"></div>
+    <div id="turnSub"></div>
+  </div>
+
+  <!-- 暂停 -->
+  <div id="pauseMenu" class="overlay hidden">
+    <div class="panel" style="text-align:center;">
+      <h2 style="margin-bottom:16px;">⏸ 暂停</h2>
+      <button class="btn" id="resumeBtn">继续游戏</button>
+      <button class="btn secondary" id="quitBtn">回到主菜单</button>
+    </div>
+  </div>
+
+  <!-- 结算 -->
+  <div id="endScreen" class="overlay hidden">
+    <div class="panel">
+      <div id="endTitle"></div>
+      <div id="endSub"></div>
+      <div id="endStats"></div>
+      <button class="btn" id="againBtn">🔁 再来一局</button>
+      <button class="btn secondary" id="backMenuBtn">回到主菜单</button>
+    </div>
+  </div>
+
+  <div id="fade"></div>
+
+  <script src="lib/three.min.js"></script>
+  <script src="game.js"></script>
+</body>
+</html>
