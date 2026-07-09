@@ -31,6 +31,206 @@ function shuffle(arr) {
   return arr;
 }
 
+/* ---------------- 国际化 ---------------- */
+const LANG = localStorage.getItem('ct_lang')
+  || (((navigator.language || 'zh').toLowerCase().indexOf('zh') === 0) ? 'zh' : 'en');
+function setLang(l) { localStorage.setItem('ct_lang', l); location.reload(); }
+
+const I18N = {
+zh: {
+  sub: '城市孪生躲猫猫 · 真实地图数据 3D 城市 · n 人藏，m 人找 · 线索 + 悬赏 + 信用点',
+  mode_ai_h: '🤖 快速游戏', mode_ai_p: 'AI 躲藏者藏进城市各处，发布线索和悬赏，你来找！',
+  mode_hot_h: '👥 好友同乐', mode_hot_p: '轮流传键盘：躲的人飞行选点、写线索、设悬赏，找的人轮流上场。',
+  cfg_hiders: '躲藏 n =', cfg_seekers: '寻找 m =', cfg_diff: '难度', cfg_time: '时限',
+  diff: ['简单', '普通', '困难'], times: ['5 分钟', '8 分钟', '12 分钟'],
+  btn_start: '开 始 游 戏',
+  help: '<kbd>W A S D</kbd> 移动 · <kbd>Shift</kbd> 奔跑 · 按住鼠标拖动转视角 · <kbd>E</kbd> 抓人 / 上下车<br><kbd>B</kbd> 借还单车 · <kbd>M</kbd> 打车 · <kbd>R</kbd> 雷达测距 · <kbd>V</kbd> 切换视角 · <kbd>C</kbd> 收起线索',
+  admin_label: '⚙️ 管理员 · 世界倍速', admin_hint: '人物与交通工具的移动速度 = 现实速度 × n（默认 3）',
+  admin_val: (n) => `${n}× 现实`,
+  city_town: '🏙 随机小镇', city_town_sub: '程序生成', city_london_sub: '真实地图数据', city_soon: '敬请期待', city_wip: '开发中，敬请期待!',
+  city_names: { london: '伦敦', istanbul: '伊斯坦布尔', dubai: '迪拜', shanghai: '上海', newyork: '纽约' },
+  map_title: '🚕 出租车地图', found_tag: ' ✅ 已找到',
+  hud_credits: '信用点', hud_time: '剩余时间', hud_found: '已找到', hud_seeker: '当前寻找者',
+  panel_title: '🕵️ 躲藏者线索', mm_title: '🗺 小地图', mm_min: '最小化', mm_restore: '还原', mm_close: '关闭', mm_open: '打开小地图',
+  ab_radar: '📡 雷达', ab_taxi: '🚕 打车', ab_bike: '🚲 单车', ab_view: '🎥 视角', ab_menu: '⏸ 菜单',
+  hide_banner: (i, n) => `🙈 躲藏者 ${i}/${n} 号正在选点`,
+  hide_help: 'WASD 飞行 · <kbd>空格</kbd> 上升 · <kbd>Z</kbd> 下降 · 拖动鼠标转视角 · 点击地上的 <span style="color:#22c1a3">青色光柱</span> 选择藏身点',
+  hide_turn: (i) => `🙈 躲藏者 ${i} 号请就位`, hide_turn_sub: '其他玩家请回避屏幕！飞到城市里挑一个青色光柱藏身',
+  clue_h2: '✍️ 发布你的线索',
+  clue_desc: (label, area) => `你选中的藏身点：<b style="color:#ffd166">${label}</b>（${area}）<br>请写一条<b>不含任何地点信息</b>的线索——禁止方位词、地名、数字。`,
+  clue_chips: '点击灵感标签可以直接加进线索：',
+  clue_ph: '写一条不暴露地点的线索，比如：我能听到流水声，身边有一股淡淡的青草味…',
+  clue_bounty: '悬赏', clue_cancel: '↩ 重新选点', clue_ok: '✅ 藏好了！',
+  map_hint: '🚕 点击地图任意位置打车前往 —— 预计费用 ', map_close: '取消 (M)',
+  pause_h: '⏸ 暂停', pause_resume: '继续游戏', pause_quit: '回到主菜单',
+  end_again: '🔁 再来一局', end_back: '回到主菜单',
+  end_win: '🏆 大获全胜！', end_lose: '⏰ 时间到！',
+  end_win_sub: (b) => `所有躲藏者都被找到了！剩余时间奖励 +${b}💰`,
+  end_lose_sub: (n) => `还有 ${n} 位躲藏者没被找到，他们赢了这一局`,
+  th_hider: '躲藏者', th_bounty: '悬赏', th_result: '结果', th_seeker: '寻找者', th_caught: '抓到', th_earned: '赚取',
+  found_by: (w) => `被 ${w} 找到`, survived: '成功隐藏到最后 🎖', persons: (n) => `${n} 人`,
+  end_total: (e, s, f) => `共获得 <b class="teal">${e}💰</b> · 花费 <b class="redt">${s}💰</b> · 最终结余 <b class="gold" style="font-size:20px">${f}💰</b>`,
+  you: '你', seeker_n: (i) => `寻找者${i}号`, hider_n: (i) => `躲藏者${i}号`,
+  turn_first: (n) => `🧢 ${n} 先上场`, turn_rotate: '每 75 秒轮换一位寻找者',
+  turn_next: (n) => `🧢 轮到 ${n}`, turn_next_sub: '快去接手键盘！',
+  seek_go: '🔎 寻找阶段开始！', seek_go_sub: '躲藏者们请把键盘交给寻找者',
+  toast_ai_ready: (n) => `🕵️ ${n} 位躲藏者藏好了！读读左侧线索开始寻找吧`,
+  toast_hot_ready: '🕵️ 所有躲藏者已就位！寻找者出发！',
+  no_credit: (n, w) => `💸 信用点不够！${w}需要 ${n}💰`,
+  w_radar: '雷达', w_bike: '租单车', w_bus: '乘公交', w_train: '乘地铁', w_taxi: '打车',
+  radar_none: '📡 附近已经没有躲藏者了',
+  radar_result: (d, temp) => `📡 最近的躲藏者距你约 <b>${d} 米</b> —— ${temp}<br><small>小地图上画出了测距圈，换个位置再测一次就能定位！</small>`,
+  r_hot4: '🔥 滚烫！！', r_hot3: '♨️ 很热！', r_hot2: '🌤 温热', r_hot1: '🧊 有点凉', r_hot0: '❄️ 冰冷',
+  bike_on: (c) => `🚲 骑上单车（-${c}💰），速度大提升！随时按 B 还车`,
+  bike_off: '🚲 已还车，步行继续～', bike_none: '🚲 附近没有单车站（看小地图上的橙色点）', bike_bus: '🚌 你在公交车上！', bike_first: '🚲 先按 B 还车再乘车',
+  bus_on: (c) => `🚌 上车成功（-${c}💰），下一站按 E 下车`, bus_off: '🚌 你下车了', bus_wait: '🚌 车还在行驶，等到站再下车哦',
+  bus_go: '🚌 公交发车了！到下一站按 <b>E</b> 下车', bus_arrive: '🚌 到站了，按 <b>E</b> 可以下车',
+  transit_on: (icon, c, line) => `${icon} 上车成功（-${c}💰）<b>${line}</b> —— 到站按 E 下车`,
+  transit_arrive: (n) => `🚉 到站：<b>${n}</b> —— 按 <kbd>E</kbd> 下车，或者坐过站`,
+  transit_run: '🚇 行驶中不能下车，等到站！', transit_off: (n) => `🚶 你在 <b>${n}</b> 下车了`,
+  taxi_busy: '🚌 你在车上，先下车！', taxi_done: (c) => `🚕 出租车把你送到了目的地（-${c}💰）`,
+  cap_toast: (s, e, n, base, b) => `🎉 <b>${s}</b> 找到了 ${e} <b>${n}</b>！<br>基础 ${base}💰 + 悬赏 ${b}💰`,
+  p_catch: (e, n) => `🫳 按 <kbd>E</kbd> 抓住 ${e} ${n}！`,
+  p_bus_arr: '🚌 到站！按 <kbd>E</kbd> 下车', p_bus_run: '🚌 公交行驶中…',
+  p_bus_board: (c) => `🚌 按 <kbd>E</kbd> 上公交（${c}💰）`,
+  p_transit_arr: (n) => `🚉 <b>${n}</b> 到站！按 <kbd>E</kbd> 下车`,
+  p_transit_run: (icon, line) => `${icon} ${line} 行驶中…`,
+  p_transit_board: (icon, line, c) => `${icon} 按 <kbd>E</kbd> 乘坐 ${line}（${c}💰）`,
+  p_bike: (c) => `🚲 按 <kbd>B</kbd> 租单车（${c}💰）`,
+  p_rustle: '👀 好像有窸窸窣窣的声音……就在附近！',
+  err_short: '线索太短啦，至少写 4 个字～', err_digits: '不可以带数字（会暴露坐标/门牌）！',
+  err_banned: (w) => `不可以出现地点词「${w}」！换个说法试试～`,
+  bounty_tag: (b) => `悬赏 ${b}💰`,
+  names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
+  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头' },
+  colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
+  spots: {
+    tower: '一座高塔脚下的背阴处', fountain: '水池边沿的外侧', reed: '一丛细长植物的中间',
+    tree: '一棵大树的树干后面', bush: '一丛茂密灌木的内部', bench: '一张长椅的后面',
+    pipe: '一个巨大圆管的内侧', crate: '一堆大木箱的后面', trash: '小巷里大箱子的后面',
+    stall: '市集小摊的桌板后面', booth: '一个红色小亭子的背面', postbox: '一个红色圆筒的后面',
+    bridge: '一座大桥的桥墩旁', abbey: '古老石墙的墙根处', eye: '巨大钢架支脚的后面',
+    stpauls: '宏伟建筑的侧面立柱后', shard: '尖顶玻璃巨塔的墙角', gherkin: '圆滚滚玻璃楼旁的花坛',
+    castle: '古老城墙的墙角', column: '高大纪念柱的基座后', palace: '金色围栏尽头的石墩后',
+  },
+  clues: {
+    water: '我能听到近处传来的流水声', park: '空气里满是青草和泥土的味道', traffic: '不时有车辆从我身旁驶过',
+    quiet: '我周围非常安静，几乎没有人声', shade: '阳光晒不到我，这里很阴凉', chime: '每隔一阵子，我能听到清脆的钟声',
+    busStop: '偶尔能听到公交车到站的叮咚声', market: '我能闻到食物和香料的香气', dust: '空气里有灰尘和水泥的味道',
+    tall: '抬头看，身旁的建筑遮住了大半个天空', low: '我附近的房子都不算高',
+    bcolor: (c) => `离我最近的一栋建筑是${c}色的`,
+    pipe: '我蜷缩在一个圆滚滚的东西里面', trash: '我旁边有一股淡淡的酸味，不太好闻', bush: '有叶子轻轻扎着我的后背',
+    booth: '我躲在一个又高又窄的小空间旁边', bench: '我旁边有一个可以坐下歇脚的东西', reed: '细长的植物在我身边随风摇晃',
+    bigbell: '每隔一阵子，我能听到浑厚悠扬的钟声', river: '我能听到河水拍岸的声音，还有海鸥的叫声',
+    trains: '我能听到列车进站出站的轰鸣和广播声', tourists: '我周围游人如织，快门声此起彼伏',
+    bridge: '我头顶上方是巨大的拱形结构，很阴凉', coffee: '空气里飘着咖啡和烘焙点心的香气',
+    lawn: '我脚下是松软的草坪，空气很清新', waterfowl: '近处传来水鸟扑腾水面的声音',
+  },
+},
+en: {
+  sub: 'City-twin hide & seek · real-map 3D cities · n hide, m seek · clues + bounties + credits',
+  mode_ai_h: '🤖 Quick Game', mode_ai_p: 'AI hiders hide across the city and post clues & bounties. You go find them!',
+  mode_hot_h: '👥 Party Mode', mode_hot_p: 'Pass the keyboard: hiders fly to pick a spot, write a clue and set a bounty; seekers take turns.',
+  cfg_hiders: 'Hiders n =', cfg_seekers: 'Seekers m =', cfg_diff: 'Difficulty', cfg_time: 'Time',
+  diff: ['Easy', 'Normal', 'Hard'], times: ['5 min', '8 min', '12 min'],
+  btn_start: 'S T A R T',
+  help: '<kbd>W A S D</kbd> move · <kbd>Shift</kbd> run · drag mouse to look · <kbd>E</kbd> catch / board & alight<br><kbd>B</kbd> rent/return bike · <kbd>M</kbd> taxi map · <kbd>R</kbd> radar ping · <kbd>V</kbd> camera · <kbd>C</kbd> toggle clues',
+  admin_label: '⚙️ Admin · world speed', admin_hint: 'People & vehicles move at n× real-world speed (default 3)',
+  admin_val: (n) => `${n}× real`,
+  city_town: '🏙 Random Town', city_town_sub: 'procedural', city_london_sub: 'real map data', city_soon: 'coming soon', city_wip: 'In development!',
+  city_names: { london: 'London', istanbul: 'Istanbul', dubai: 'Dubai', shanghai: 'Shanghai', newyork: 'New York' },
+  map_title: '🚕 Taxi Map', found_tag: ' ✅ found',
+  hud_credits: 'credits', hud_time: 'time left', hud_found: 'found', hud_seeker: 'current seeker',
+  panel_title: '🕵️ Hider Clues', mm_title: '🗺 Minimap', mm_min: 'Minimize', mm_restore: 'Restore', mm_close: 'Close', mm_open: 'Open minimap',
+  ab_radar: '📡 Radar', ab_taxi: '🚕 Taxi', ab_bike: '🚲 Bike', ab_view: '🎥 View', ab_menu: '⏸ Menu',
+  hide_banner: (i, n) => `🙈 Hider ${i}/${n} is picking a spot`,
+  hide_help: 'WASD fly · <kbd>Space</kbd> up · <kbd>Z</kbd> down · drag to look · click a <span style="color:#22c1a3">cyan beacon</span> to choose your hiding spot',
+  hide_turn: (i) => `🙈 Hider ${i}, you're up`, hide_turn_sub: 'Everyone else, look away! Fly around and pick a cyan beacon',
+  clue_h2: '✍️ Publish your clue',
+  clue_desc: (label, area) => `Your hiding spot: <b style="color:#ffd166">${label}</b> (${area})<br>Write a clue with <b>no location info</b> — no place names, directions or numbers.`,
+  clue_chips: 'Click a hint chip to add it to your clue:',
+  clue_ph: 'Write a clue that gives away no location, e.g. “I can hear running water, and there is a smell of fresh grass…”',
+  clue_bounty: 'Bounty', clue_cancel: '↩ Pick again', clue_ok: '✅ Hidden!',
+  map_hint: '🚕 Click anywhere on the map to take a taxi — est. fare ', map_close: 'Cancel (M)',
+  pause_h: '⏸ Paused', pause_resume: 'Resume', pause_quit: 'Back to menu',
+  end_again: '🔁 Play again', end_back: 'Back to menu',
+  end_win: '🏆 Flawless victory!', end_lose: '⏰ Time is up!',
+  end_win_sub: (b) => `All hiders found! Time bonus +${b}💰`,
+  end_lose_sub: (n) => `${n} hider(s) were never found — they win this round`,
+  th_hider: 'Hider', th_bounty: 'Bounty', th_result: 'Result', th_seeker: 'Seeker', th_caught: 'Caught', th_earned: 'Earned',
+  found_by: (w) => `found by ${w}`, survived: 'stayed hidden 🎖', persons: (n) => `${n}`,
+  end_total: (e, s, f) => `Earned <b class="teal">${e}💰</b> · spent <b class="redt">${s}💰</b> · final balance <b class="gold" style="font-size:20px">${f}💰</b>`,
+  you: 'You', seeker_n: (i) => `Seeker ${i}`, hider_n: (i) => `Hider ${i}`,
+  turn_first: (n) => `🧢 ${n} goes first`, turn_rotate: 'Seekers rotate every 75 seconds',
+  turn_next: (n) => `🧢 ${n}'s turn`, turn_next_sub: 'Grab the keyboard!',
+  seek_go: '🔎 The hunt begins!', seek_go_sub: 'Hiders, hand the keyboard to the seekers',
+  toast_ai_ready: (n) => `🕵️ ${n} hiders are in place! Read the clues on the left and start hunting`,
+  toast_hot_ready: '🕵️ All hiders are in place. Seekers, go!',
+  no_credit: (n, w) => `💸 Not enough credits! ${w} costs ${n}💰`,
+  w_radar: 'Radar', w_bike: 'Bike rental', w_bus: 'Bus ride', w_train: 'Tube ride', w_taxi: 'Taxi',
+  radar_none: '📡 No hiders left nearby',
+  radar_result: (d, temp) => `📡 Nearest hider is about <b>${d} m</b> away — ${temp}<br><small>A range ring was drawn on the minimap. Ping from another spot to triangulate!</small>`,
+  r_hot4: '🔥 Scorching!!', r_hot3: '♨️ Hot!', r_hot2: '🌤 Warm', r_hot1: '🧊 Cool', r_hot0: '❄️ Freezing',
+  bike_on: (c) => `🚲 On the bike (-${c}💰). Much faster! Press B anytime to return it`,
+  bike_off: '🚲 Bike returned. Back on foot~', bike_none: '🚲 No bike dock nearby (orange dots on the minimap)', bike_bus: '🚌 You are on a vehicle!', bike_first: '🚲 Return the bike (B) before boarding',
+  bus_on: (c) => `🚌 Boarded (-${c}💰). Press E at the next stop to get off`, bus_off: '🚌 You got off', bus_wait: '🚌 Still moving — wait for the stop',
+  bus_go: '🚌 Bus departing! Press <b>E</b> at the next stop to get off', bus_arrive: '🚌 Arrived. Press <b>E</b> to get off',
+  transit_on: (icon, c, line) => `${icon} Boarded (-${c}💰) <b>${line}</b> — press E at a station to alight`,
+  transit_arrive: (n) => `🚉 Arriving: <b>${n}</b> — press <kbd>E</kbd> to alight, or stay on`,
+  transit_run: '🚇 Cannot alight while moving — wait for the station!', transit_off: (n) => `🚶 You got off at <b>${n}</b>`,
+  taxi_busy: '🚌 You are on a vehicle — get off first!', taxi_done: (c) => `🚕 The taxi dropped you off (-${c}💰)`,
+  cap_toast: (s, e, n, base, b) => `🎉 <b>${s}</b> caught ${e} <b>${n}</b>!<br>Base ${base}💰 + bounty ${b}💰`,
+  p_catch: (e, n) => `🫳 Press <kbd>E</kbd> to catch ${e} ${n}!`,
+  p_bus_arr: '🚌 At the stop! Press <kbd>E</kbd> to get off', p_bus_run: '🚌 Bus is moving…',
+  p_bus_board: (c) => `🚌 Press <kbd>E</kbd> to board (${c}💰)`,
+  p_transit_arr: (n) => `🚉 <b>${n}</b> — press <kbd>E</kbd> to alight`,
+  p_transit_run: (icon, line) => `${icon} ${line} en route…`,
+  p_transit_board: (icon, line, c) => `${icon} Press <kbd>E</kbd> to ride ${line} (${c}💰)`,
+  p_bike: (c) => `🚲 Press <kbd>B</kbd> to rent a bike (${c}💰)`,
+  p_rustle: '👀 You hear rustling… someone is close!',
+  err_short: 'Too short — write at least 4 characters', err_digits: 'No digits allowed (they could reveal coordinates)!',
+  err_banned: (w) => `The location word “${w}” is not allowed! Try another phrasing`,
+  bounty_tag: (b) => `Bounty ${b}💰`,
+  names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
+  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London' },
+  colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
+  spots: {
+    tower: 'the shaded foot of a tall tower', fountain: 'the outer rim of a water basin', reed: 'among a clump of tall reeds',
+    tree: 'behind the trunk of a big tree', bush: 'inside a dense bush', bench: 'behind a bench',
+    pipe: 'inside a huge round pipe', crate: 'behind a stack of crates', trash: 'behind a big bin in a back alley',
+    stall: 'behind a market stall', booth: 'behind a little red kiosk', postbox: 'behind a red pillar box',
+    bridge: 'beside the pier of a big bridge', abbey: 'at the base of an ancient stone wall', eye: 'behind a giant steel support leg',
+    stpauls: 'behind a column of a grand building', shard: 'at the corner of a glass spire', gherkin: 'by a rounded glass tower',
+    castle: 'at the corner of ancient walls', column: 'behind the base of a tall column', palace: 'behind a plinth by golden railings',
+  },
+  clues: {
+    water: 'I can hear running water nearby', park: 'The air is full of the smell of grass and earth', traffic: 'Cars keep passing right by me',
+    quiet: 'It is very quiet around me, hardly any voices', shade: 'The sun cannot reach me — nice and shady', chime: 'Every so often I hear crisp bell chimes',
+    busStop: 'Now and then I hear the ding of a bus arriving', market: 'I can smell food and spices', dust: 'The air tastes of dust and cement',
+    tall: 'Looking up, the building beside me blocks half the sky', low: 'The buildings around me are all quite low',
+    bcolor: (c) => `The nearest building to me is ${c}`,
+    pipe: 'I am curled up inside something big and round', trash: 'There is a faint sour smell next to me', bush: 'Leaves keep tickling my back',
+    booth: 'I am next to a tall, narrow little box', bench: 'There is something to sit on right beside me', reed: 'Tall thin plants sway around me',
+    bigbell: 'Every so often I hear deep, resonant bell tolls', river: 'I can hear water lapping, and seagulls crying',
+    trains: 'I hear the rumble and announcements of trains', tourists: 'Crowds bustle around me, camera shutters clicking',
+    bridge: 'A huge arched structure looms right above me', coffee: 'The air smells of coffee and fresh pastries',
+    lawn: 'Soft lawn under my feet, the air is fresh', waterfowl: 'I hear waterfowl splashing nearby',
+  },
+},
+};
+const t = (k, ...a) => {
+  let s = I18N[LANG][k];
+  if (s === undefined) s = I18N.zh[k];
+  if (s === undefined) return k;
+  return typeof s === 'function' ? s(...a) : s;
+};
+const tClue = (k, ...a) => {
+  const d = I18N[LANG].clues[k] || I18N.zh.clues[k];
+  return typeof d === 'function' ? d(...a) : d;
+};
+const tSpot = (k) => I18N[LANG].spots[k] || I18N.zh.spots[k] || k;
+const tColor = (c) => I18N[LANG].colors[c] || c;
+
 /* ---------------- 音效（WebAudio 合成，无素材） ---------------- */
 const AudioSys = {
   ctx: null,
@@ -136,32 +336,13 @@ const BANNED_WORDS = [
   'north', 'south', 'east', 'west', 'tower', 'corner',
 ];
 
-const HIDER_NAMES = [
-  ['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'],
-  ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡'],
-];
+const HIDER_NAMES = I18N[LANG].names;
 
-/* 线索模板：key -> 文案（保证不含地点词） */
-const CLUE_TMPL = {
-  water:   () => '我能听到近处传来的流水声',
-  park:    () => '空气里满是青草和泥土的味道',
-  traffic: () => '不时有车辆从我身旁驶过',
-  quiet:   () => '我周围非常安静，几乎没有人声',
-  shade:   () => '阳光晒不到我，这里很阴凉',
-  chime:   () => '每隔一阵子，我能听到清脆的钟声',
-  busStop: () => '偶尔能听到公交车到站的叮咚声',
-  market:  () => '我能闻到食物和香料的香气',
-  dust:    () => '空气里有灰尘和水泥的味道',
-  tall:    () => '抬头看，身旁的建筑遮住了大半个天空',
-  low:     () => '我附近的房子都不算高',
-  bcolor:  (c) => `离我最近的一栋建筑是${c}色的`,
-  pipe:    () => '我蜷缩在一个圆滚滚的东西里面',
-  trash:   () => '我旁边有一股淡淡的酸味，不太好闻',
-  bush:    () => '有叶子轻轻扎着我的后背',
-  booth:   () => '我躲在一个又高又窄的小空间旁边',
-  bench:   () => '我旁边有一个可以坐下歇脚的东西',
-  reed:    () => '细长的植物在我身边随风摇晃',
-};
+/* 线索模板：key -> 文案（保证不含地点词，走 i18n 词典） */
+const CLUE_TMPL = {};
+['water', 'park', 'traffic', 'quiet', 'shade', 'chime', 'busStop', 'market', 'dust',
+  'tall', 'low', 'bcolor', 'pipe', 'trash', 'bush', 'booth', 'bench', 'reed']
+  .forEach((k) => { CLUE_TMPL[k] = (...a) => tClue(k, ...a); });
 
 /* ---------------- 全局状态 ---------------- */
 const G = {
@@ -270,7 +451,7 @@ function blockType(i, j) {
   if (i === 5 && j === 5) return 'constr';
   return 'res';
 }
-const TYPE_NAME = { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅' };
+const TYPE_NAME = I18N[LANG].area;
 
 function genCity() {
   const city = {
@@ -379,7 +560,7 @@ function buildPlaza(city, g, cx, cz, benchPlace, treePlace) {
     city.clockHands.push(hand);
   }
   city.aabbs.push({ x1: tw.x - 3.6, z1: tw.z - 3.6, x2: tw.x + 3.6, z2: tw.z + 3.6 });
-  city.spots.push({ x: tw.x - 4.6, z: tw.z - 4.6, prop: 'tower', label: '一座高耸建筑的背阴角落' });
+  city.spots.push({ x: tw.x - 4.6, z: tw.z - 4.6, prop: 'tower', label: tSpot('tower') });
 
   // 喷泉
   city.fountain = { x: cx + 9, z: cz + 8 };
@@ -394,8 +575,8 @@ function buildPlaza(city, g, cx, cz, benchPlace, treePlace) {
   jet.position.set(f.x, 3, f.z); g.add(jet);
   city.fountainJet = jet;
   city.circles.push({ x: f.x, z: f.z, r: 5.5 });
-  city.spots.push({ x: f.x + 6.6, z: f.z + 1, prop: 'fountain', label: '水池边沿的外侧' });
-  city.spots.push({ x: f.x - 6.6, z: f.z - 1, prop: 'fountain', label: '水池边沿的外侧' });
+  city.spots.push({ x: f.x + 6.6, z: f.z + 1, prop: 'fountain', label: tSpot('fountain') });
+  city.spots.push({ x: f.x - 6.6, z: f.z - 1, prop: 'fountain', label: tSpot('fountain') });
 
   for (let b = 0; b < 6; b++) {
     const ang = b * Math.PI / 3 + 0.4;
@@ -425,7 +606,7 @@ function buildPark(city, g, i, j, cx, cz, hasPond, treePlace, benchPlace, bushPl
       const px = cx + Math.cos(ang) * 13.4, pz = cz + Math.sin(ang) * 9.4;
       const reed = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.1, R(1.6, 2.4), 5), lambert(0x8aa64f));
       reed.position.set(px, 1, pz); g.add(reed);
-      if (r === 2 || r === 6) city.spots.push({ x: px, z: pz, prop: 'reed', label: '一丛细长植物的中间' });
+      if (r === 2 || r === 6) city.spots.push({ x: px, z: pz, prop: 'reed', label: tSpot('reed') });
     }
     for (let t = 0; t < 5; t++) {
       const ang = R(0, Math.PI * 2);
@@ -441,17 +622,17 @@ function buildPark(city, g, i, j, cx, cz, hasPond, treePlace, benchPlace, bushPl
     }
     // 树后藏点：挑 2 棵
     shuffle(localTrees).slice(0, 2).forEach(([tx, tz]) => {
-      city.spots.push({ x: tx + R(-1, 1) * 0.5 + 1.1, z: tz + 1.1, prop: 'tree', label: '一棵大树的树干后面' });
+      city.spots.push({ x: tx + R(-1, 1) * 0.5 + 1.1, z: tz + 1.1, prop: 'tree', label: tSpot('tree') });
     });
     for (let b = 0; b < 3; b++) {
       const bx = cx + R(-13, 13), bz = cz + R(-13, 13);
       bushPlace.push({ x: bx, z: bz });
-      if (b === 0) city.spots.push({ x: bx, z: bz, prop: 'bush', label: '一丛茂密灌木的内部' });
+      if (b === 0) city.spots.push({ x: bx, z: bz, prop: 'bush', label: tSpot('bush') });
     }
     benchPlace.push({ x: cx + R(-12, 12), z: cz + R(-12, 12), rot: R(0, Math.PI * 2) });
     if (rng() < 0.5) {
       const bp = benchPlace[benchPlace.length - 1];
-      city.spots.push({ x: bp.x + 0.2, z: bp.z + 1.2, prop: 'bench', label: '一个歇脚设施的后面' });
+      city.spots.push({ x: bp.x + 0.2, z: bp.z + 1.2, prop: 'bench', label: tSpot('bench') });
     }
   }
 }
@@ -466,7 +647,7 @@ function buildConstruction(city, g, cx, cz) {
     pipe.rotation.z = Math.PI / 2; pipe.position.set(px, 1.5, pz);
     pipe.castShadow = true; g.add(pipe);
     city.aabbs.push({ x1: px - 2.2, z1: pz - 1.6, x2: px + 2.2, z2: pz + 1.6 });
-    city.spots.push({ x: px, z: pz + 2.6, prop: 'pipe', label: '一个巨大圆管的内侧' });
+    city.spots.push({ x: px, z: pz + 2.6, prop: 'pipe', label: tSpot('pipe') });
   }
   // 木箱堆
   const crateM = lambert(0xa5814f);
@@ -478,7 +659,7 @@ function buildConstruction(city, g, cx, cz) {
     crate.castShadow = true; g.add(crate);
     if (c === 0) {
       city.aabbs.push({ x1: px - s / 2, z1: pz - s / 2, x2: px + s / 2, z2: pz + s / 2 });
-      city.spots.push({ x: px + s / 2 + 0.9, z: pz, prop: 'crate', label: '一堆大木箱的后面' });
+      city.spots.push({ x: px + s / 2 + 0.9, z: pz, prop: 'crate', label: tSpot('crate') });
     }
   }
   // 半成品框架
@@ -530,7 +711,7 @@ function buildBuildingBlock(city, g, i, j, type, cx, cz, treePlace) {
     dump.position.set(dx, 0.7, dz); dump.rotation.y = R(0, Math.PI); dump.castShadow = true;
     city.group.add(dump);
     city.aabbs.push({ x1: dx - 1.2, z1: dz - 0.9, x2: dx + 1.2, z2: dz + 0.9 });
-    city.spots.push({ x: dx + 1.9, z: dz + 0.6, prop: 'trash', label: '两栋楼之间的大箱子后面' });
+    city.spots.push({ x: dx + 1.9, z: dz + 0.6, prop: 'trash', label: tSpot('trash') });
   }
   // 市场货摊（藏点）
   if (type === 'market') {
@@ -549,7 +730,7 @@ function buildBuildingBlock(city, g, i, j, type, cx, cz, treePlace) {
       stall.traverse((o) => { o.castShadow = true; });
       city.group.add(stall);
       city.aabbs.push({ x1: sx - 1.7, z1: sz - 1, x2: sx + 1.7, z2: sz + 1 });
-      if (s === 0) city.spots.push({ x: sx, z: sz - 1.9, prop: 'stall', label: '一个小货摊的桌板后面' });
+      if (s === 0) city.spots.push({ x: sx, z: sz - 1.9, prop: 'stall', label: tSpot('stall') });
     }
   }
   // 住宅区路边树
@@ -690,7 +871,7 @@ function buildExtraProps(city, g) {
     const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.6, 1.52), new THREE.MeshLambertMaterial({ color: 0xbfe3f5, transparent: true, opacity: 0.6 }));
     glass.position.set(x, 1.9, z); g.add(glass);
     city.aabbs.push({ x1: x - 0.85, z1: z - 0.85, x2: x + 0.85, z2: z + 0.85 });
-    city.spots.push({ x: x + 1.6, z: z + 0.6, prop: 'booth', label: '一个红色小亭子的背面' });
+    city.spots.push({ x: x + 1.6, z: z + 0.6, prop: 'booth', label: tSpot('booth') });
   }
 }
 
@@ -761,7 +942,7 @@ function townSpotHints(spot) {
   if (a.shade) push('shade', CLUE_TMPL.shade());
   if (a.tall) push('tall', CLUE_TMPL.tall());
   if (a.low) push('low', CLUE_TMPL.low());
-  if (a.bcolor) push('bcolor', CLUE_TMPL.bcolor(a.bcolor));
+  if (a.bcolor) push('bcolor', CLUE_TMPL.bcolor(tColor(a.bcolor)));
   return out;
 }
 
@@ -773,7 +954,8 @@ function genAIClue(spot, hintCount) {
   const rest = shuffle(hints.slice(1));
   while (chosen.length < hintCount && rest.length) chosen.push(rest.pop());
   shuffle(chosen);
-  return chosen.map((h) => h.txt).join('；') + '。';
+  const joiner = LANG === 'zh' ? '；' : '; ';
+  return chosen.map((h) => h.txt).join(joiner) + (LANG === 'zh' ? '。' : '.');
 }
 
 function spotBounty(spot) {
@@ -788,15 +970,15 @@ function spotBounty(spot) {
 /* ---- 线索合法性校验（好友模式） ---- */
 function validateClue(text) {
   const t = text.trim();
-  if (t.length < 4) return '线索太短啦，至少写 4 个字～';
-  if (/[0-9０-９]/.test(t)) return '不可以带数字（会暴露坐标/门牌）！';
+  if (t.length < 4) return t('err_short');
+  if (/[0-9０-９]/.test(t)) return t('err_digits');
   const lower = t.toLowerCase();
   for (const w of BANNED_WORDS) {
-    if (lower.includes(w.toLowerCase())) return `不可以出现地点词「${w}」！换个说法试试～`;
+    if (lower.includes(w.toLowerCase())) return t('err_banned', w);
   }
   if (G.city && G.city.bannedExtra) {
     for (const w of G.city.bannedExtra) {
-      if (w.length >= 2 && lower.includes(w.toLowerCase())) return `不可以出现地点词「${w}」！换个说法试试～`;
+      if (w.length >= 2 && lower.includes(w.toLowerCase())) return t('err_banned', w);
     }
   }
   return null;
@@ -806,16 +988,9 @@ function validateClue(text) {
  * 伦敦 —— 真实地图数据城市
  * 站点/线路: nicola/tubemaps (TfL 公开数据)；地理要素按真实经纬度描摹
  * ============================================================ */
-const LONDON_CLUE_TMPL = {
-  bigbell:  () => '每隔一阵子，我能听到浑厚悠扬的钟声',
-  river:    () => '我能听到河水拍岸的声音，还有海鸥的叫声',
-  trains:   () => '我能听到列车进站出站的轰鸣和广播声',
-  tourists: () => '我周围游人如织，快门声此起彼伏',
-  bridge:   () => '我头顶上方是巨大的拱形结构，很阴凉',
-  coffee:   () => '空气里飘着咖啡和烘焙点心的香气',
-  lawn:     () => '我脚下是松软的草坪，空气很清新',
-  waterfowl:() => '近处传来水鸟扑腾水面的声音',
-};
+const LONDON_CLUE_TMPL = {};
+['bigbell', 'river', 'trains', 'tourists', 'bridge', 'coffee', 'lawn', 'waterfowl']
+  .forEach((k) => { LONDON_CLUE_TMPL[k] = (...a) => tClue(k, ...a); });
 
 /* 带状网格：沿多段线铺一条宽 w 的面 */
 function ribbonMesh(pts, w, color, y = 0.05, opacity = 1) {
@@ -951,7 +1126,7 @@ function genLondon() {
     // 桥下藏点（南岸端）
     if (!br.foot && rng() < 0.7) {
       const end = br.b[1] > br.a[1] ? br.b : br.a;
-      city.spots.push({ x: end[0] + R(-3, 3), z: end[1] + 5, prop: 'bridge', label: '一座大桥的桥墩旁' });
+      city.spots.push({ x: end[0] + R(-3, 3), z: end[1] + 5, prop: 'bridge', label: tSpot('bridge') });
     }
   });
 
@@ -983,7 +1158,7 @@ function genLondon() {
     for (let b = 0; b < 3; b++) {
       const a = R(0, Math.PI * 2);
       const bx = pk.p[0] + Math.cos(a) * pk.rx * 0.7, bz = pk.p[1] + Math.sin(a) * pk.rz * 0.7;
-      if (b === 0) city.spots.push({ x: bx, z: bz, prop: 'bench', label: '一张长椅的后面' });
+      if (b === 0) city.spots.push({ x: bx, z: bz, prop: 'bench', label: tSpot('bench') });
     }
   });
 
@@ -1068,7 +1243,7 @@ function buildLondonLandmark(city, g, lm) {
       }
       city.aabbs.push({ x1: x - 3.8, z1: z - 3.8, x2: x + 3.8, z2: z + 3.8 });
       city.tower = { x, z };
-      city.spots.push({ x: x - 5.2, z: z - 5.2, prop: 'tower', label: '一座高塔脚下的背阴处' });
+      city.spots.push({ x: x - 5.2, z: z - 5.2, prop: 'tower', label: tSpot('tower') });
       break;
     }
     case 'parliament': {
@@ -1082,7 +1257,7 @@ function buildLondonLandmark(city, g, lm) {
       addBox(5, 22, 5, x - 4, 11, z - 15, lambert(0xe0d6c0));
       addBox(5, 22, 5, x + 4, 11, z - 15, lambert(0xe0d6c0));
       city.aabbs.push({ x1: x - 7.5, z1: z - 18, x2: x + 7.5, z2: z + 13.5 });
-      city.spots.push({ x: x + 9, z: z + 10, prop: 'abbey', label: '古老石墙的墙根处' });
+      city.spots.push({ x: x + 9, z: z + 10, prop: 'abbey', label: tSpot('abbey') });
       break;
     }
     case 'eye': {
@@ -1113,7 +1288,7 @@ function buildLondonLandmark(city, g, lm) {
         g.add(leg);
       });
       city.circles.push({ x, z, r: 4 });
-      city.spots.push({ x: x + 4, z: z + 10, prop: 'eye', label: '巨大钢架支脚的后面' });
+      city.spots.push({ x: x + 4, z: z + 10, prop: 'eye', label: tSpot('eye') });
       break;
     }
     case 'stpauls': {
@@ -1125,7 +1300,7 @@ function buildLondonLandmark(city, g, lm) {
       const lantern = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 5, 8), lambert(0xe3dac6));
       lantern.position.set(x, 32, z); g.add(lantern);
       city.aabbs.push({ x1: x - 10.5, z1: z - 17.5, x2: x + 10.5, z2: z + 17.5 });
-      city.spots.push({ x: x - 12, z: z + 6, prop: 'stpauls', label: '宏伟建筑的侧面立柱后' });
+      city.spots.push({ x: x - 12, z: z + 6, prop: 'stpauls', label: tSpot('stpauls') });
       break;
     }
     case 'shard': {
@@ -1135,7 +1310,7 @@ function buildLondonLandmark(city, g, lm) {
       shard.castShadow = true;
       g.add(shard);
       city.aabbs.push({ x1: x - 8, z1: z - 8, x2: x + 8, z2: z + 8 });
-      city.spots.push({ x: x + 10.5, z: z - 4, prop: 'shard', label: '一栋尖顶玻璃巨塔的墙角' });
+      city.spots.push({ x: x + 10.5, z: z - 4, prop: 'shard', label: tSpot('shard') });
       break;
     }
     case 'gherkin': {
@@ -1145,7 +1320,7 @@ function buildLondonLandmark(city, g, lm) {
       ghk.castShadow = true;
       g.add(ghk);
       city.circles.push({ x, z, r: 9.5 });
-      city.spots.push({ x: x - 11, z: z + 3, prop: 'gherkin', label: '一栋圆滚滚玻璃楼旁的花坛' });
+      city.spots.push({ x: x - 11, z: z + 3, prop: 'gherkin', label: tSpot('gherkin') });
       break;
     }
     case 'castle': {
@@ -1161,7 +1336,7 @@ function buildLondonLandmark(city, g, lm) {
       addBox(1.6, 4.5, 26, x - 12, 2.25, z, lambert(0xcfc4a4));
       addBox(1.6, 4.5, 26, x + 12, 2.25, z, lambert(0xcfc4a4));
       city.aabbs.push({ x1: x - 8.5, z1: z - 8.5, x2: x + 8.5, z2: z + 8.5 });
-      city.spots.push({ x: x - 13.8, z: z - 13.8, prop: 'castle', label: '古老城墙的墙角' });
+      city.spots.push({ x: x - 13.8, z: z - 13.8, prop: 'castle', label: tSpot('castle') });
       break;
     }
     case 'column': {
@@ -1180,7 +1355,7 @@ function buildLondonLandmark(city, g, lm) {
       fw.position.set(f.x, 0.92, f.z); g.add(fw);
       city.circles.push({ x: f.x, z: f.z, r: 4.6 });
       city.circles.push({ x, z, r: 3 });
-      city.spots.push({ x: x - 4.5, z: z - 4.5, prop: 'column', label: '高大纪念柱的基座后' });
+      city.spots.push({ x: x - 4.5, z: z - 4.5, prop: 'column', label: tSpot('column') });
       break;
     }
     case 'palace': {
@@ -1191,7 +1366,7 @@ function buildLondonLandmark(city, g, lm) {
       const flag = new THREE.Mesh(new THREE.PlaneGeometry(2.4, 1.4), new THREE.MeshBasicMaterial({ color: 0xc0281c, side: THREE.DoubleSide }));
       flag.position.set(x + 1.2, 19.6, z); g.add(flag);
       city.aabbs.push({ x1: x - 15.5, z1: z - 6.5, x2: x + 15.5, z2: z + 6.5 });
-      city.spots.push({ x: x + 17.5, z: z + 4, prop: 'palace', label: '金色围栏尽头的石墩后' });
+      city.spots.push({ x: x + 17.5, z: z + 4, prop: 'palace', label: tSpot('palace') });
       break;
     }
   }
@@ -1397,7 +1572,7 @@ function buildLondonProps(city, g, D, treePlace) {
     const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.5, 1.52), new THREE.MeshLambertMaterial({ color: 0xbfe3f5, transparent: true, opacity: 0.55 }));
     glass.position.set(pos.x, 1.8, pos.z); g.add(glass);
     city.aabbs.push({ x1: pos.x - 0.85, z1: pos.z - 0.85, x2: pos.x + 0.85, z2: pos.z + 0.85 });
-    if (i % 2 === 0) city.spots.push({ x: pos.x + 1.7, z: pos.z + 0.5, prop: 'booth', label: '一个红色小亭子的背面' });
+    if (i % 2 === 0) city.spots.push({ x: pos.x + 1.7, z: pos.z + 0.5, prop: 'booth', label: tSpot('booth') });
   }
   // 红色邮筒 ×6
   for (let i = 0; i < 6; i++) {
@@ -1407,7 +1582,7 @@ function buildLondonProps(city, g, D, treePlace) {
     post.position.set(pos.x, 0.75, pos.z); post.castShadow = true; g.add(post);
     const cap = new THREE.Mesh(new THREE.SphereGeometry(0.44, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0xa02318));
     cap.position.set(pos.x, 1.5, pos.z); g.add(cap);
-    if (i % 2 === 0) city.spots.push({ x: pos.x + 1.1, z: pos.z + 0.6, prop: 'postbox', label: '一个红色圆筒的后面' });
+    if (i % 2 === 0) city.spots.push({ x: pos.x + 1.1, z: pos.z + 0.6, prop: 'postbox', label: tSpot('postbox') });
   }
   // 垃圾箱小巷 ×5
   for (let i = 0; i < 5; i++) {
@@ -1417,7 +1592,7 @@ function buildLondonProps(city, g, D, treePlace) {
     const dump = new THREE.Mesh(new THREE.BoxGeometry(2.1, 1.4, 1.2), lambert(pick([0x3f7f5f, 0x4a6fa5])));
     dump.position.set(dx2, 0.7, dz2); dump.castShadow = true; g.add(dump);
     city.aabbs.push({ x1: dx2 - 1.2, z1: dz2 - 0.8, x2: dx2 + 1.2, z2: dz2 + 0.8 });
-    city.spots.push({ x: dx2 + 1.9, z: dz2 + 0.5, prop: 'trash', label: '楼后小巷的大箱子后面' });
+    city.spots.push({ x: dx2 + 1.9, z: dz2 + 0.5, prop: 'trash', label: tSpot('trash') });
   }
   // 考文特花园市集摊位 ×3（真实经纬度投影）
   const mkX = ((-0.1228 - (-0.11)) * 111320 * Math.cos(51.507 * Math.PI / 180)) * 0.24;
@@ -1434,12 +1609,12 @@ function buildLondonProps(city, g, D, treePlace) {
     stall.traverse((o) => { o.castShadow = true; });
     g.add(stall);
     city.aabbs.push({ x1: sx - 1.7, z1: sz - 1, x2: sx + 1.7, z2: sz + 1 });
-    if (i < 2) city.spots.push({ x: sx, z: sz - 1.9, prop: 'stall', label: '市集小摊的桌板后面' });
+    if (i < 2) city.spots.push({ x: sx, z: sz - 1.9, prop: 'stall', label: tSpot('stall') });
   }
   // 公园树藏点
   const parkTrees = treePlace.filter((t) => t.park);
   shuffle(parkTrees).slice(0, 6).forEach((t) => {
-    city.spots.push({ x: t.x + 1.1, z: t.z + 1.1, prop: 'tree', label: '一棵大树的树干后面' });
+    city.spots.push({ x: t.x + 1.1, z: t.z + 1.1, prop: 'tree', label: tSpot('tree') });
   });
   // 共享单车桩 ×8
   const dockStreets = shuffle(D.streets.slice());
@@ -1547,7 +1722,7 @@ function londonSpotHints(spot) {
   if (a.shade) push('shade', CLUE_TMPL.shade());
   if (a.tall) push('tall', CLUE_TMPL.tall());
   if (a.low) push('low', CLUE_TMPL.low());
-  if (a.bcolor) push('bcolor', CLUE_TMPL.bcolor(a.bcolor));
+  if (a.bcolor) push('bcolor', CLUE_TMPL.bcolor(tColor(a.bcolor)));
   return out;
 }
 
@@ -1646,7 +1821,7 @@ function vehicleArrive(v, stop, city) {
   if (v.kind === 'train') AudioSys.busDing(clamp(0.2 * (1 - d / 120), 0, 0.2));
   else AudioSys.beep(520, 0.15, 'sine', clamp(0.15 * (1 - d / 90), 0, 0.15));
   if (v.riding) {
-    showToast(`🚉 到站：<b>${stop.name}</b> —— 按 <kbd>E</kbd> 下车，或者坐过站`);
+    showToast(t('transit_arrive', stop.name));
   }
 }
 
@@ -1757,18 +1932,18 @@ function transitNear() {
 }
 
 function boardTransit(v) {
-  if (!spendCredits(v.cost, v.kind === 'train' ? '乘地铁' : '乘公交')) return;
+  if (!spendCredits(v.cost, v.kind === 'train' ? t('w_train') : t('w_bus'))) return;
   player.riding = 'transit';
   player.tv = v;
   v.riding = true;
   AudioSys.busDing();
-  showToast(`${v.kind === 'train' ? '🚇' : '🚌'} 上车成功（-${v.cost}💰）<b>${v.line}</b> —— 到站按 E 下车`);
+  showToast(t('transit_on', v.kind === 'train' ? '🚇' : '🚌', v.cost, v.line));
 }
 
 function alightTransit() {
   const v = player.tv;
   if (!v) return;
-  if (v.state !== 'dwell') { showToast('🚇 行驶中不能下车，等到站！', 'red'); return; }
+  if (v.state !== 'dwell') { showToast(t('transit_run'), 'red'); return; }
   v.riding = false;
   player.riding = null;
   player.tv = null;
@@ -1777,7 +1952,7 @@ function alightTransit() {
     [player.x, player.z] = collide(stop.x + 2, stop.z + 4);
   }
   AudioSys.click();
-  showToast(`🚶 你在 <b>${stop ? stop.name : '站点'}</b> 下车了`);
+  showToast(t('transit_off', stop ? stop.name : ''));
 }
 
 /* ============================================================
@@ -1875,7 +2050,7 @@ function updateBus(dt) {
   const bus = G.city.bus, path = G.city.busPath;
   if (bus.dwell > 0) {
     bus.dwell -= dt;
-    if (bus.dwell <= 0 && bus.riding) showToast('🚌 公交发车了！到下一站按 <b>E</b> 下车');
+    if (bus.dwell <= 0 && bus.riding) showToast(t('bus_go'));
     return;
   }
   const a = path[bus.seg], b = path[(bus.seg + 1) % 4];
@@ -1891,7 +2066,7 @@ function updateBus(dt) {
     const d = dist2d(player.x, player.z, stop.x, stop.z);
     AudioSys.busDing(clamp(0.22 * (1 - d / 90), 0.02, 0.22));
     if (bus.riding) {
-      showToast('🚌 到站了，按 <b>E</b> 可以下车');
+      showToast(t('bus_arrive'));
     }
   }
   if (bus.t >= 1) { bus.t = 0; bus.announced = false; bus.seg = (bus.seg + 1) % 4; }
@@ -2121,7 +2296,7 @@ document.querySelectorAll('.abtn').forEach((btn) => {
 function spendCredits(n, what) {
   if (G.credits < n) {
     AudioSys.deny();
-    showToast(`💸 信用点不够！${what}需要 ${n}💰`, 'red');
+    showToast(t('no_credit', n, what), 'red');
     return false;
   }
   G.credits -= n;
@@ -2139,7 +2314,7 @@ function tryInteract() {
     if (player.riding === 'transit') { alightTransit(); return; }
     const v = transitNear();
     if (v && player.riding === null) { boardTransit(v); return; }
-    if (v && player.riding === 'bike') { showToast('🚲 先按 B 还车再乘车', 'red'); }
+    if (v && player.riding === 'bike') { showToast(t('bike_first'), 'red'); }
     return;
   }
   const bus = G.city.bus;
@@ -2150,62 +2325,62 @@ function tryInteract() {
       bus.riding = false;
       const stop = G.city.busStops[bus.stopIdx];
       player.x = stop.sx; player.z = stop.sz;
-      showToast('🚌 你下车了');
+      showToast(t('bus_off'));
       AudioSys.click();
     } else {
-      showToast('🚌 车还在行驶，等到站再下车哦', 'red');
+      showToast(t('bus_wait'), 'red');
     }
     return;
   }
   if (player.riding === null || player.riding === 'bike') {
     const d = dist2d(player.x, player.z, bus.mesh.position.x, bus.mesh.position.z);
     if (d < 6 && bus.dwell > 0) {
-      if (player.riding === 'bike') { showToast('🚲 先按 B 还车再上公交', 'red'); return; }
-      if (!spendCredits(COST.bus, '乘公交')) return;
+      if (player.riding === 'bike') { showToast(t('bike_first'), 'red'); return; }
+      if (!spendCredits(COST.bus, t('w_bus'))) return;
       player.riding = 'bus';
       bus.riding = true;
       AudioSys.busDing();
-      showToast(`🚌 上车成功（-${COST.bus}💰），下一站按 E 下车`);
+      showToast(t('bus_on', COST.bus));
     }
   }
 }
 
 function tryRadar() {
   if (G.phase !== 'seek' || G.paused) return;
-  if (!spendCredits(COST.radar, '雷达')) return;
+  if (!spendCredits(COST.radar, t('w_radar'))) return;
   const h = nearestActiveHider();
   AudioSys.radar();
-  if (!h) { showToast('📡 附近已经没有躲藏者了'); return; }
+  if (!h) { showToast(t('radar_none')); return; }
   const d = Math.round(h.d);
   const k = G.city.radarScale || 1;
   let temp;
-  if (d < 20 * k) temp = '🔥 滚烫！！';
-  else if (d < 45 * k) temp = '♨️ 很热！';
-  else if (d < 80 * k) temp = '🌤 温热';
-  else if (d < 130 * k) temp = '🧊 有点凉';
-  else temp = '❄️ 冰冷';
+  if (d < 20 * k) temp = t('r_hot4');
+  else if (d < 45 * k) temp = t('r_hot3');
+  else if (d < 80 * k) temp = t('r_hot2');
+  else if (d < 130 * k) temp = t('r_hot1');
+  else temp = t('r_hot0');
   G.radarRings.push({ x: player.x, z: player.z, d: h.d, until: performance.now() + 7000 });
   if (G.radarRings.length > 2) G.radarRings.shift();
-  showToast(`📡 最近的躲藏者距你约 <b>${d} 米</b> —— ${temp}<br><small>小地图上画出了测距圈，换个位置再测一次就能定位！</small>`, 'gold');
+  showToast(t('radar_result', d, temp), 'gold');
 }
 
 function tryBike() {
   if (G.phase !== 'seek' || G.paused) return;
-  if (player.riding === 'bus') { showToast('🚌 你在公交车上！', 'red'); return; }
+  if (player.riding === 'bus' || player.riding === 'transit') { showToast(t('bike_bus'), 'red'); return; }
   if (player.riding === 'bike') {
     player.riding = null;
     player.bikeMesh.visible = false;
-    showToast('🚲 已还车，步行继续～');
+    showToast(t('bike_off'));
     AudioSys.click();
     return;
   }
   const st = G.city.bikeStations.find((s) => dist2d(player.x, player.z, s.x, s.z) < 7);
-  if (!st) { showToast('🚲 附近没有单车站（看小地图上的橙色点）', 'red'); return; }
-  if (!spendCredits(COST.bike, '租单车')) return;
+  if (!st) { showToast(t('bike_none'), 'red'); return; }
+  if (!spendCredits(COST.bike, t('w_bike'))) return;
   player.riding = 'bike';
   player.bikeMesh.visible = true;
   AudioSys.coin();
-  showToast(`🚲 骑上单车（-${COST.bike}💰），速度大提升！随时按 B 还车`);
+  showToast(t('bike_on', COST.bike));
 }
 
 function nearestActiveHider() {
@@ -2230,7 +2405,7 @@ function captureHider(h) {
   G.seekers[G.curSeeker].earned += reward;
   AudioSys.capture();
   burstConfetti(h.spot.x, 1, h.spot.z);
-  showToast(`🎉 <b>${G.seekers[G.curSeeker].name}</b> 找到了 ${h.emoji} <b>${h.name}</b>！<br>基础 ${COST.captureBase}💰 + 悬赏 ${h.bounty}💰`, 'gold');
+  showToast(t('cap_toast', G.seekers[G.curSeeker].name, h.emoji, h.name, COST.captureBase, h.bounty), 'gold');
   updateHUD();
   renderCluePanel();
   const left = G.hiders.filter((x) => !x.found).length;
@@ -2243,7 +2418,7 @@ function toggleBigMap() {
   if (G.phase !== 'seek' || G.paused) return;
   bigMapOpen = !bigMapOpen;
   $('bigMapWrap').classList.toggle('hidden', !bigMapOpen);
-  if (bigMapOpen) drawMap($('bigMap').getContext('2d'), 560, true);
+  if (bigMapOpen) drawMap($('bigMap').getContext('2d'), $('bigMap').width, true);
 }
 $('mapClose').addEventListener('click', toggleBigMap);
 function mapToWorld(e) {
@@ -2271,9 +2446,9 @@ function taxiCost(x, z) {
   return COST.taxiBase + Math.round(dist2d(player.x, player.z, x, z) * perM);
 }
 function callTaxi(x, z) {
-  if (player.riding === 'bus' || player.riding === 'transit') { showToast('🚌 你在车上，先下车！', 'red'); return; }
+  if (player.riding === 'bus' || player.riding === 'transit') { showToast(t('taxi_busy'), 'red'); return; }
   const cost = taxiCost(x, z);
-  if (!spendCredits(cost, '打车')) return;
+  if (!spendCredits(cost, t('w_taxi'))) return;
   // 落点吸附到最近道路
   let tx = x, tz = z;
   if (G.city.kind === 'london') {
@@ -2302,7 +2477,7 @@ function callTaxi(x, z) {
   setTimeout(() => {
     [player.x, player.z] = collide(tx, tz);
     fade.style.opacity = 0;
-    showToast(`🚕 出租车把你送到了目的地（-${cost}💰）`);
+    showToast(t('taxi_done', cost));
   }, 550);
 }
 
@@ -2577,38 +2752,130 @@ function renderCluePanel() {
   G.hiders.forEach((h) => {
     const card = document.createElement('div');
     card.className = 'clueCard' + (h.found ? ' found' : '');
-    card.innerHTML = `<span class="bounty">悬赏 ${h.bounty}💰</span><div class="who">${h.emoji} ${h.name}</div><div class="clue">"${h.clue}"</div>`;
+    card.innerHTML = `<span class="bounty">${t('bounty_tag', h.bounty)}</span><div class="who">${h.emoji} ${h.name}</div><div class="clue">"${h.clue}"</div>`;
     list.appendChild(card);
   });
 }
 
-function togglePanel() {
-  G.panelOpen = !G.panelOpen;
-  $('clueList').style.display = G.panelOpen ? '' : 'none';
-  $('panelArrow').textContent = G.panelOpen ? '▾' : '▸';
+/* ============================================================
+ * 浮动窗口系统：拖动 / 缩放 / 最小化 / 关闭 / 恢复托盘
+ * ============================================================ */
+function enableDrag(el, handle) {
+  let drag = false, sx = 0, sy = 0, ox = 0, oy = 0;
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('button')) return;
+    drag = true; sx = e.clientX; sy = e.clientY;
+    const r = el.getBoundingClientRect(); ox = r.left; oy = r.top;
+    el.style.left = ox + 'px'; el.style.top = oy + 'px';
+    el.style.right = 'auto'; el.style.bottom = 'auto';
+    el.style.position = 'absolute'; el.style.margin = '0';
+    handle.setPointerCapture(e.pointerId);
+    e.preventDefault();
+  });
+  handle.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    el.style.left = clamp(ox + e.clientX - sx, 0, innerWidth - 80) + 'px';
+    el.style.top = clamp(oy + e.clientY - sy, 0, innerHeight - 40) + 'px';
+  });
+  handle.addEventListener('pointerup', () => { drag = false; });
 }
-$('panelToggle').addEventListener('click', togglePanel);
+function addResizeHandle(el, onSize) {
+  const h = document.createElement('div');
+  h.className = 'wResize';
+  el.appendChild(h);
+  let drag = false, sx = 0, sy = 0, sw = 0, sh = 0;
+  h.addEventListener('pointerdown', (e) => {
+    drag = true; sx = e.clientX; sy = e.clientY;
+    const r = el.getBoundingClientRect(); sw = r.width; sh = r.height;
+    h.setPointerCapture(e.pointerId);
+    e.preventDefault(); e.stopPropagation();
+  });
+  h.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    onSize(sw + e.clientX - sx, sh + e.clientY - sy);
+  });
+  h.addEventListener('pointerup', () => { drag = false; });
+  return h;
+}
 
-/* 小地图浮动窗口：最小化 / 关闭 / 重开 */
-const MM = { open: true, min: false };
-$('mmMin').addEventListener('click', () => {
-  MM.min = !MM.min;
-  $('minimap').style.display = MM.min ? 'none' : 'block';
-  $('mmMin').textContent = MM.min ? '▢' : '–';
-  $('mmMin').title = MM.min ? '还原' : '最小化';
+const WIN = { mm: { open: true, min: false }, cp: { open: true, min: false }, bm: { min: false } };
+
+function renderDockTray() {
+  const tray = $('dockTray');
+  tray.innerHTML = '';
+  const add = (icon, title, cb) => {
+    const b = document.createElement('button');
+    b.className = 'dockBtn'; b.textContent = icon; b.title = title;
+    b.addEventListener('click', cb);
+    tray.appendChild(b);
+  };
+  if (!WIN.mm.open) add('🗺', t('mm_open'), () => setWinOpen('mm', true));
+  if (!WIN.cp.open) add('🕵️', t('panel_title'), () => setWinOpen('cp', true));
+}
+function setWinOpen(key, open) {
+  WIN[key].open = open;
+  (key === 'mm' ? $('minimapWrap') : $('cluePanel')).classList.toggle('hidden', !open);
+  renderDockTray();
   AudioSys.click();
+}
+function setWinMin(key, min) {
+  WIN[key].min = min;
+  if (key === 'mm') {
+    $('minimap').style.display = min ? 'none' : 'block';
+    $('mmMin').textContent = min ? '▢' : '–';
+    $('mmMin').title = min ? t('mm_restore') : t('mm_min');
+  } else if (key === 'cp') {
+    $('clueList').style.display = min ? 'none' : '';
+    const p = $('cluePanel');
+    if (min) { p.dataset.h = p.style.height || ''; p.style.height = 'auto'; }
+    else p.style.height = p.dataset.h || '';
+    $('cpMin').textContent = min ? '▢' : '–';
+  } else if (key === 'bm') {
+    $('bigMap').style.display = min ? 'none' : 'block';
+    $('mapHint').style.display = min ? 'none' : '';
+    $('mapClose').style.display = min ? 'none' : '';
+    const rh = $('bigMapPanel').querySelector('.wResize');
+    if (rh) rh.style.display = min ? 'none' : 'block';
+    $('bmMin').textContent = min ? '▢' : '–';
+  }
+  ['mm'].forEach(() => {});
+  AudioSys.click();
+}
+function togglePanel() {
+  if (!WIN.cp.open) setWinOpen('cp', true);
+  else setWinMin('cp', !WIN.cp.min);
+}
+$('panelToggle').addEventListener('dblclick', () => setWinMin('cp', !WIN.cp.min));
+$('cpMin').addEventListener('click', () => setWinMin('cp', !WIN.cp.min));
+$('cpClose').addEventListener('click', () => setWinOpen('cp', false));
+$('mmMin').addEventListener('click', () => setWinMin('mm', !WIN.mm.min));
+$('mmClose').addEventListener('click', () => setWinOpen('mm', false));
+$('bmMin').addEventListener('click', () => setWinMin('bm', !WIN.bm.min));
+$('bmClose').addEventListener('click', () => toggleBigMap());
+
+enableDrag($('minimapWrap'), $('minimapBar'));
+enableDrag($('cluePanel'), $('panelToggle'));
+enableDrag($('bigMapPanel'), $('bigMapBar'));
+
+$('clueList').style.flex = '1';
+$('clueList').style.minHeight = '0';
+addResizeHandle($('minimapWrap'), (w, h) => {
+  const s = Math.round(clamp(Math.min(w, h - 34), 150, 430));
+  const c = $('minimap');
+  c.width = c.height = s;
+  if (G.phase === 'seek') drawMap(c.getContext('2d'), s, false);
 });
-$('mmClose').addEventListener('click', () => {
-  MM.open = false;
-  $('minimapWrap').classList.add('hidden');
-  $('mmReopen').classList.remove('hidden');
-  AudioSys.click();
+addResizeHandle($('cluePanel'), (w, h) => {
+  const p = $('cluePanel');
+  p.style.width = clamp(w, 230, 560) + 'px';
+  p.style.height = clamp(h, 110, innerHeight - 30) + 'px';
+  p.style.maxHeight = 'none';
 });
-$('mmReopen').addEventListener('click', () => {
-  MM.open = true;
-  $('minimapWrap').classList.remove('hidden');
-  $('mmReopen').classList.add('hidden');
-  AudioSys.click();
+addResizeHandle($('bigMapPanel'), (w, h) => {
+  const s = Math.round(clamp(Math.min(w - 40, h - 150), 300, 760));
+  const c = $('bigMap');
+  c.width = c.height = s;
+  drawMap(c.getContext('2d'), s, true);
 });
 
 function setPrompt(html) {
@@ -2667,7 +2934,7 @@ function startGame() {
   G.curSeeker = 0;
   G.seekers = [];
   for (let i = 0; i < G.mSeekers; i++) {
-    G.seekers.push({ name: G.mSeekers > 1 ? `寻找者${i + 1}号` : '你', captures: 0, earned: 0 });
+    G.seekers.push({ name: G.mSeekers > 1 ? t('seeker_n', i + 1) : t('you'), captures: 0, earned: 0 });
   }
   $('menu').classList.add('hidden');
   $('endScreen').classList.add('hidden');
@@ -2690,13 +2957,13 @@ function beginHidePhase() {
   flyCam.x = 0; flyCam.y = G.city.kind === 'london' ? 240 : 110; flyCam.z = G.city.kind === 'london' ? 200 : 90;
   player.yaw = 0; player.pitch = -0.85;
   makeSpotMarkers();
-  showTurnOverlay(`🙈 躲藏者 ${G.hideIdx + 1} 号请就位`, '其他玩家请回避屏幕！飞到城市里挑一个青色圆环藏身', () => {
+  showTurnOverlay(t('hide_turn', G.hideIdx + 1), t('hide_turn_sub'), () => {
     updateHideBanner();
   });
 }
 
 function updateHideBanner() {
-  $('hideBannerText').textContent = `🙈 躲藏者 ${G.hideIdx + 1}/${G.nHiders} 号正在选点`;
+  $('hideBannerText').textContent = t('hide_banner', G.hideIdx + 1, G.nHiders);
 }
 
 function makeSpotMarkers() {
@@ -2741,7 +3008,7 @@ function pickSpotAt(cx, cy) {
 function openClueModal(spot) {
   AudioSys.click();
   $('clueModal').classList.remove('hidden');
-  $('spotDesc').innerHTML = `你选中的藏身点：<b style="color:#ffd166">${spot.label}</b>（${TYPE_NAME[spot.blockType] || '某处'}）<br>请写一条<b>不含任何地点信息</b>的线索——禁止方位词、地名、数字。`;
+  $('spotDesc').innerHTML = t('clue_desc', spot.label, TYPE_NAME[spot.blockType] || '');
   const chips = $('hintChips');
   chips.innerHTML = '';
   spotHints(spot).forEach((h) => {
@@ -2750,7 +3017,7 @@ function openClueModal(spot) {
     c.textContent = '+ ' + h.txt;
     c.addEventListener('click', () => {
       const ta = $('clueInput');
-      ta.value = ta.value ? ta.value.replace(/[。；;]?\s*$/, '') + '；' + h.txt : h.txt;
+      ta.value = ta.value ? ta.value.replace(/[。.；;]?\s*$/, '') + (LANG === 'zh' ? '；' : '; ') + h.txt : h.txt;
     });
     chips.appendChild(c);
   });
@@ -2772,8 +3039,8 @@ $('clueOk').addEventListener('click', () => {
   const spot = G.pendingSpot;
   const bounty = parseInt($('bountyRange').value);
   const [nm, emoji] = HIDER_NAMES[G.hideIdx % HIDER_NAMES.length];
-  const label = `躲藏者${G.hideIdx + 1}号`;
-  G.hiders.push(createHider(spot, `${label}·${nm}`, emoji, text + '。', bounty, true, label));
+  const label = t('hider_n', G.hideIdx + 1);
+  G.hiders.push(createHider(spot, `${label}·${nm}`, emoji, text + (LANG === 'zh' ? '。' : '.'), bounty, true, label));
   closeClueModal();
   AudioSys.coin();
   // 移除被占的标记
@@ -2783,11 +3050,11 @@ $('clueOk').addEventListener('click', () => {
   if (G.hideIdx < G.nHiders) {
     flyCam.x = 0; flyCam.y = G.city.kind === 'london' ? 240 : 110; flyCam.z = G.city.kind === 'london' ? 200 : 90;
     player.yaw = R(0, Math.PI * 2); player.pitch = -0.85;
-    showTurnOverlay(`🙈 躲藏者 ${G.hideIdx + 1} 号请就位`, '其他玩家请回避屏幕！', updateHideBanner);
+    showTurnOverlay(t('hide_turn', G.hideIdx + 1), t('hide_turn_sub'), updateHideBanner);
   } else {
     clearSpotMarkers();
     $('hideBanner').classList.add('hidden');
-    showTurnOverlay('🔎 寻找阶段开始！', '躲藏者们请把键盘交给寻找者', beginSeekPhase);
+    showTurnOverlay(t('seek_go'), t('seek_go_sub'), beginSeekPhase);
   }
 });
 
@@ -2817,12 +3084,12 @@ function beginSeekPhase() {
   updateHUD();
   renderCluePanel();
   if (G.mode === 'ai') {
-    showToast(`🕵️ ${G.nHiders} 位躲藏者藏好了！读读左侧线索开始寻找吧`, 'gold');
+    showToast(t('toast_ai_ready', G.nHiders), 'gold');
   } else {
-    showToast('🕵️ 所有躲藏者已就位！寻找者出发！', 'gold');
+    showToast(t('toast_hot_ready'), 'gold');
   }
   if (G.seekers.length > 1) {
-    showTurnOverlay(`🧢 ${G.seekers[0].name} 先上场`, '每 75 秒轮换一位寻找者', null);
+    showTurnOverlay(t('turn_first', G.seekers[0].name), t('turn_rotate'), null);
   }
   chimeTimer = 15;
 }
@@ -2842,7 +3109,7 @@ function rotateSeeker() {
   G.curSeeker = (G.curSeeker + 1) % G.seekers.length;
   G.turnTimer = 75;
   AudioSys.busDing();
-  showTurnOverlay(`🧢 轮到 ${G.seekers[G.curSeeker].name}`, '快去接手键盘！', null);
+  showTurnOverlay(t('turn_next', G.seekers[G.curSeeker].name), t('turn_next_sub'), null);
   updateHUD();
 }
 
@@ -2852,24 +3119,24 @@ function endGame(allFound) {
   $('hud').classList.add('hidden');
   const bonus = allFound ? Math.round(G.timeLeft) : 0;
   const finalScore = G.credits + bonus;
-  $('endTitle').innerHTML = allFound ? '🏆 大获全胜！' : '⏰ 时间到！';
+  $('endTitle').innerHTML = allFound ? t('end_win') : t('end_lose');
   $('endSub').textContent = allFound
-    ? `所有躲藏者都被找到了！剩余时间奖励 +${bonus}💰`
-    : `还有 ${G.hiders.filter((h) => !h.found).length} 位躲藏者没被找到，他们赢了这一局`;
-  let html = `<table class="result"><tr><th>躲藏者</th><th>悬赏</th><th>结果</th></tr>`;
+    ? t('end_win_sub', bonus)
+    : t('end_lose_sub', G.hiders.filter((h) => !h.found).length);
+  let html = `<table class="result"><tr><th>${t('th_hider')}</th><th>${t('th_bounty')}</th><th>${t('th_result')}</th></tr>`;
   G.hiders.forEach((h) => {
     html += `<tr><td>${h.emoji} ${h.name}</td><td class="gold">${h.bounty}💰</td>` +
-      (h.found ? `<td class="teal">被 ${h.foundBy} 找到</td>` : `<td class="redt">成功隐藏到最后 🎖</td>`) + `</tr>`;
+      (h.found ? `<td class="teal">${t('found_by', h.foundBy)}</td>` : `<td class="redt">${t('survived')}</td>`) + `</tr>`;
   });
   html += `</table>`;
   if (G.seekers.length > 1) {
-    html += `<table class="result"><tr><th>寻找者</th><th>抓到</th><th>赚取</th></tr>`;
+    html += `<table class="result"><tr><th>${t('th_seeker')}</th><th>${t('th_caught')}</th><th>${t('th_earned')}</th></tr>`;
     [...G.seekers].sort((a, b) => b.earned - a.earned).forEach((s) => {
-      html += `<tr><td>🧢 ${s.name}</td><td>${s.captures} 人</td><td class="gold">${s.earned}💰</td></tr>`;
+      html += `<tr><td>🧢 ${s.name}</td><td>${t('persons', s.captures)}</td><td class="gold">${s.earned}💰</td></tr>`;
     });
     html += `</table>`;
   }
-  html += `<div style="font-size:15px;line-height:2">共获得 <b class="teal">${G.earned}💰</b> · 花费 <b class="redt">${G.spent}💰</b> · 最终结余 <b class="gold" style="font-size:20px">${finalScore}💰</b></div>`;
+  html += `<div style="font-size:15px;line-height:2">${t('end_total', G.earned, G.spent, finalScore)}</div>`;
   $('endStats').innerHTML = html;
   $('endScreen').classList.remove('hidden');
   if (allFound) AudioSys.capture();
@@ -2895,7 +3162,7 @@ $('modeHot').addEventListener('click', () => { $('modeHot').classList.add('sel')
 /* 管理员：世界倍速 */
 {
   const slider = $('simSpeed'), val = $('simSpeedVal');
-  const renderSim = () => { val.textContent = `${SIM.mul}× 现实`; };
+  const renderSim = () => { val.textContent = t('admin_val', SIM.mul); };
   slider.value = SIM.mul;
   renderSim();
   slider.addEventListener('input', () => {
@@ -2913,7 +3180,7 @@ document.querySelectorAll('.cityCard').forEach((card) => {
       AudioSys.deny();
       const small = card.querySelector('small');
       const orig = small.textContent;
-      small.textContent = '开发中，敬请期待!';
+      small.textContent = t('city_wip');
       setTimeout(() => { small.textContent = orig; }, 1200);
       return;
     }
@@ -3009,8 +3276,8 @@ function tick() {
     miniTimer -= dt;
     if (miniTimer <= 0) {
       miniTimer = 0.12;
-      if (MM.open && !MM.min) drawMap($('minimap').getContext('2d'), 220, false);
-      if (bigMapOpen) drawMap($('bigMap').getContext('2d'), 560, true);
+      if (WIN.mm.open && !WIN.mm.min) drawMap($('minimap').getContext('2d'), $('minimap').width, false);
+      if (bigMapOpen) drawMap($('bigMap').getContext('2d'), $('bigMap').width, true);
     }
   } else if (G.phase === 'end') {
     menuOrbit += dt * 0.05;
@@ -3036,47 +3303,116 @@ function updateInteractPrompt() {
   const near = nearestActiveHider();
   const onVehicle = player.riding === 'bus' || player.riding === 'transit';
   if (near && near.d < 3.2 && !onVehicle) {
-    setPrompt(`🫳 按 <kbd>E</kbd> 抓住 ${near.hider.emoji} ${near.hider.name}！`);
+    setPrompt(t('p_catch', near.hider.emoji, near.hider.name));
     return;
   }
   if (G.city.kind === 'london') {
     if (player.riding === 'transit') {
       const v = player.tv;
       setPrompt(v && v.state === 'dwell'
-        ? `🚉 <b>${v.curStop ? v.curStop.name : ''}</b> 到站！按 <kbd>E</kbd> 下车`
-        : `${v && v.kind === 'train' ? '🚇' : '🚌'} ${v ? v.line : ''} 行驶中…`);
+        ? t('p_transit_arr', v.curStop ? v.curStop.name : '')
+        : t('p_transit_run', v && v.kind === 'train' ? '🚇' : '🚌', v ? v.line : ''));
       return;
     }
     const v = transitNear();
     if (v && player.riding === null) {
-      setPrompt(`${v.kind === 'train' ? '🚇' : '🚌'} 按 <kbd>E</kbd> 乘坐 ${v.line}（${v.cost}💰）`);
+      setPrompt(t('p_transit_board', v.kind === 'train' ? '🚇' : '🚌', v.line, v.cost));
       return;
     }
   } else {
     const bus = G.city.bus;
     if (player.riding === 'bus') {
-      setPrompt(bus.dwell > 0 ? '🚌 到站！按 <kbd>E</kbd> 下车' : '🚌 公交行驶中…');
+      setPrompt(bus.dwell > 0 ? t('p_bus_arr') : t('p_bus_run'));
       return;
     }
     const busD = dist2d(player.x, player.z, bus.mesh.position.x, bus.mesh.position.z);
     if (busD < 6 && bus.dwell > 0 && player.riding !== 'bike') {
-      setPrompt(`🚌 按 <kbd>E</kbd> 上公交（${COST.bus}💰）`);
+      setPrompt(t('p_bus_board', COST.bus));
       return;
     }
   }
   const st = G.city.bikeStations.find((s) => dist2d(player.x, player.z, s.x, s.z) < 7);
   if (st && player.riding === null) {
-    setPrompt(`🚲 按 <kbd>B</kbd> 租单车（${COST.bike}💰）`);
+    setPrompt(t('p_bike', COST.bike));
     return;
   }
   if (near && near.d < 14) {
-    setPrompt('👀 好像有窸窸窣窣的声音……就在附近！');
+    setPrompt(t('p_rustle'));
     return;
   }
   setPrompt('');
 }
 
+/* ---- 静态界面文案（i18n） ---- */
+function applyStaticLang() {
+  document.title = LANG === 'zh' ? 'CityTwin · 城市孪生躲猫猫' : 'CityTwin · City-Twin Hide & Seek';
+  const q = (sel) => document.querySelector(sel);
+  q('#menu .sub').innerHTML = t('sub');
+  q('#modeAI h3').textContent = t('mode_ai_h');
+  q('#modeAI p').textContent = t('mode_ai_p');
+  q('#modeHot h3').textContent = t('mode_hot_h');
+  q('#modeHot p').textContent = t('mode_hot_p');
+  $('lblHiders').textContent = t('cfg_hiders');
+  $('lblSeekers').textContent = t('cfg_seekers');
+  $('lblDiff').textContent = t('cfg_diff');
+  $('lblTime').textContent = t('cfg_time');
+  [...$('difficulty').options].forEach((o, i) => { o.text = t('diff')[i]; });
+  [...$('timeLimit').options].forEach((o, i) => { o.text = t('times')[i]; });
+  $('startBtn').textContent = t('btn_start');
+  $('controlsHelp').innerHTML = t('help');
+  $('lblAdmin').textContent = t('admin_label');
+  $('adminHint').textContent = t('admin_hint');
+  // 城市卡
+  const flags = { istanbul: '🇹🇷', dubai: '🇦🇪', shanghai: '🇨🇳', newyork: '🇺🇸' };
+  document.querySelectorAll('.cityCard').forEach((card) => {
+    const c = card.dataset.city;
+    if (c === 'town') card.innerHTML = `${t('city_town')}<small>${t('city_town_sub')}</small>`;
+    else if (c === 'london') card.innerHTML = `🇬🇧 ${t('city_names').london}<small>${t('city_london_sub')}</small><span class="new">NEW</span>`;
+    else card.innerHTML = `${flags[c]} ${t('city_names')[c]}<small>${t('city_soon')}</small>`;
+  });
+  // HUD
+  $('smCredits').textContent = t('hud_credits');
+  $('smTime').textContent = t('hud_time');
+  $('smFound').textContent = t('hud_found');
+  $('smSeeker').textContent = t('hud_seeker');
+  $('panelTitle').textContent = t('panel_title');
+  $('mmTitle').textContent = t('mm_title');
+  $('mmMin').title = t('mm_min'); $('mmClose').title = t('mm_close');
+  $('cpMin').title = t('mm_min'); $('cpClose').title = t('mm_close');
+  $('bmMin').title = t('mm_min'); $('bmClose').title = t('mm_close');
+  const abKeys = { radar: ['ab_radar', 'R'], map: ['ab_taxi', 'M'], bike: ['ab_bike', 'B'], view: ['ab_view', 'V'], pause: ['ab_menu', 'Esc'] };
+  document.querySelectorAll('.abtn').forEach((b) => {
+    const [k, kbd] = abKeys[b.dataset.act];
+    b.innerHTML = `${t(k)} <kbd>${kbd}</kbd>`;
+  });
+  $('hideHelp').innerHTML = t('hide_help');
+  $('clueH2').textContent = t('clue_h2');
+  $('chipsHint').textContent = t('clue_chips');
+  $('clueInput').placeholder = t('clue_ph');
+  $('lblBounty').textContent = t('clue_bounty');
+  $('clueCancel').textContent = t('clue_cancel');
+  $('clueOk').textContent = t('clue_ok');
+  $('mapHint').innerHTML = t('map_hint') + '<span id="mapCost">--</span>';
+  $('mapClose').textContent = t('map_close');
+  $('bmTitle').textContent = t('map_title');
+  q('#pauseMenu h2').textContent = t('pause_h');
+  $('resumeBtn').textContent = t('pause_resume');
+  $('quitBtn').textContent = t('pause_quit');
+  $('againBtn').textContent = t('end_again');
+  $('backMenuBtn').textContent = t('end_back');
+  // “已找到”角标（CSS content）
+  const st = document.createElement('style');
+  st.textContent = `.clueCard.found .who::after { content: "${t('found_tag')}"; }`;
+  document.head.appendChild(st);
+  // 语言按钮
+  document.querySelectorAll('.langBtn').forEach((b) => {
+    b.classList.toggle('on', b.dataset.lang === LANG);
+    b.addEventListener('click', () => { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); });
+  });
+}
+
 /* ---- 启动 ---- */
+applyStaticLang();
 resetWorld();
 updateHUD();
 tick();

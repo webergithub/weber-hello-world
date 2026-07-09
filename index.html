@@ -30,7 +30,7 @@
   label { font-size:14px; color:#c8d2e0; }
 
   /* ---------- 主菜单 ---------- */
-  #menu .panel { width:min(560px, 92vw); text-align:center; }
+  #menu .panel { width:min(560px, 92vw); text-align:center; position:relative; }
   #menu h1 { font-size:34px; letter-spacing:2px; margin-bottom:4px;
     background:linear-gradient(90deg,#ffd166,#22c1a3); -webkit-background-clip:text; background-clip:text; color:transparent; }
   #menu .sub { color:#9fb0c8; font-size:14px; margin-bottom:18px; }
@@ -74,6 +74,21 @@
     border:1px solid rgba(255,255,255,.22); background:rgba(13,20,35,.85); color:#eef2f7;
     font-size:20px; cursor:pointer; pointer-events:auto; box-shadow:0 8px 24px rgba(0,0,0,.4); }
   #mmReopen:hover { border-color:#ffd166; }
+  .wResize { position:absolute; right:1px; bottom:1px; width:15px; height:15px; cursor:nwse-resize;
+    border-right:3px solid rgba(255,255,255,.4); border-bottom:3px solid rgba(255,255,255,.4);
+    border-radius:3px; z-index:5; }
+  #dockTray { position:absolute; top:14px; right:246px; display:flex; gap:6px; pointer-events:auto; }
+  .dockBtn { width:42px; height:42px; border-radius:12px; border:1px solid rgba(255,255,255,.22);
+    background:rgba(13,20,35,.85); color:#eef2f7; font-size:19px; cursor:pointer;
+    box-shadow:0 8px 24px rgba(0,0,0,.4); }
+  .dockBtn:hover { border-color:#ffd166; }
+  #langSwitch { position:absolute; top:14px; right:16px; display:flex; gap:4px; }
+  .langBtn { border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#c8d2e0;
+    border-radius:8px; padding:4px 10px; font-size:12.5px; cursor:pointer; font-family:inherit; font-weight:700; }
+  .langBtn.on { background:#ffd166; color:#0b1220; border-color:#ffd166; }
+  .winBar { display:flex; justify-content:space-between; align-items:center; padding:5px 6px 5px 12px;
+    font-size:12.5px; font-weight:700; color:#c8d2e0; border-bottom:1px solid rgba(255,255,255,.1);
+    user-select:none; cursor:move; }
   #cluePanel { position:absolute; left:14px; top:96px; width:300px; max-height:calc(100% - 220px);
     background:rgba(13,20,35,.82); border:1px solid rgba(255,255,255,.12); border-radius:12px;
     backdrop-filter:blur(6px); pointer-events:auto; display:flex; flex-direction:column; }
@@ -156,14 +171,14 @@
   <!-- HUD -->
   <div id="hud" class="hidden">
     <div id="topbar">
-      <div class="stat">💰 <span id="credits">0</span><small>信用点</small></div>
-      <div class="stat">⏱ <span id="timer">0:00</span><small>剩余时间</small></div>
-      <div class="stat">🔎 <span id="found">0/0</span><small>已找到</small></div>
-      <div class="stat" id="seekerStat">🧢 <span id="seekerName">-</span><small>当前寻找者</small></div>
+      <div class="stat">💰 <span id="credits">0</span><small id="smCredits">信用点</small></div>
+      <div class="stat">⏱ <span id="timer">0:00</span><small id="smTime">剩余时间</small></div>
+      <div class="stat">🔎 <span id="found">0/0</span><small id="smFound">已找到</small></div>
+      <div class="stat" id="seekerStat">🧢 <span id="seekerName">-</span><small id="smSeeker">当前寻找者</small></div>
     </div>
     <div id="minimapWrap">
-      <div id="minimapBar">
-        <span>🗺 小地图</span>
+      <div id="minimapBar" class="winBar">
+        <span id="mmTitle">🗺 小地图</span>
         <span>
           <button class="mmBtn" id="mmMin" title="最小化">–</button>
           <button class="mmBtn" id="mmClose" title="关闭">×</button>
@@ -171,9 +186,9 @@
       </div>
       <canvas id="minimap" width="220" height="220"></canvas>
     </div>
-    <button id="mmReopen" class="hidden" title="打开小地图">🗺</button>
+    <div id="dockTray"></div>
     <div id="cluePanel">
-      <header id="panelToggle"><span>🕵️ 躲藏者线索</span><span id="panelArrow">▾</span></header>
+      <header id="panelToggle" class="winBar" style="border-radius:12px 12px 0 0;"><span id="panelTitle">🕵️ 躲藏者线索</span><span><button class="mmBtn" id="cpMin" title="最小化">–</button><button class="mmBtn" id="cpClose" title="关闭">×</button></span></header>
       <div id="clueList"></div>
     </div>
     <div id="toasts"></div>
@@ -191,12 +206,13 @@
   <!-- 躲藏阶段横幅 -->
   <div id="hideBanner" class="hidden">
     <b id="hideBannerText">躲藏阶段</b>
-    <div>WASD 飞行 · <kbd>空格</kbd> 上升 · <kbd>Z</kbd> 下降 · 拖动鼠标转视角 · 点击地上的 <span style="color:#22c1a3">青色圆环</span> 选择藏身点</div>
+    <div id="hideHelp">WASD 飞行 · <kbd>空格</kbd> 上升 · <kbd>Z</kbd> 下降 · 拖动鼠标转视角 · 点击地上的 <span style="color:#22c1a3">青色光柱</span> 选择藏身点</div>
   </div>
 
   <!-- 主菜单 -->
   <div id="menu" class="overlay">
     <div class="panel">
+      <div id="langSwitch"><button class="langBtn" data-lang="zh">中文</button><button class="langBtn" data-lang="en">EN</button></div>
       <h1>CityTwin</h1>
       <div class="sub">城市孪生躲猫猫 · 真实地图数据 3D 城市 · n 人藏，m 人找 · 线索 + 悬赏 + 信用点</div>
       <div class="cityRow" id="cityRow">
@@ -218,22 +234,22 @@
         </div>
       </div>
       <div class="cfgRow">
-        <div class="cfgItem"><label>躲藏 n =</label>
+        <div class="cfgItem"><label id="lblHiders">躲藏 n =</label>
           <select id="numHiders"><option>1</option><option>2</option><option selected>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></div>
-        <div class="cfgItem"><label>寻找 m =</label>
+        <div class="cfgItem"><label id="lblSeekers">寻找 m =</label>
           <select id="numSeekers"><option selected>1</option><option>2</option><option>3</option><option>4</option></select></div>
-        <div class="cfgItem"><label>难度</label>
+        <div class="cfgItem"><label id="lblDiff">难度</label>
           <select id="difficulty"><option value="easy">简单</option><option value="normal" selected>普通</option><option value="hard">困难</option></select></div>
-        <div class="cfgItem"><label>时限</label>
+        <div class="cfgItem"><label id="lblTime">时限</label>
           <select id="timeLimit"><option value="300">5 分钟</option><option value="480" selected>8 分钟</option><option value="720">12 分钟</option></select></div>
       </div>
       <div class="cfgRow" style="background:rgba(255,255,255,.04); border-radius:10px; padding:8px 14px; margin:8px auto; max-width:430px;">
         <div class="cfgItem" style="flex:1;">
-          <label>⚙️ 管理员 · 世界倍速</label>
+          <label id="lblAdmin">⚙️ 管理员 · 世界倍速</label>
           <input type="range" id="simSpeed" min="1" max="8" step="1" value="3" style="flex:1; accent-color:#ffd166;">
           <b id="simSpeedVal" style="color:#ffd166; min-width:70px;">3× 现实</b>
         </div>
-        <small style="color:#8fa2bc; width:100%; text-align:center;">人物与交通工具的移动速度 = 现实速度 × n（默认 3）</small>
+        <small id="adminHint" style="color:#8fa2bc; width:100%; text-align:center;">人物与交通工具的移动速度 = 现实速度 × n（默认 3）</small>
       </div>
       <button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
       <div id="controlsHelp">
@@ -246,14 +262,14 @@
   <!-- 线索编辑弹窗（好友模式） -->
   <div id="clueModal" class="overlay hidden">
     <div class="panel">
-      <h2>✍️ 发布你的线索</h2>
+      <h2 id="clueH2">✍️ 发布你的线索</h2>
       <div id="spotDesc"></div>
-      <div style="font-size:13px;color:#9fb0c8;margin-bottom:6px;">点击灵感标签可以直接加进线索：</div>
+      <div id="chipsHint" style="font-size:13px;color:#9fb0c8;margin-bottom:6px;">点击灵感标签可以直接加进线索：</div>
       <div id="hintChips"></div>
       <textarea id="clueInput" placeholder="写一条不暴露地点的线索，比如：我能听到流水声，身边有一股淡淡的青草味…"></textarea>
       <div id="clueError"></div>
       <div class="bountyRow">
-        <label>悬赏</label>
+        <label id="lblBounty">悬赏</label>
         <input type="range" id="bountyRange" min="10" max="100" step="5" value="40">
         <span id="bountyVal">40 💰</span>
       </div>
@@ -266,7 +282,8 @@
 
   <!-- 大地图 / 打车 -->
   <div id="bigMapWrap" class="overlay hidden">
-    <div class="panel">
+    <div class="panel" id="bigMapPanel" style="position:relative; padding-top:0;">
+      <div class="winBar" id="bigMapBar" style="margin:0 -18px 10px; padding:8px 10px 8px 14px;"><span id="bmTitle">🚕 出租车地图</span><span><button class="mmBtn" id="bmMin" title="最小化">–</button><button class="mmBtn" id="bmClose" title="关闭">×</button></span></div>
       <canvas id="bigMap" width="560" height="560"></canvas>
       <div id="mapHint">🚕 点击地图任意位置打车前往 —— 预计费用 <span id="mapCost">--</span></div>
       <button class="btn secondary" id="mapClose">取消 (M)</button>
