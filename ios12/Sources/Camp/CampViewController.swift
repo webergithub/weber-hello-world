@@ -1,11 +1,10 @@
 import UIKit
 
-// 营地：基于蓝牙 Mesh 的群聊（文字）。无移动网络/WiFi 也能互通。iOS 12 可用。
-final class CampViewController: UIViewController, UITableViewDataSource, BleMeshDelegate, UITextFieldDelegate {
+// 营地：基于共享蓝牙 Mesh 的群聊（文字）。无移动网络/WiFi 也能互通。iOS 12 可用。
+final class CampViewController: UIViewController, UITableViewDataSource, UITextFieldDelegate {
 
     private struct ChatMsg: Codable { let mid: String; let n: String; let t: String; let ts: Double }
 
-    private let mesh = BleMesh()
     private let table = UITableView(frame: .zero, style: .plain)
     private let inputBar = UIView()
     private let field = UITextField()
@@ -14,19 +13,16 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
 
     private var messages: [ChatMsg] = []
     private var seenMids = Set<String>()
-    private var myName: String = ""
-    private let myId = UUID().uuidString
+    private var myName: String = Identity.nick
 
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "营地"
         view.backgroundColor = .white
-        loadNick()
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "改昵称", style: .plain, target: self, action: #selector(renameNick))
-        updatePeersTitle(0)
+        updatePeersTitle(MeshBus.shared.peerCount)
 
-        // 表格
         table.dataSource = self
         table.separatorStyle = .none
         table.allowsSelection = false
@@ -35,7 +31,6 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
         table.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(table)
 
-        // 输入栏
         inputBar.backgroundColor = UIColor(white: 0.97, alpha: 1)
         inputBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(inputBar)
@@ -76,19 +71,16 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardChange(_:)),
                                                name: UIResponder.keyboardWillChangeFrameNotification, object: nil)
 
-        mesh.delegate = self
-        mesh.start()
+        // 共享 Mesh：启动 + 订阅聊天 + 邻居数
+        MeshBus.shared.start()
+        MeshBus.shared.subscribe(MeshBus.kindChat) { [weak self] data in
+            guard let self = self, let msg = try? JSONDecoder().decode(ChatMsg.self, from: data) else { return }
+            self.appendIfNew(msg)
+        }
+        MeshBus.shared.onPeers { [weak self] count in self?.updatePeersTitle(count) }
     }
 
     // MARK: - 昵称
-    private func loadNick() {
-        if let n = UserDefaults.standard.string(forKey: "trailmate.nick"), !n.isEmpty {
-            myName = n
-        } else {
-            myName = "旅友" + String(format: "%03d", Int(arc4random_uniform(1000)))
-            UserDefaults.standard.set(myName, forKey: "trailmate.nick")
-        }
-    }
     @objc private func renameNick() {
         let a = UIAlertController(title: "改昵称", message: nil, preferredStyle: .alert)
         a.addTextField { $0.text = self.myName }
@@ -96,7 +88,7 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
         a.addAction(UIAlertAction(title: "保存", style: .default) { [weak self] _ in
             guard let self = self, let n = a.textFields?.first?.text?.trimmingCharacters(in: .whitespaces), !n.isEmpty else { return }
             self.myName = n
-            UserDefaults.standard.set(n, forKey: "trailmate.nick")
+            Identity.nick = n
         })
         present(a, animated: true)
     }
@@ -110,16 +102,14 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
     @objc private func sendTapped() {
         guard let text = field.text?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return }
         let msg = ChatMsg(mid: UUID().uuidString, n: myName, t: text, ts: Date().timeIntervalSince1970)
-        appendIfNew(msg, mine: true)
-        if let data = try? JSONEncoder().encode(msg) { mesh.send(data) }
+        appendIfNew(msg)
+        if let data = try? JSONEncoder().encode(msg) { MeshBus.shared.send(MeshBus.kindChat, data) }
         field.text = ""
     }
 
-    func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-        sendTapped(); return true
-    }
+    func textFieldShouldReturn(_ textField: UITextField) -> Bool { sendTapped(); return true }
 
-    private func appendIfNew(_ msg: ChatMsg, mine: Bool) {
+    private func appendIfNew(_ msg: ChatMsg) {
         if seenMids.contains(msg.mid) { return }
         seenMids.insert(msg.mid)
         messages.append(msg)
@@ -127,15 +117,6 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
         if !messages.isEmpty {
             table.scrollToRow(at: IndexPath(row: messages.count - 1, section: 0), at: .bottom, animated: true)
         }
-    }
-
-    // MARK: - BleMeshDelegate
-    func bleMesh(_ mesh: BleMesh, didReceive payload: Data) {
-        guard let msg = try? JSONDecoder().decode(ChatMsg.self, from: payload) else { return }
-        appendIfNew(msg, mine: false)
-    }
-    func bleMeshDidUpdatePeers(_ count: Int) {
-        updatePeersTitle(count)
     }
 
     // MARK: - 键盘
@@ -151,9 +132,7 @@ final class CampViewController: UIViewController, UITableViewDataSource, BleMesh
     }
 
     // MARK: - UITableViewDataSource
-    func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int {
-        messages.isEmpty ? 1 : messages.count
-    }
+    func tableView(_ t: UITableView, numberOfRowsInSection s: Int) -> Int { messages.isEmpty ? 1 : messages.count }
     func tableView(_ t: UITableView, cellForRowAt ip: IndexPath) -> UITableViewCell {
         let cell = t.dequeueReusableCell(withIdentifier: "c", for: ip)
         cell.textLabel?.numberOfLines = 0
