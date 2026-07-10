@@ -440,6 +440,102 @@ function windowTexture(repX, repY) {
   return tex;
 }
 
+
+/* ---------------- 真实感程序化立面纹理 ---------------- */
+function makeNoiseTexture(baseCss, dotAlpha, dotCount) {
+  const c = document.createElement('canvas');
+  c.width = 128; c.height = 128;
+  const x = c.getContext('2d');
+  x.fillStyle = baseCss; x.fillRect(0, 0, 128, 128);
+  for (let i = 0; i < dotCount; i++) {
+    const l = rng() < 0.5;
+    x.fillStyle = `rgba(${l ? '255,255,255' : '0,0,0'},${rng() * dotAlpha})`;
+    x.fillRect(rng() * 128 | 0, rng() * 128 | 0, 1 + rng() * 2, 1 + rng() * 2);
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.encoding = THREE.sRGBEncoding;
+  return tex;
+}
+
+function makeFacadeTexture(style, floors, bays, litRatio) {
+  const W = 128, H = 256;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const x = c.getContext('2d');
+  const base = { brick: '#8a5a48', stone: '#cfc3a8', glass: '#8ba3b5', concrete: '#9b9b98' }[style] || '#9b9b98';
+  x.fillStyle = base; x.fillRect(0, 0, W, H);
+
+  if (style === 'brick') {
+    for (let yy = 0; yy < H; yy += 6) { x.fillStyle = 'rgba(30,10,5,0.22)'; x.fillRect(0, yy, W, 1); }
+    for (let yy = 0; yy < H; yy += 6) {
+      for (let xx = (yy % 12 ? 0 : 8); xx < W; xx += 16) { x.fillStyle = 'rgba(30,10,5,0.18)'; x.fillRect(xx, yy, 1, 6); }
+    }
+    for (let i = 0; i < 150; i++) {
+      x.fillStyle = `rgba(${rng() < 0.5 ? '255,235,220' : '60,25,15'},${0.04 + rng() * 0.07})`;
+      x.fillRect((rng() * 8 | 0) * 16 + 1, (rng() * 42 | 0) * 6 + 1, 14, 5);
+    }
+  } else if (style === 'stone') {
+    for (let yy = 20; yy < H; yy += 26) { x.fillStyle = 'rgba(80,70,50,0.28)'; x.fillRect(0, yy, W, 2); }
+    for (let i = 0; i < 60; i++) {
+      x.fillStyle = `rgba(${rng() < 0.5 ? '255,250,235' : '90,80,60'},${rng() * 0.06})`;
+      x.fillRect(rng() * W | 0, rng() * H | 0, 10 + rng() * 20, 4 + rng() * 8);
+    }
+    x.fillStyle = 'rgba(70,60,45,0.35)'; x.fillRect(0, H - 30, W, 30); // 基座
+  } else if (style === 'concrete') {
+    for (let i = 0; i < 24; i++) {
+      x.fillStyle = `rgba(60,60,58,${0.04 + rng() * 0.08})`;
+      const sx = rng() * W | 0;
+      x.fillRect(sx, 0, 1 + rng() * 3, H);
+    }
+    for (let i = 0; i < 30; i++) {
+      x.fillStyle = `rgba(40,42,40,${rng() * 0.1})`;
+      x.fillRect(rng() * W | 0, rng() * H | 0, 6 + rng() * 26, 3 + rng() * 14);
+    }
+  }
+
+  if (style === 'glass') {
+    // 玻璃幕墙：整面分格
+    const cols = Math.max(3, bays * 2), rows = Math.max(4, floors);
+    const cw = W / cols, rh = H / rows;
+    for (let r = 0; r < rows; r++) for (let col = 0; col < cols; col++) {
+      const grd = x.createLinearGradient(0, r * rh, 0, (r + 1) * rh);
+      const bright = 0.75 + rng() * 0.5;
+      if (rng() < litRatio * 0.4) { grd.addColorStop(0, '#ffe3b0'); grd.addColorStop(1, '#e8b878'); }
+      else {
+        grd.addColorStop(0, `rgba(${185 * bright | 0},${208 * bright | 0},${226 * bright | 0},1)`);
+        grd.addColorStop(1, `rgba(${92 * bright | 0},${112 * bright | 0},${128 * bright | 0},1)`);
+      }
+      x.fillStyle = grd;
+      x.fillRect(col * cw + 1, r * rh + 1, cw - 2, rh - 2);
+    }
+    for (let col = 0; col <= cols; col++) { x.fillStyle = 'rgba(235,240,245,0.5)'; x.fillRect(col * cw, 0, 1, H); }
+  } else {
+    // 窗洞：floors 排 × bays 列
+    const mTop = 16, mBot = 14, mSide = 9;
+    const gw = (W - mSide * 2) / bays, gh = (H - mTop - mBot) / floors;
+    for (let r = 0; r < floors; r++) for (let col = 0; col < bays; col++) {
+      const wx = mSide + col * gw + gw * 0.18, wy = mTop + r * gh + gh * 0.18;
+      const ww = gw * 0.64, wh = gh * 0.6;
+      x.fillStyle = '#23282e'; x.fillRect(wx - 1.5, wy - 1.5, ww + 3, wh + 3); // 窗框
+      if (rng() < litRatio) {
+        x.fillStyle = rng() < 0.5 ? '#ffdca4' : '#f2c37e';
+        x.fillRect(wx, wy, ww, wh);
+      } else {
+        const grd = x.createLinearGradient(0, wy, 0, wy + wh);
+        grd.addColorStop(0, '#b7cddd'); grd.addColorStop(1, '#57707f');
+        x.fillStyle = grd; x.fillRect(wx, wy, ww, wh);
+      }
+      x.fillStyle = 'rgba(255,255,255,0.35)'; x.fillRect(wx - 2, wy + wh + 1.5, ww + 4, 2); // 窗台
+    }
+  }
+  x.fillStyle = 'rgba(30,30,32,0.5)'; x.fillRect(0, 0, W, 5); // 檐口
+  const tex = new THREE.CanvasTexture(c);
+  tex.encoding = THREE.sRGBEncoding;
+  tex.anisotropy = 4;
+  return tex;
+}
+
 /* ============================================================
  * 城市生成
  * ============================================================ */
@@ -1079,7 +1175,9 @@ function genLondon() {
   const base = new THREE.Mesh(new THREE.PlaneGeometry(W + 700, H + 700), lambert(0x8fa878));
   base.rotation.x = -Math.PI / 2; base.position.y = -0.08; base.receiveShadow = true;
   g.add(base);
-  const urban = new THREE.Mesh(new THREE.PlaneGeometry(W, H), lambert(0x9da0a6));
+  const urbanTex = makeNoiseTexture('#94979d', 0.16, 900);
+  urbanTex.repeat.set(90, 45);
+  const urban = new THREE.Mesh(new THREE.PlaneGeometry(W, H), new THREE.MeshLambertMaterial({ map: urbanTex }));
   urban.rotation.x = -Math.PI / 2; urban.position.set((B.minX + B.maxX) / 2, -0.02, (B.minZ + B.maxZ) / 2);
   urban.receiveShadow = true;
   g.add(urban);
@@ -1091,11 +1189,29 @@ function genLondon() {
   g.add(water);
   city.waterMesh = water;
 
-  /* ---- 街道 ---- */
+  /* ---- 街道（含人行道） ---- */
   D.streets.forEach((st) => {
-    g.add(ribbonMesh(st.pts, st.w, 0x4a4e55, 0.03));
-    g.add(ribbonMesh(st.pts, 0.35, 0xd8dade, 0.06));
+    g.add(ribbonMesh(st.pts, st.w + 7, 0xaeb1b5, 0.02));   // 人行道
+    g.add(ribbonMesh(st.pts, st.w, 0x3e4147, 0.035));       // 沥青路面
+    g.add(ribbonMesh(st.pts, 0.35, 0xd8dade, 0.06));        // 中线
   });
+
+  /* ---- 云层 ---- */
+  city.clouds = [];
+  for (let i = 0; i < 9; i++) {
+    const cl = new THREE.Group();
+    const puffs = RI(3, 5);
+    for (let p = 0; p < puffs; p++) {
+      const puff = new THREE.Mesh(new THREE.SphereGeometry(R(9, 18), 8, 6),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, transparent: true, opacity: 0.82, fog: false }));
+      puff.position.set(R(-18, 18), R(-3, 3), R(-9, 9));
+      puff.scale.y = 0.45;
+      cl.add(puff);
+    }
+    cl.position.set(R(B.minX, B.maxX), R(130, 190), R(B.minZ, B.maxZ));
+    g.add(cl);
+    city.clouds.push({ mesh: cl, vx: R(1.2, 2.6) });
+  }
 
   /* ---- 桥梁 ---- */
   D.bridges.forEach((br) => {
@@ -1531,29 +1647,42 @@ function buildLondonBuildings(city, g, D) {
       const colorName = pick(pal);
       const options = LONDON_PAL.filter((p) => p[0] === colorName);
       const colorHex = pick(options)[1];
-      (h > 40 ? towerPlaces : lowPlaces).push({ x: jx, z: jz, w, d, h, colorHex });
+      (h > 40 ? towerPlaces : lowPlaces).push({ x: jx, z: jz, w, d, h, colorHex, styleName: colorName });
       city.buildings.push({ x: jx, z: jz, w, d, h, colorName: colorName === '彩' ? '彩色' : colorName });
       city.aabbs.push({ x1: jx - w / 2, z1: jz - d / 2, x2: jx + w / 2, z2: jz + d / 2 });
     }
   }
-  // 两批 InstancedMesh（低层 / 高塔），单位盒按实例矩阵缩放
-  const makeBatch = (places, repX, repY) => {
-    if (!places.length) return;
+  // 按"立面风格 × 高度档"分桶 InstancedMesh，每桶一张真实感立面纹理
+  const styleOf = { 玻璃蓝: 'glass', 灰: 'concrete', 米白: 'stone', 砖红: 'brick', 彩: 'brick' };
+  const buckets = {};
+  lowPlaces.concat(towerPlaces).forEach((p) => {
+    const style = styleOf[p.styleName] || 'stone';
+    const size = p.h >= 40 ? 'tall' : p.h >= 18 ? 'mid' : 'low';
+    const key = style + '_' + size;
+    (buckets[key] = buckets[key] || { style, size, places: [] }).places.push(p);
+  });
+  const roofMat = new THREE.MeshLambertMaterial({ color: 0x3c3f43 });
+  Object.values(buckets).forEach((b) => {
+    const avgH = b.places.reduce((s2, p) => s2 + p.h, 0) / b.places.length;
+    const floors = clamp(Math.round(avgH / 3.1), 2, 26);
+    const bays = b.size === 'low' ? 3 : 4;
+    const lit = b.style === 'glass' ? 0.25 : 0.18;
+    const wallMat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: makeFacadeTexture(b.style, floors, bays, lit) });
     const geo = new THREE.BoxGeometry(1, 1, 1);
     geo.translate(0, 0.5, 0);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffffff, map: windowTexture(repX, repY) });
-    const inst = new THREE.InstancedMesh(geo, mat, places.length);
+    const inst = new THREE.InstancedMesh(geo, [wallMat, wallMat, roofMat, roofMat, wallMat, wallMat], b.places.length);
     const m4 = new THREE.Matrix4(), q = new THREE.Quaternion();
-    places.forEach((p, i) => {
+    const tint = new THREE.Color();
+    b.places.forEach((p, i) => {
       m4.compose(new THREE.Vector3(p.x, 0, p.z), q, new THREE.Vector3(p.w, p.h, p.d));
       inst.setMatrixAt(i, m4);
-      inst.setColorAt(i, new THREE.Color(p.colorHex));
+      // 轻微色相/明度抖动，避免同桶建筑一模一样
+      tint.setHex(p.colorHex).lerp(new THREE.Color(0xffffff), 0.72).offsetHSL(0, 0, R(-0.05, 0.05));
+      inst.setColorAt(i, tint);
     });
     inst.castShadow = inst.receiveShadow = true;
     g.add(inst);
-  };
-  makeBatch(lowPlaces, 3, 4);
-  makeBatch(towerPlaces, 4, 12);
+  });
 }
 
 /* ---- 街头道具 & 藏点 ---- */
@@ -1751,8 +1880,9 @@ function updateNPCs(city, dt, t) {
   for (let i = city.npcs.length - 1; i >= 0; i--) {
     const n = city.npcs[i];
     if (n.state === 'wait') {
-      n.mesh.position.y = 0.05 + Math.sin(t * 2.2 + n.x) * 0.025;
+      animateHuman(n.mesh.userData.human, t, 0);
     } else if (n.state === 'board') {
+      animateHuman(n.mesh.userData.human, t, 0.55);
       const tx = n.vRef.mesh.position.x, tz = n.vRef.mesh.position.z;
       const dx = tx - n.x, dz = tz - n.z;
       const d = Math.hypot(dx, dz);
@@ -1772,6 +1902,7 @@ function updateNPCs(city, dt, t) {
         n.x += (dx / d) * 2.8 * simK() * dt; n.z += (dz / d) * 2.8 * simK() * dt;
         n.mesh.position.set(n.x, 0.05, n.z);
         n.mesh.rotation.y = Math.atan2(dx, dz);
+        animateHuman(n.mesh.userData.human, t, 0.5);
       }
       if (n.timer <= 0) {
         scene.remove(n.mesh);
@@ -1908,6 +2039,12 @@ function updateLondon(dt, t) {
   updateNPCs(city, dt, t);
   if (city.eyeWheel) city.eyeWheel.rotation.z += dt * 0.06;
   if (city.waterMesh) city.waterMesh.material.opacity = 0.9 + Math.sin(t * 1.4) * 0.04;
+  if (city.clouds) {
+    city.clouds.forEach((c) => {
+      c.mesh.position.x += c.vx * dt;
+      if (c.mesh.position.x > city.bounds.maxX + 120) c.mesh.position.x = city.bounds.minX - 120;
+    });
+  }
   // 海鸥
   if (!city.gullTimer) city.gullTimer = 6;
   city.gullTimer -= dt;
@@ -1956,20 +2093,117 @@ function alightTransit() {
 }
 
 /* ============================================================
- * 角色
+ * 角色 —— 拟真人物（真实比例 + 关节走路动画）
  * ============================================================ */
-function makePersonMesh(bodyColor, hatColor) {
+const SKIN_TONES = [0xf2cfb3, 0xe8b992, 0xd9a878, 0xc98d63, 0x9c6b46, 0x6f4a30];
+const CLOTH_TONES = [0x3a4a5f, 0x54585e, 0x6e5a4a, 0x2f4a3f, 0x5f3a3a, 0x7a7f88, 0x2a3444, 0x8a6f54, 0x74584c, 0x46586a];
+const PANTS_TONES = [0x2b3038, 0x3a3f46, 0x2f3a4f, 0x4a4238, 0x33383f, 0x1f242b];
+const HAIR_TONES = [0x2a2320, 0x4a3623, 0x6b4a2a, 0x8a8a8a, 0x151517, 0x7a5535];
+
+function makeHumanPalette() {
+  return { skin: pick(SKIN_TONES), shirt: pick(CLOTH_TONES), pants: pick(PANTS_TONES), hair: pick(HAIR_TONES) };
+}
+
+/* 人物：原点在双脚，面朝本地 +Z，身高约 1.75m */
+function makeHuman(pal) {
+  const p = pal || makeHumanPalette();
   const grp = new THREE.Group();
-  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 1.0, 10), lambert(bodyColor));
-  body.position.y = 0.75; body.castShadow = true; grp.add(body);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 12, 10), lambert(0xf0c8a0));
-  head.position.y = 1.55; head.castShadow = true; grp.add(head);
-  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.45, 10), lambert(hatColor));
-  hat.position.y = 1.92; grp.add(hat);
-  const e1 = new THREE.Mesh(new THREE.SphereGeometry(0.045, 6, 6), lambert(0x222222));
-  const e2 = e1.clone();
-  e1.position.set(-0.1, 1.6, 0.26); e2.position.set(0.1, 1.6, 0.26);
-  grp.add(e1); grp.add(e2);
+  const bob = new THREE.Group();           // 走路上下起伏用
+  grp.add(bob);
+  const M = (geo, color) => {
+    const m = new THREE.Mesh(geo, lambert(color));
+    m.castShadow = true;
+    return m;
+  };
+  // 骨盆 & 躯干
+  const pelvis = M(new THREE.BoxGeometry(0.30, 0.17, 0.19), p.pants);
+  pelvis.position.y = 0.97; bob.add(pelvis);
+  const torso = M(new THREE.BoxGeometry(0.34, 0.46, 0.20), p.shirt);
+  torso.position.y = 1.28; bob.add(torso);
+  const shoulders = M(new THREE.BoxGeometry(0.40, 0.10, 0.19), p.shirt);
+  shoulders.position.y = 1.50; bob.add(shoulders);
+  // 脖子 & 头
+  const neck = M(new THREE.CylinderGeometry(0.05, 0.06, 0.08, 8), p.skin);
+  neck.position.y = 1.58; bob.add(neck);
+  const head = M(new THREE.SphereGeometry(0.115, 12, 10), p.skin);
+  head.scale.y = 1.18;
+  head.position.y = 1.70; bob.add(head);
+  const hair = M(new THREE.SphereGeometry(0.118, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.55), p.hair);
+  hair.scale.y = 1.2;
+  hair.position.y = 1.715; bob.add(hair);
+  // 四肢：pivot 在关节处，geometry 下移
+  const limb = (r1, r2, len, color) => {
+    const pv = new THREE.Group();
+    const g = new THREE.CylinderGeometry(r1, r2, len, 8);
+    g.translate(0, -len / 2, 0);
+    pv.add(M(g, color));
+    return pv;
+  };
+  const armL = limb(0.048, 0.04, 0.56, p.shirt);
+  const armR = limb(0.048, 0.04, 0.56, p.shirt);
+  armL.position.set(-0.235, 1.50, 0); armR.position.set(0.235, 1.50, 0);
+  bob.add(armL); bob.add(armR);
+  const handG = new THREE.SphereGeometry(0.045, 8, 6);
+  const handL = M(handG, p.skin); handL.position.set(0, -0.58, 0); armL.add(handL);
+  const handR = M(handG, p.skin); handR.position.set(0, -0.58, 0); armR.add(handR);
+  const legL = limb(0.075, 0.05, 0.86, p.pants);
+  const legR = limb(0.075, 0.05, 0.86, p.pants);
+  legL.position.set(-0.095, 0.90, 0); legR.position.set(0.095, 0.90, 0);
+  bob.add(legL); bob.add(legR);
+  const shoeG = new THREE.BoxGeometry(0.10, 0.07, 0.24);
+  shoeG.translate(0, -0.885, 0.05);
+  const shoeL = M(shoeG, 0x22242a); legL.add(shoeL);
+  const shoeR = M(shoeG.clone(), 0x22242a); legR.add(shoeR);
+  // 眼睛
+  const eyeG = new THREE.SphereGeometry(0.016, 6, 6);
+  const e1 = M(eyeG, 0x1a1a1a), e2 = M(eyeG, 0x1a1a1a);
+  e1.position.set(-0.045, 1.72, 0.105); e2.position.set(0.045, 1.72, 0.105);
+  bob.add(e1); bob.add(e2);
+  grp.userData.human = { bob, armL, armR, legL, legR, torso, head, phase: R(0, Math.PI * 2) };
+  return grp;
+}
+
+/* 走路/站立动画（每帧调用，零分配）
+ * speed01: 0=站立(呼吸) → 1=奔跑 */
+function animateHuman(h, time, speed01) {
+  if (!h) return;
+  const ph = h.phase;
+  if (speed01 < 0.02) {
+    const b = Math.sin(time * 1.7 + ph);
+    h.bob.position.y = 0;
+    h.torso.rotation.x = 0;
+    h.armL.rotation.x = b * 0.035;
+    h.armR.rotation.x = -b * 0.035;
+    h.legL.rotation.x = 0;
+    h.legR.rotation.x = 0;
+    h.head.rotation.y = Math.sin(time * 0.6 + ph) * 0.12;
+  } else {
+    const f = time * (5 + 5.5 * speed01) + ph;
+    const swing = 0.32 + 0.42 * speed01;
+    const s = Math.sin(f);
+    h.legL.rotation.x = s * swing;
+    h.legR.rotation.x = -s * swing;
+    h.armL.rotation.x = -s * swing * 0.78;
+    h.armR.rotation.x = s * swing * 0.78;
+    h.bob.position.y = Math.abs(Math.cos(f)) * 0.045 * (0.4 + speed01);
+    h.torso.rotation.x = 0.06 + 0.1 * speed01;
+    h.head.rotation.y = 0;
+  }
+}
+
+/* 兼容旧接口：shirt 用 bodyColor，戴 hatColor 的毛线帽（躲藏者识别度） */
+function makePersonMesh(bodyColor, hatColor) {
+  const pal = makeHumanPalette();
+  pal.shirt = bodyColor;
+  const grp = makeHuman(pal);
+  if (hatColor !== undefined) {
+    const beanie = new THREE.Mesh(
+      new THREE.SphereGeometry(0.125, 10, 7, 0, Math.PI * 2, 0, Math.PI * 0.5), lambert(hatColor));
+    beanie.scale.y = 0.9;
+    beanie.position.y = 1.73;
+    beanie.castShadow = true;
+    grp.userData.human.bob.add(beanie);
+  }
   return grp;
 }
 
@@ -2176,7 +2410,8 @@ function updateHiders(dt, t) {
       return;
     }
     if (G.phase !== 'seek') return;
-    h.mesh.position.y = 0.05 + Math.sin(t * 2 + h.spot.x) * 0.03;
+    h.mesh.position.y = 0.03;
+    animateHuman(h.mesh.userData.human, t, 0);
     // 靠近时窸窣声提示
     const d = dist2d(player.x, player.z, h.spot.x, h.spot.z);
     h.giggleCd -= dt;
@@ -2526,6 +2761,10 @@ function updatePlayer(dt) {
     player.mesh.rotation.y += dr * Math.min(1, dt * 12);
   }
   player.mesh.position.set(player.x, 0.05, player.z);
+  // 拟真步态：走 0.5 / 跑 0.95 / 骑车与静止 0
+  let s01 = 0;
+  if (player.riding !== 'bike' && moving) s01 = sp > SPEED.walk * simK() * 1.2 ? 0.95 : 0.5;
+  animateHuman(player.mesh.userData.human, G.now || 0, s01);
   updateCamera(dt);
 }
 
@@ -3208,6 +3447,7 @@ function tick() {
   const dt = clamp((now - lastT) / 1000, 0, 0.1);
   lastT = now;
   const t = now / 1000;
+  G.now = t;
 
   const isLondon = G.city && G.city.kind === 'london';
   const cityAmbient = () => {
