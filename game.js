@@ -77,7 +77,7 @@ zh: {
   toast_ai_ready: (n) => `🕵️ ${n} 位躲藏者藏好了！读读左侧线索开始寻找吧`,
   toast_hot_ready: '🕵️ 所有躲藏者已就位！寻找者出发！',
   no_credit: (n, w) => `💸 信用点不够！${w}需要 ${n}💰`,
-  w_radar: '雷达', w_bike: '租单车', w_bus: '乘公交', w_train: '乘地铁', w_taxi: '打车',
+  w_radar: '雷达', w_bike: '租单车', w_bus: '乘公交', w_train: '乘地铁', w_taxi: '打车', w_ferry: '乘轮渡',
   radar_none: '📡 附近已经没有躲藏者了',
   radar_result: (d, temp) => `📡 最近的躲藏者距你约 <b>${d} 米</b> —— ${temp}<br><small>小地图上画出了测距圈，换个位置再测一次就能定位！</small>`,
   r_hot4: '🔥 滚烫！！', r_hot3: '♨️ 很热！', r_hot2: '🌤 温热', r_hot1: '🧊 有点凉', r_hot0: '❄️ 冰冷',
@@ -102,7 +102,7 @@ zh: {
   err_banned: (w) => `不可以出现地点词「${w}」！换个说法试试～`,
   bounty_tag: (b) => `悬赏 ${b}💰`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
-  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头' },
+  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
   spots: {
     tower: '一座高塔脚下的背阴处', fountain: '水池边沿的外侧', reed: '一丛细长植物的中间',
@@ -167,7 +167,7 @@ en: {
   toast_ai_ready: (n) => `🕵️ ${n} hiders are in place! Read the clues on the left and start hunting`,
   toast_hot_ready: '🕵️ All hiders are in place. Seekers, go!',
   no_credit: (n, w) => `💸 Not enough credits! ${w} costs ${n}💰`,
-  w_radar: 'Radar', w_bike: 'Bike rental', w_bus: 'Bus ride', w_train: 'Tube ride', w_taxi: 'Taxi',
+  w_radar: 'Radar', w_bike: 'Bike rental', w_bus: 'Bus ride', w_train: 'Metro ride', w_taxi: 'Taxi', w_ferry: 'Ferry ride',
   radar_none: '📡 No hiders left nearby',
   radar_result: (d, temp) => `📡 Nearest hider is about <b>${d} m</b> away — ${temp}<br><small>A range ring was drawn on the minimap. Ping from another spot to triangulate!</small>`,
   r_hot4: '🔥 Scorching!!', r_hot3: '♨️ Hot!', r_hot2: '🌤 Warm', r_hot1: '🧊 Cool', r_hot0: '❄️ Freezing',
@@ -192,7 +192,7 @@ en: {
   err_banned: (w) => `The location word “${w}” is not allowed! Try another phrasing`,
   bounty_tag: (b) => `Bounty ${b}💰`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
-  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London' },
+  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
   spots: {
     tower: 'the shaded foot of a tall tower', fountain: 'the outer rim of a water basin', reed: 'among a clump of tall reeds',
@@ -1022,7 +1022,7 @@ function computeSpotAttrs(city) {
 
 /* ---- 由藏点生成合法线索句子列表（按城市分发） ---- */
 function spotHints(spot) {
-  return G.city.kind === 'london' ? londonSpotHints(spot) : townSpotHints(spot);
+  return G.city.kind === 'real' ? londonSpotHints(spot) : townSpotHints(spot);
 }
 function townSpotHints(spot) {
   const a = spot.attrs, out = [];
@@ -1144,25 +1144,26 @@ const LONDON_PAL = [
   ['彩', 0xd97b6c], ['彩', 0x6fc4c4], ['彩', 0xe6cf6f], ['彩', 0x83bf78],
 ];
 
-function genLondon() {
-  const D = window.CITY_DATA.london;
+function genRealCity(cityKey) {
+  const D = window.CITY_DATA[cityKey];
   const B = D.bounds;
   const city = {
-    kind: 'london',
+    kind: 'real',
+    cityKey,
     bounds: B,
     name: D.name,
     buildings: [], aabbs: [], circles: [],
     trees: [], spots: [], bikeStations: [],
     stations: [], railLines: [], vehicles: [], cars: [], npcs: [], transitStops: [],
     pond: null, fountain: null, tower: null,
-    river: { pts: D.thames, halfW: D.riverWidth / 2 },
+    river: { pts: D.river, halfW: D.riverWidth / 2 },
     bridgeCorridors: D.bridges.map((b) => ({ a: b.a, b: b.b, hw: b.foot ? 4 : 7 })),
     streets: D.streets,
     parks: D.parks,
     landmarks: D.landmarks,
     group: new THREE.Group(),
-    orbitR: 560, orbitH: 300,
-    spawn: null, flyMul: 1.9, radarScale: 2.4, taxiPerM: 0.12,
+    orbitR: Math.round((B.maxX - B.minX) * 0.38), orbitH: Math.round((B.maxX - B.minX) * 0.2),
+    spawn: null, flyMul: (B.maxX - B.minX) / 800, radarScale: Math.max(2, (B.maxX - B.minX) / 620), taxiPerM: 0.12,
     bannedExtra: [],
   };
   const g = city.group;
@@ -1183,9 +1184,9 @@ function genLondon() {
   g.add(urban);
 
   /* ---- 泰晤士河 ---- */
-  const riverBed = ribbonMesh(D.thames, D.riverWidth + 5, 0xa89c80, 0.0);
+  const riverBed = ribbonMesh(D.river, D.riverWidth + 5, 0xa89c80, 0.0);
   g.add(riverBed);
-  const water = ribbonMesh(D.thames, D.riverWidth, 0x2e6598, 0.05, 0.97);
+  const water = ribbonMesh(D.river, D.riverWidth, 0x2e6598, 0.05, 0.97);
   g.add(water);
   city.waterMesh = water;
 
@@ -1312,18 +1313,10 @@ function genLondon() {
   /* ---- 藏点属性 ---- */
   londonComputeAttrs(city);
 
-  /* ---- 好友模式违禁词（站名 + 地标名） ---- */
-  city.bannedExtra = [
-    ...D.stations.map((s) => s.name.toLowerCase()),
-    '泰晤士', '大本钟', '伦敦眼', '摩天轮', '碎片', '小黄瓜', '白金汉', '威斯敏斯特', '西敏',
-    '圣保罗', '特拉法加', '塔桥', '伦敦塔', '议会', '国会', '皮卡迪利', '牛津', '摄政',
-    '河岸', '舰队', '白厅', '南岸', '博罗', 'thames', 'big ben', 'eye', 'shard', 'gherkin',
-    'buckingham', 'westminster', 'st paul', 'trafalgar', 'whitehall', 'oxford', 'regent',
-    'piccadilly', 'strand', 'fleet', 'borough', 'soho',
-  ];
+  /* ---- 好友模式违禁词（站名 + 地标名，数据驱动） ---- */
+  city.bannedExtra = [...D.stations.map((s) => s.name.toLowerCase()), ...(D.banned || [])];
 
-  // 出生点：威斯敏斯特桥南岸（摩天轮旁），面向河对岸的钟楼
-  city.spawn = { x: -163, z: 128, yaw: 2.0 };
+  city.spawn = D.spawn || { x: 0, z: 20, yaw: Math.PI };
   scene.add(g);
   return city;
 }
@@ -1485,6 +1478,88 @@ function buildLondonLandmark(city, g, lm) {
       city.spots.push({ x: x + 17.5, z: z + 4, prop: 'palace', label: tSpot('palace') });
       break;
     }
+    case 'customhouse': {  // 外滩海关大楼：石材楼 + 大钟（整点钟声）
+      addBox(14, 20, 22, x, 10, z, lambert(0xcfc3a8));
+      addBox(7, 22, 7, x, 31, z, lambert(0xd9cfb8));
+      const cap2 = new THREE.Mesh(new THREE.ConeGeometry(4.6, 5, 4), lambert(0x3f5a4f));
+      cap2.position.set(x, 44.5, z); cap2.rotation.y = Math.PI / 4; cap2.castShadow = true; g.add(cap2);
+      for (let f = 0; f < 4; f++) {
+        const ang = f * Math.PI / 2;
+        const face = new THREE.Mesh(new THREE.CircleGeometry(2.1, 24), new THREE.MeshBasicMaterial({ color: 0xfff6d8 }));
+        face.position.set(x + Math.sin(ang) * 3.56, 38, z + Math.cos(ang) * 3.56);
+        face.rotation.y = ang;
+        g.add(face);
+        const hand = new THREE.Mesh(new THREE.BoxGeometry(0.15, 1.5, 0.05), new THREE.MeshBasicMaterial({ color: 0x2a2a2a }));
+        hand.geometry.translate(0, 0.65, 0);
+        hand.position.copy(face.position);
+        hand.rotation.y = ang;
+        g.add(hand);
+        city.clockHands.push(hand);
+      }
+      city.aabbs.push({ x1: x - 7.5, z1: z - 11.5, x2: x + 7.5, z2: z + 11.5 });
+      city.tower = { x, z };
+      city.spots.push({ x: x - 8.6, z: z - 12.6, prop: 'tower', label: tSpot('tower') });
+      break;
+    }
+    case 'pearltower': {   // 三球塔
+      [[-4.5, 0], [2.25, 3.9], [2.25, -3.9]].forEach(([ox, oz]) => {
+        const leg = new THREE.Mesh(new THREE.CylinderGeometry(1.1, 1.4, 40, 8), lambert(0xb8bcc2));
+        leg.position.set(x + ox * 0.8, 20, z + oz * 0.8);
+        leg.rotation.z = ox > 0 ? -0.06 : 0.12;
+        leg.castShadow = true; g.add(leg);
+      });
+      const shaft2 = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.6, 70, 10), lambert(0xc4c9cf));
+      shaft2.position.set(x, 55, z); shaft2.castShadow = true; g.add(shaft2);
+      const ball1 = new THREE.Mesh(new THREE.SphereGeometry(9, 16, 12), new THREE.MeshLambertMaterial({ color: 0xc45a7a }));
+      ball1.position.set(x, 42, z); ball1.castShadow = true; g.add(ball1);
+      const ball2 = new THREE.Mesh(new THREE.SphereGeometry(5.5, 14, 10), new THREE.MeshLambertMaterial({ color: 0xd06a88 }));
+      ball2.position.set(x, 80, z); ball2.castShadow = true; g.add(ball2);
+      const ant = new THREE.Mesh(new THREE.CylinderGeometry(0.25, 0.7, 26, 6), lambert(0x9aa0a6));
+      ant.position.set(x, 100, z); g.add(ant);
+      city.circles.push({ x, z, r: 7 });
+      city.spots.push({ x: x + 8.5, z: z + 5, prop: 'eye', label: tSpot('eye') });
+      break;
+    }
+    case 'twisttower': {   // 螺旋巨塔（最高）
+      const tw2 = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 12.5, 145, 12), new THREE.MeshLambertMaterial({ color: 0x9fc4dc, transparent: true, opacity: 0.94 }));
+      tw2.position.set(x, 72.5, z); tw2.castShadow = true; g.add(tw2);
+      const fin = new THREE.Mesh(new THREE.BoxGeometry(2, 145, 6), new THREE.MeshLambertMaterial({ color: 0x8ab4cc }));
+      fin.position.set(x + 8, 72.5, z); fin.rotation.y = 0.5; g.add(fin);
+      city.circles.push({ x, z, r: 13 });
+      city.spots.push({ x: x - 14.5, z: z + 4, prop: 'shard', label: tSpot('shard') });
+      break;
+    }
+    case 'jinmao': {       // 宝塔式退台塔
+      let hh = 0;
+      [[16, 40], [13, 30], [10, 22], [7.5, 16], [5, 12]].forEach(([ww, sh]) => {
+        addBox(ww, sh, ww, x, hh + sh / 2, z, lambert(0xb0b8c4));
+        hh += sh;
+      });
+      const spire = new THREE.Mesh(new THREE.ConeGeometry(2, 14, 8), lambert(0x9aa0a6));
+      spire.position.set(x, hh + 7, z); spire.castShadow = true; g.add(spire);
+      city.aabbs.push({ x1: x - 8.5, z1: z - 8.5, x2: x + 8.5, z2: z + 8.5 });
+      break;
+    }
+    case 'wfc': {          // 开瓶器：方塔 + 顶部门洞
+      addBox(15, 100, 9, x, 50, z, new THREE.MeshLambertMaterial({ color: 0x8898a8 }));
+      addBox(15, 6, 9.2, x, 106, z, lambert(0x7f8ba0));
+      addBox(3.5, 22, 9.2, x - 5.75, 92, z, lambert(0x7f8ba0));
+      addBox(3.5, 22, 9.2, x + 5.75, 92, z, lambert(0x7f8ba0));
+      city.aabbs.push({ x1: x - 8, z1: z - 5, x2: x + 8, z2: z + 5 });
+      break;
+    }
+    case 'pavilion': {     // 古典园林亭子（翘檐）
+      [[-1.6, -1.6], [1.6, -1.6], [-1.6, 1.6], [1.6, 1.6]].forEach(([ox, oz]) => {
+        const col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 3.2, 8), lambert(0x8a2018));
+        col.position.set(x + ox, 1.6, z + oz); col.castShadow = true; g.add(col);
+      });
+      const roof1 = new THREE.Mesh(new THREE.ConeGeometry(4.2, 1.8, 4), lambert(0x4a5a3a));
+      roof1.position.set(x, 4.1, z); roof1.rotation.y = Math.PI / 4; roof1.scale.y = 0.75; roof1.castShadow = true; g.add(roof1);
+      const roof2 = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.4, 4), lambert(0x55663f));
+      roof2.position.set(x, 5.2, z); roof2.rotation.y = Math.PI / 4; g.add(roof2);
+      city.spots.push({ x: x + 3.4, z: z + 3.4, prop: 'bench', label: tSpot('bench') });
+      break;
+    }
   }
 }
 
@@ -1604,19 +1679,48 @@ function buildLondonTransit(city, g, D) {
       });
     }
   });
+
+  /* ---- 轮渡（跨江水上交通） ---- */
+  (D.ferries || []).forEach((f) => {
+    const path = buildPath([f.a, f.b]);
+    const stops = [
+      { s: 0, x: f.a[0], z: f.a[1], name: f.name },
+      { s: path.total, x: f.b[0], z: f.b[1], name: f.name },
+    ];
+    // 渡口栈桥
+    [f.a, f.b].forEach((pt) => {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(6, 0.8, 10), lambert(0x8a7f6e));
+      pier.position.set(pt[0], 0.4, pt[1]); pier.castShadow = true; g.add(pier);
+      city.transitStops.push({ x: pt[0], z: pt[1], kind: 'ferry', waiters: [], respawn: R(6, 20) });
+    });
+    const boat = new THREE.Group();
+    const hull = new THREE.Mesh(new THREE.BoxGeometry(9, 1.6, 4), lambert(0xf0f0ea));
+    hull.position.y = 0.9; hull.castShadow = true; boat.add(hull);
+    const cabin = new THREE.Mesh(new THREE.BoxGeometry(6, 1.6, 3), lambert(0x2f6f8f));
+    cabin.position.y = 2.4; boat.add(cabin);
+    const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.36, 1.6, 8), lambert(0xc0281c));
+    stack.position.set(-2, 3.6, 0); boat.add(stack);
+    g.add(boat);
+    city.vehicles.push({
+      kind: 'ferry', line: f.name, color: '#e8f0f5', mesh: boat, cars: null,
+      path, loop: false, stops,
+      s: 0, dir: 1, speed: 0,
+      maxSpeed: 8, accel: 2.5, state: 'dwell', dwell: 5, curStop: stops[0], riding: false,
+      cost: 2,
+    });
+  });
 }
 
 /* ---- 建筑填充（避开路/河/园/轨/地标） ---- */
 function buildLondonBuildings(city, g, D) {
   const B = city.bounds;
-  const thamesZ = (x) => distToPolyline(x, 0, D.thames); // 仅用于河侧判断的近似
   const towerPlaces = [], lowPlaces = [];
   const step = 30;
   for (let x = B.minX + 14; x < B.maxX - 14; x += step) {
     for (let z = B.minZ + 14; z < B.maxZ - 14; z += step) {
       const jx = x + R(-7, 7), jz = z + R(-7, 7);
       if (rng() < 0.22) continue;
-      if (distToPolyline(jx, jz, D.thames).d < city.river.halfW + 16) continue;
+      if (distToPolyline(jx, jz, D.river).d < city.river.halfW + 16) continue;
       let bad = false;
       for (const st of D.streets) { if (distToPolyline(jx, jz, st.pts).d < st.w / 2 + 7) { bad = true; break; } }
       if (bad) continue;
@@ -1634,16 +1738,16 @@ function buildLondonBuildings(city, g, D) {
       for (const br of city.bridgeCorridors) { if (distToSeg(jx, jz, br.a[0], br.a[1], br.b[0], br.b[1]).d < 14) { bad = true; break; } }
       if (bad) continue;
 
-      // 分区风格
-      const southOfRiver = jz > distToPolyline(jx, jz, D.thames).pz;
-      const isCity = jx > 170 && !southOfRiver;
+      // 分区风格（数据驱动：先匹配的分区生效）
       const w = R(13, 21), d = R(13, 21);
-      let h, pal;
-      if (isCity) { h = rng() < 0.25 ? R(45, 95) : R(16, 34); pal = ['玻璃蓝', '玻璃蓝', '灰', '米白']; }
-      else if (southOfRiver) { h = R(9, 20); pal = ['砖红', '砖红', '灰', '米白']; }
-      else if (jx < -380) { h = R(12, 19); pal = ['米白', '米白', '米白', '砖红']; }
-      else if (jx < -120 && jz < -120) { h = R(9, 15); pal = ['彩', '砖红', '米白', '彩']; }
-      else { h = R(11, 22); pal = ['米白', '砖红', '米白', '灰']; }
+      const zone = (D.zones || []).find((zn) => {
+        const x1 = Math.min(zn.r[0], zn.r[2]), x2 = Math.max(zn.r[0], zn.r[2]);
+        const z1 = Math.min(zn.r[1], zn.r[3]), z2 = Math.max(zn.r[1], zn.r[3]);
+        return jx >= x1 && jx <= x2 && jz >= z1 && jz <= z2;
+      }) || D.zoneDefault;
+      let h = R(zone.h[0], zone.h[1]);
+      if (zone.tall && rng() < zone.tall.c) h = R(zone.tall.h[0], zone.tall.h[1]);
+      const pal = zone.pal;
       const colorName = pick(pal);
       const options = LONDON_PAL.filter((p) => p[0] === colorName);
       const colorHex = pick(options)[1];
@@ -1696,15 +1800,15 @@ function buildLondonProps(city, g, D, treePlace) {
   for (let i = 0; i < 6; i++) {
     const st = pick(D.streets);
     const pos = alongStreet(st, R(0.12, 0.88), pick([-1, 1]));
-    const booth = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), lambert(0xc0281c));
+    const booth = new THREE.Mesh(new THREE.BoxGeometry(1.5, 3, 1.5), lambert(D.boothColor || 0xc0281c));
     booth.position.set(pos.x, 1.56, pos.z); booth.castShadow = true; g.add(booth);
     const glass = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.5, 1.52), new THREE.MeshLambertMaterial({ color: 0xbfe3f5, transparent: true, opacity: 0.55 }));
     glass.position.set(pos.x, 1.8, pos.z); g.add(glass);
     city.aabbs.push({ x1: pos.x - 0.85, z1: pos.z - 0.85, x2: pos.x + 0.85, z2: pos.z + 0.85 });
     if (i % 2 === 0) city.spots.push({ x: pos.x + 1.7, z: pos.z + 0.5, prop: 'booth', label: tSpot('booth') });
   }
-  // 红色邮筒 ×6
-  for (let i = 0; i < 6; i++) {
+  // 红色邮筒 ×6（伦敦特色）
+  for (let i = 0; i < (D.postbox ? 6 : 0); i++) {
     const st = pick(D.streets);
     const pos = alongStreet(st, R(0.1, 0.9), pick([-1, 1]));
     const post = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 1.5, 10), lambert(0xc0281c));
@@ -1723,9 +1827,8 @@ function buildLondonProps(city, g, D, treePlace) {
     city.aabbs.push({ x1: dx2 - 1.2, z1: dz2 - 0.8, x2: dx2 + 1.2, z2: dz2 + 0.8 });
     city.spots.push({ x: dx2 + 1.9, z: dz2 + 0.5, prop: 'trash', label: tSpot('trash') });
   }
-  // 考文特花园市集摊位 ×3（真实经纬度投影）
-  const mkX = ((-0.1228 - (-0.11)) * 111320 * Math.cos(51.507 * Math.PI / 180)) * 0.24;
-  const mkZ = (-(51.5120 - 51.507) * 111132) * 0.24;
+  // 市集摊位 ×3（坐标来自城市数据）
+  const mkX = D.market[0], mkZ = D.market[1];
   city.market = { x: mkX, z: mkZ };
   for (let i = 0; i < 3; i++) {
     const sx = mkX + R(-14, 14), sz = mkZ + R(-10, 10);
@@ -1762,7 +1865,7 @@ function buildLondonProps(city, g, D, treePlace) {
 
 function buildLondonTrees(city, g, treePlace) {
   // 河堤树
-  const emb = city.streets.find((s) => s.name === '维多利亚堤岸');
+  const emb = city.streets.find((s) => s.name === (window.CITY_DATA[city.cityKey] || {}).treeStreet);
   if (emb) {
     const path = buildPath(emb.pts);
     for (let s = 20; s < path.total; s += 34) {
@@ -1826,7 +1929,7 @@ function londonComputeAttrs(city) {
     a.propKey = { trash: 'trash', bench: 'bench', booth: 'booth' }[s.prop] || null;
     s.attrs = a;
     s.taken = false;
-    s.blockType = 'london';
+    s.blockType = city.cityKey;
   });
   const counts = {};
   ['river', 'bigbell', 'trains', 'park', 'water', 'waterfowl', 'tourists', 'market', 'traffic', 'quiet', 'shade', 'bridge', 'tall', 'low', 'lawn', 'coffee']
@@ -2056,8 +2159,10 @@ function updateLondon(dt, t) {
 }
 
 /* ---- 乘车交互 ---- */
+const vIcon = (v) => (v.kind === 'train' ? '🚇' : v.kind === 'ferry' ? '⛴️' : '🚌');
+
 function transitNear() {
-  if (G.city.kind !== 'london') return null;
+  if (G.city.kind !== 'real') return null;
   let best = null, bd = 1e9;
   G.city.vehicles.forEach((v) => {
     if (v.state !== 'dwell' || v.dwell <= 0.3) return;
@@ -2069,12 +2174,12 @@ function transitNear() {
 }
 
 function boardTransit(v) {
-  if (!spendCredits(v.cost, v.kind === 'train' ? t('w_train') : t('w_bus'))) return;
+  if (!spendCredits(v.cost, v.kind === 'train' ? t('w_train') : v.kind === 'ferry' ? t('w_ferry') : t('w_bus'))) return;
   player.riding = 'transit';
   player.tv = v;
   v.riding = true;
   AudioSys.busDing();
-  showToast(t('transit_on', v.kind === 'train' ? '🚇' : '🚌', v.cost, v.line));
+  showToast(t('transit_on', vIcon(v), v.cost, v.line));
 }
 
 function alightTransit() {
@@ -2377,7 +2482,7 @@ function createHider(spot, name, emoji, clue, bounty, isHuman, ownerLabel) {
 function placeAIHiders(n) {
   const free = G.city.spots.filter((s) => !s.taken);
   // 贪心挑分散的点
-  const spread = G.city.kind === 'london' ? 140 : 55;
+  const spread = G.city.kind === 'real' ? 140 : 55;
   const chosen = [];
   shuffle(free);
   for (const s of free) {
@@ -2545,7 +2650,7 @@ function tryInteract() {
   const h = nearestActiveHider();
   if (h && h.d < 3.2 && player.riding !== 'bus' && player.riding !== 'transit') { captureHider(h.hider); return; }
   // 伦敦：地铁/公交
-  if (G.city.kind === 'london') {
+  if (G.city.kind === 'real') {
     if (player.riding === 'transit') { alightTransit(); return; }
     const v = transitNear();
     if (v && player.riding === null) { boardTransit(v); return; }
@@ -2686,7 +2791,7 @@ function callTaxi(x, z) {
   if (!spendCredits(cost, t('w_taxi'))) return;
   // 落点吸附到最近道路
   let tx = x, tz = z;
-  if (G.city.kind === 'london') {
+  if (G.city.kind === 'real') {
     let best = { d: 1e9, px: x, pz: z };
     G.city.streets.forEach((st) => {
       const r = distToPolyline(x, z, st.pts);
@@ -2830,7 +2935,7 @@ function drawMap(ctx, size, big) {
   ctx.clearRect(0, 0, size, size);
   ctx.fillStyle = '#141a22'; ctx.fillRect(0, 0, size, size);
 
-  if (c.kind === 'london') {
+  if (c.kind === 'real') {
     ctx.fillStyle = '#2a313a';
     ctx.fillRect(TX(B.minX), TZ(B.minZ), W * sc, H * sc);
     // 公园
@@ -2890,7 +2995,7 @@ function drawMap(ctx, size, big) {
     if (G.phase === 'seek') {
       c.vehicles.forEach((v) => {
         const hp = v.headPos || { x: v.mesh.position.x, z: v.mesh.position.z };
-        ctx.fillStyle = v.kind === 'train' ? v.color : '#ff5a4a';
+        ctx.fillStyle = v.kind === 'train' ? v.color : v.kind === 'ferry' ? '#e8f0f5' : '#ff5a4a';
         ctx.beginPath(); ctx.arc(TX(hp.x), TZ(hp.z), big ? 4 : 2.6, 0, Math.PI * 2); ctx.fill();
         if (v.state === 'dwell') {
           ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
@@ -3140,8 +3245,8 @@ function resetWorld() {
   rng = mulberry32(G.seed);
   makeScene();
   camera.far = 900; camera.updateProjectionMatrix();
-  if (G.citySel === 'london' && window.CITY_DATA && window.CITY_DATA.london) {
-    G.city = genLondon();
+  if (G.citySel !== 'town' && window.CITY_DATA && window.CITY_DATA[G.citySel]) {
+    G.city = genRealCity(G.citySel);
   } else {
     G.city = genCity();
     makeCars(G.city);
@@ -3193,7 +3298,7 @@ function beginHidePhase() {
   G.hideIdx = 0;
   $('hud').classList.add('hidden');
   $('hideBanner').classList.remove('hidden');
-  flyCam.x = 0; flyCam.y = G.city.kind === 'london' ? 240 : 110; flyCam.z = G.city.kind === 'london' ? 200 : 90;
+  flyCam.x = 0; flyCam.y = G.city.kind === 'real' ? 240 : 110; flyCam.z = G.city.kind === 'real' ? 200 : 90;
   player.yaw = 0; player.pitch = -0.85;
   makeSpotMarkers();
   showTurnOverlay(t('hide_turn', G.hideIdx + 1), t('hide_turn_sub'), () => {
@@ -3287,7 +3392,7 @@ $('clueOk').addEventListener('click', () => {
   if (mk) { scene.remove(mk); spotMarkers.splice(spotMarkers.indexOf(mk), 1); }
   G.hideIdx++;
   if (G.hideIdx < G.nHiders) {
-    flyCam.x = 0; flyCam.y = G.city.kind === 'london' ? 240 : 110; flyCam.z = G.city.kind === 'london' ? 200 : 90;
+    flyCam.x = 0; flyCam.y = G.city.kind === 'real' ? 240 : 110; flyCam.z = G.city.kind === 'real' ? 200 : 90;
     player.yaw = R(0, Math.PI * 2); player.pitch = -0.85;
     showTurnOverlay(t('hide_turn', G.hideIdx + 1), t('hide_turn_sub'), updateHideBanner);
   } else {
@@ -3449,7 +3554,7 @@ function tick() {
   const t = now / 1000;
   G.now = t;
 
-  const isLondon = G.city && G.city.kind === 'london';
+  const isLondon = G.city && G.city.kind === 'real';
   const cityAmbient = () => {
     if (isLondon) updateLondon(dt, t);
     else { updateCars(dt); updateBus(dt); }
@@ -3546,17 +3651,17 @@ function updateInteractPrompt() {
     setPrompt(t('p_catch', near.hider.emoji, near.hider.name));
     return;
   }
-  if (G.city.kind === 'london') {
+  if (G.city.kind === 'real') {
     if (player.riding === 'transit') {
       const v = player.tv;
       setPrompt(v && v.state === 'dwell'
         ? t('p_transit_arr', v.curStop ? v.curStop.name : '')
-        : t('p_transit_run', v && v.kind === 'train' ? '🚇' : '🚌', v ? v.line : ''));
+        : t('p_transit_run', v ? vIcon(v) : '🚌', v ? v.line : ''));
       return;
     }
     const v = transitNear();
     if (v && player.riding === null) {
-      setPrompt(t('p_transit_board', v.kind === 'train' ? '🚇' : '🚌', v.line, v.cost));
+      setPrompt(t('p_transit_board', vIcon(v), v.line, v.cost));
       return;
     }
   } else {
@@ -3603,12 +3708,17 @@ function applyStaticLang() {
   $('lblAdmin').textContent = t('admin_label');
   $('adminHint').textContent = t('admin_hint');
   // 城市卡
-  const flags = { istanbul: '🇹🇷', dubai: '🇦🇪', shanghai: '🇨🇳', newyork: '🇺🇸' };
+  const flags = { london: '🇬🇧', istanbul: '🇹🇷', dubai: '🇦🇪', shanghai: '🇨🇳', newyork: '🇺🇸' };
   document.querySelectorAll('.cityCard').forEach((card) => {
     const c = card.dataset.city;
-    if (c === 'town') card.innerHTML = `${t('city_town')}<small>${t('city_town_sub')}</small>`;
-    else if (c === 'london') card.innerHTML = `🇬🇧 ${t('city_names').london}<small>${t('city_london_sub')}</small><span class="new">NEW</span>`;
-    else card.innerHTML = `${flags[c]} ${t('city_names')[c]}<small>${t('city_soon')}</small>`;
+    if (c === 'town') {
+      card.innerHTML = `${t('city_town')}<small>${t('city_town_sub')}</small>`;
+    } else if (window.CITY_DATA && window.CITY_DATA[c]) {
+      card.innerHTML = `${flags[c]} ${t('city_names')[c]}<small>${t('city_london_sub')}</small><span class="new">NEW</span>`;
+      card.classList.remove('locked');
+    } else {
+      card.innerHTML = `${flags[c]} ${t('city_names')[c]}<small>${t('city_soon')}</small>`;
+    }
   });
   // HUD
   $('smCredits').textContent = t('hud_credits');

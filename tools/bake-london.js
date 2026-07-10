@@ -214,15 +214,33 @@ const data = {
     riverWidth: Math.round(240 * S),
     stations: outStations,
     lines: outLines,
-    thames, bridges, streets, parks, landmarks, busRoutes,
+    river: thames, bridges, streets, parks, landmarks, busRoutes,
+    ferries: [],
+    market: P(-0.1228, 51.5120),          // 考文特花园市集
+    boothColor: 0xc0281c, postbox: true,
+    treeStreet: '维多利亚堤岸',
+    spawn: { x: -163, z: 128, yaw: 2.0 }, // 威斯敏斯特桥南岸
+    // 建筑风格分区（投影坐标矩形，先匹配者生效）
+    zones: [
+      { r: [170, -374, 749, 60], pal: ['玻璃蓝', '玻璃蓝', '灰', '米白'], h: [16, 34], tall: { c: 0.25, h: [45, 95] } },
+      { r: [-749, 60, 749, 374], pal: ['砖红', '砖红', '灰', '米白'], h: [9, 20] },
+      { r: [-749, -374, -380, 374], pal: ['米白', '米白', '米白', '砖红'], h: [12, 19] },
+      { r: [-380, -374, -120, -120], pal: ['彩', '砖红', '米白', '彩'], h: [9, 15] },
+    ],
+    zoneDefault: { pal: ['米白', '砖红', '米白', '灰'], h: [11, 22] },
+    banned: ['泰晤士', '大本钟', '伦敦眼', '摩天轮', '碎片', '小黄瓜', '白金汉', '威斯敏斯特', '西敏',
+      '圣保罗', '特拉法加', '塔桥', '伦敦塔', '议会', '国会', '皮卡迪利', '牛津', '摄政',
+      '河岸', '舰队', '白厅', '南岸', '博罗', 'thames', 'big ben', 'eye', 'shard', 'gherkin',
+      'buckingham', 'westminster', 'st paul', 'trafalgar', 'whitehall', 'oxford', 'regent',
+      'piccadilly', 'strand', 'fleet', 'borough', 'soho'],
   },
 };
 
 process.stdout.write(
-  '/* 由 tools/bake-london.js 自动生成 —— 请勿手改\n' +
+  '/* 由 tools/bake-*.js 自动生成 —— 请勿手改\n' +
   ' * 地铁数据来源: github.com/nicola/tubemaps (维基百科/TfL 公开数据)\n' +
   ' * 地理要素按真实经纬度描摹, 比例 1:' + Math.round(1 / S) + ' */\n' +
-  'window.CITY_DATA = ' + JSON.stringify(data) + ';\n'
+  'window.CITY_DATA = Object.assign(window.CITY_DATA || {}, ' + JSON.stringify(data) + ');\n'
 );
 console.error(`✔ 站点 ${outStations.length} 个, 线路链 ${outLines.length} 条`);
 outLines.forEach((l) => console.error(`  - ${l.name} (${l.stations.length} 站${l.loop ? ', 环线' : ''})`));
