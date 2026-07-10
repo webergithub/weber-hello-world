@@ -18,4 +18,17 @@ enum Identity {
         }
         set { UserDefaults.standard.set(newValue, forKey: "trailmate.nick") }
     }
+
+    // 队伍码：跟车/营地按此分房间过滤。默认 "public"（公共队）。
+    static var team: String {
+        get { UserDefaults.standard.string(forKey: "trailmate.team") ?? "public" }
+        set { UserDefaults.standard.set(newValue.isEmpty ? "public" : newValue, forKey: "trailmate.team") }
+    }
+
+    static func newTeamCode() -> String {
+        let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")   // 去掉易混字符
+        var s = ""
+        for _ in 0..<6 { s.append(chars[Int(arc4random_uniform(UInt32(chars.count)))]) }
+        return s
+    }
 }

@@ -12,8 +12,9 @@ final class RootTabBarController: UITabBarController {
         let ledger = wrap(LedgerViewController(), title: "记账")
         let camp = wrap(CampViewController(), title: "营地")
         let voice = wrap(VoiceViewController(), title: "变声")
+        let team = wrap(TeamViewController(), title: "队伍")
 
-        viewControllers = [convoy, ledger, camp, voice]
+        viewControllers = [team, convoy, ledger, camp, voice]
     }
 
     private func wrap(_ vc: UIViewController, title: String) -> UINavigationController {

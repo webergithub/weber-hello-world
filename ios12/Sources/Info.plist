@@ -40,5 +40,7 @@
 	<string>用于在无移动网络的营地，通过蓝牙与附近同伴自组网互发消息。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于趣味变声的实时试听与录制。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于扫描队伍二维码入队，以及拍照录入小票。</string>
 </dict>
 </plist>
