@@ -3,9 +3,10 @@
 与 `ios12/`（原生 iOS）对应的**原生 Android** 版本，纯 Kotlin，覆盖老安卓机（minSdk 21 / Android 5.0），
 与仓库根目录的 Capacitor `android/`（网页壳）是两套并行实现。
 
-## 当前进度（里程碑 1）
+## 当前进度
 - ✅ **记账**：成员管理、记一笔（平均分摊）、各家净额、最优转账结算，SharedPreferences 持久化
-- ⏳ 跟车（osmdroid 地图 + 定位）、营地（蓝牙 Mesh，复用 Capacitor 版 Java 逻辑思路）、变声、队伍二维码 —— 后续里程碑逐个补
+- ✅ **跟车**：osmdroid 地图（道路/卫星切换）+ 定位（底部导航切换）
+- ⏳ 营地（蓝牙 Mesh，Kotlin）、变声、队伍二维码 —— 后续里程碑逐个补
 
 ## 构建
 CI 自动出 APK：`.github/workflows/android-native-build.yml`（改动 `android-native/**` 即触发），
