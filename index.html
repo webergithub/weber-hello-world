@@ -86,6 +86,11 @@
   .langBtn { border:1px solid rgba(255,255,255,.25); background:rgba(255,255,255,.06); color:#c8d2e0;
     border-radius:8px; padding:4px 10px; font-size:12.5px; cursor:pointer; font-family:inherit; font-weight:700; }
   .langBtn.on { background:#ffd166; color:#0b1220; border-color:#ffd166; }
+  .avRow { display:flex; align-items:center; gap:12px; margin:10px 0; }
+  .avRow label { min-width:44px; text-align:right; }
+  .avSwatches { display:flex; gap:7px; flex-wrap:wrap; }
+  .avSw { width:30px; height:30px; border-radius:50%; border:2px solid rgba(255,255,255,.25); cursor:pointer; }
+  .avSw.on { border-color:#ffd166; box-shadow:0 0 0 2px rgba(255,209,102,.5); }
   .winBar { display:flex; justify-content:space-between; align-items:center; padding:5px 6px 5px 12px;
     font-size:12.5px; font-weight:700; color:#c8d2e0; border-bottom:1px solid rgba(255,255,255,.1);
     user-select:none; cursor:move; }
@@ -218,7 +223,7 @@
       <div class="cityRow" id="cityRow">
         <div class="cityCard sel" data-city="town">🏙 随机小镇<small>程序生成</small></div>
         <div class="cityCard" data-city="london">🇬🇧 伦敦<small>真实地图数据</small><span class="new">NEW</span></div>
-        <div class="cityCard locked" data-city="istanbul">🇹🇷 伊斯坦布尔<small>敬请期待</small></div>
+        <div class="cityCard" data-city="istanbul">🇹🇷 伊斯坦布尔<small>真实地图数据</small><span class="new">NEW</span></div>
         <div class="cityCard locked" data-city="dubai">🇦🇪 迪拜<small>敬请期待</small></div>
         <div class="cityCard" data-city="shanghai">🇨🇳 上海<small>真实地图数据</small><span class="new">NEW</span></div>
         <div class="cityCard locked" data-city="newyork">🇺🇸 纽约<small>敬请期待</small></div>
@@ -251,7 +256,8 @@
         </div>
         <small id="adminHint" style="color:#8fa2bc; width:100%; text-align:center;">人物与交通工具的移动速度 = 现实速度 × n（默认 3）</small>
       </div>
-      <button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
+      <div><button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
+      <button class="btn secondary" id="avatarBtn" style="margin-top:8px;">👤 自定义形象</button></div>
       <div id="controlsHelp">
         <kbd>W A S D</kbd> 移动 · <kbd>Shift</kbd> 奔跑 · 按住鼠标拖动转视角 · <kbd>E</kbd> 抓人 / 上下公交<br>
         <kbd>B</kbd> 在站点借还单车 (8💰) · <kbd>M</kbd> 打车 (15💰+里程) · <kbd>R</kbd> 雷达测距 (12💰) · <kbd>V</kbd> 切换视角 · <kbd>C</kbd> 收起线索
@@ -287,6 +293,19 @@
       <canvas id="bigMap" width="560" height="560"></canvas>
       <div id="mapHint">🚕 点击地图任意位置打车前往 —— 预计费用 <span id="mapCost">--</span></div>
       <button class="btn secondary" id="mapClose">取消 (M)</button>
+    </div>
+  </div>
+
+  <!-- 形象定制 -->
+  <div id="avatarModal" class="overlay hidden">
+    <div class="panel" style="width:min(460px,94vw);">
+      <h2 id="avTitle" style="margin-bottom:14px;">👤 自定义你的形象</h2>
+      <div id="avRows"></div>
+      <div style="text-align:right; margin-top:14px;">
+        <button class="btn secondary" id="avClose">×</button>
+        <button class="btn secondary" id="avRandom">🎲 随机</button>
+        <button class="btn teal" id="avSave">✅ 保存</button>
+      </div>
     </div>
   </div>
 

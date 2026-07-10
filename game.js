@@ -101,8 +101,9 @@ zh: {
   err_short: '线索太短啦，至少写 4 个字～', err_digits: '不可以带数字（会暴露坐标/门牌）！',
   err_banned: (w) => `不可以出现地点词「${w}」！换个说法试试～`,
   bounty_tag: (b) => `悬赏 ${b}💰`,
+  av_btn: '👤 自定义形象', av_title: '👤 自定义你的形象', av_skin: '肤色', av_shirt: '上衣', av_pants: '裤子', av_hair: '发色', av_save: '✅ 保存', av_random: '🎲 随机',
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
-  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头' },
+  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
   spots: {
     tower: '一座高塔脚下的背阴处', fountain: '水池边沿的外侧', reed: '一丛细长植物的中间',
@@ -191,8 +192,9 @@ en: {
   err_short: 'Too short — write at least 4 characters', err_digits: 'No digits allowed (they could reveal coordinates)!',
   err_banned: (w) => `The location word “${w}” is not allowed! Try another phrasing`,
   bounty_tag: (b) => `Bounty ${b}💰`,
+  av_btn: '👤 Avatar', av_title: '👤 Customize your avatar', av_skin: 'Skin', av_shirt: 'Shirt', av_pants: 'Pants', av_hair: 'Hair', av_save: '✅ Save', av_random: '🎲 Random',
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
-  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai' },
+  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
   spots: {
     tower: 'the shaded foot of a tall tower', fountain: 'the outer rim of a water basin', reed: 'among a clump of tall reeds',
@@ -1548,6 +1550,31 @@ function buildLondonLandmark(city, g, lm) {
       city.aabbs.push({ x1: x - 8, z1: z - 5, x2: x + 8, z2: z + 5 });
       break;
     }
+    case 'mosque': {       // 大圆顶 + 四座宣礼塔
+      addBox(20, 12, 20, x, 6, z, lambert(0xd4c8a8));
+      const dome2 = new THREE.Mesh(new THREE.SphereGeometry(9, 18, 12, 0, Math.PI * 2, 0, Math.PI / 2), lambert(0x7a8a94));
+      dome2.position.set(x, 12, z); dome2.castShadow = true; g.add(dome2);
+      [[-12, -12], [12, -12], [-12, 12], [12, 12]].forEach(([ox, oz]) => {
+        const mn = new THREE.Mesh(new THREE.CylinderGeometry(0.9, 1.1, 26, 8), lambert(0xe0d6c0));
+        mn.position.set(x + ox, 13, z + oz); mn.castShadow = true; g.add(mn);
+        const cp = new THREE.Mesh(new THREE.ConeGeometry(1.3, 3.6, 8), lambert(0x8a8f96));
+        cp.position.set(x + ox, 27.8, z + oz); g.add(cp);
+      });
+      city.aabbs.push({ x1: x - 10.5, z1: z - 10.5, x2: x + 10.5, z2: z + 10.5 });
+      city.spots.push({ x: x + 12.2, z: z - 12.2, prop: 'abbey', label: tSpot('abbey') });
+      break;
+    }
+    case 'galata': {       // 石砌圆塔
+      const gt = new THREE.Mesh(new THREE.CylinderGeometry(4.2, 4.8, 30, 14), lambert(0xc9bda0));
+      gt.position.set(x, 15, z); gt.castShadow = true; g.add(gt);
+      const ring2 = new THREE.Mesh(new THREE.CylinderGeometry(5.2, 5.2, 2.4, 14), lambert(0xb8ac90));
+      ring2.position.set(x, 29, z); g.add(ring2);
+      const cone2 = new THREE.Mesh(new THREE.ConeGeometry(4.6, 7, 14), lambert(0x5f6f7a));
+      cone2.position.set(x, 34, z); cone2.castShadow = true; g.add(cone2);
+      city.circles.push({ x, z, r: 5.2 });
+      city.spots.push({ x: x + 6, z: z + 3, prop: 'tower', label: tSpot('tower') });
+      break;
+    }
     case 'pavilion': {     // 古典园林亭子（翘檐）
       [[-1.6, -1.6], [1.6, -1.6], [-1.6, 1.6], [1.6, 1.6]].forEach(([ox, oz]) => {
         const col = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 3.2, 8), lambert(0x8a2018));
@@ -2320,10 +2347,21 @@ const player = {
   camDist: 7.5,
 };
 
+function playerPalette() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('ct_avatar') || 'null');
+    if (saved && saved.skin) return saved;
+  } catch (e) { /* 忽略损坏存档 */ }
+  return { skin: 0xe8b992, shirt: 0x2f6fd6, pants: 0x2b3038, hair: 0x2a2320 };
+}
+function rebuildPlayerMesh() {
+  if (player.mesh) { scene.remove(player.mesh); player.mesh = null; }
+  makePlayerMesh();
+}
 function makePlayerMesh() {
   if (player.mesh) scene.add(player.mesh);
   else {
-    player.mesh = makePersonMesh(0x2f6fd6, 0xffd166);
+    player.mesh = makeHuman(playerPalette());
     // 单车（骑行时显示）
     const bike = new THREE.Group();
     [[-0.55], [0.55]].forEach(([off]) => {
@@ -3688,7 +3726,58 @@ function updateInteractPrompt() {
   setPrompt('');
 }
 
+/* ---- 玩家自定义形象 ---- */
+function initAvatarUI() {
+  const rows = [
+    ['av_skin', 'skin', SKIN_TONES],
+    ['av_shirt', 'shirt', CLOTH_TONES],
+    ['av_pants', 'pants', PANTS_TONES],
+    ['av_hair', 'hair', HAIR_TONES],
+  ];
+  const cur = playerPalette();
+  const wrap = $('avRows');
+  wrap.innerHTML = '';
+  rows.forEach(([labelKey, key, tones]) => {
+    const row = document.createElement('div');
+    row.className = 'avRow';
+    row.innerHTML = `<label>${t(labelKey)}</label>`;
+    const sw = document.createElement('div');
+    sw.className = 'avSwatches';
+    tones.forEach((hex) => {
+      const b = document.createElement('button');
+      b.className = 'avSw' + (cur[key] === hex ? ' on' : '');
+      b.style.background = '#' + hex.toString(16).padStart(6, '0');
+      b.addEventListener('click', () => {
+        cur[key] = hex;
+        sw.querySelectorAll('.avSw').forEach((x) => x.classList.remove('on'));
+        b.classList.add('on');
+      });
+      sw.appendChild(b);
+    });
+    row.appendChild(sw);
+    wrap.appendChild(row);
+  });
+  $('avSave').onclick = () => {
+    localStorage.setItem('ct_avatar', JSON.stringify(cur));
+    rebuildPlayerMesh();
+    $('avatarModal').classList.add('hidden');
+    AudioSys.coin();
+  };
+  $('avRandom').onclick = () => {
+    Object.assign(cur, makeHumanPalette());
+    localStorage.setItem('ct_avatar', JSON.stringify(cur));
+    initAvatarUI();
+  };
+  $('avClose').onclick = () => $('avatarModal').classList.add('hidden');
+}
+$('avatarBtn').addEventListener('click', () => {
+  AudioSys.click();
+  initAvatarUI();
+  $('avatarModal').classList.remove('hidden');
+});
+
 /* ---- 静态界面文案（i18n） ---- */
+
 function applyStaticLang() {
   document.title = LANG === 'zh' ? 'CityTwin · 城市孪生躲猫猫' : 'CityTwin · City-Twin Hide & Seek';
   const q = (sel) => document.querySelector(sel);
@@ -3704,6 +3793,10 @@ function applyStaticLang() {
   [...$('difficulty').options].forEach((o, i) => { o.text = t('diff')[i]; });
   [...$('timeLimit').options].forEach((o, i) => { o.text = t('times')[i]; });
   $('startBtn').textContent = t('btn_start');
+  $('avatarBtn').textContent = t('av_btn');
+  $('avTitle').textContent = t('av_title');
+  $('avSave').textContent = t('av_save');
+  $('avRandom').textContent = t('av_random');
   $('controlsHelp').innerHTML = t('help');
   $('lblAdmin').textContent = t('admin_label');
   $('adminHint').textContent = t('admin_hint');
