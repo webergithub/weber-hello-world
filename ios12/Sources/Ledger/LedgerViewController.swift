@@ -1,9 +1,11 @@
 import UIKit
 
 // 记账：成员管理 + 记一笔（平均分摊）+ 各家账单 + 最优转账结算。纯 UIKit，iOS 12 可用。
-final class LedgerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate {
+final class LedgerViewController: UIViewController, UITableViewDataSource, UITableViewDelegate,
+    UIImagePickerControllerDelegate, UINavigationControllerDelegate {
     private let table = UITableView(frame: .zero, style: .grouped)
     private let store = LedgerStore.shared
+    private var pendingReceipt: String?   // 本次拍照小票文件名
 
     private enum Section: Int, CaseIterable { case members, expenses, settlement }
 
@@ -20,7 +22,43 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
         view.addSubview(table)
 
         navigationItem.leftBarButtonItem = UIBarButtonItem(title: "＋成员", style: .plain, target: self, action: #selector(addMember))
-        navigationItem.rightBarButtonItem = UIBarButtonItem(title: "记一笔", style: .done, target: self, action: #selector(addExpense))
+        navigationItem.rightBarButtonItems = [
+            UIBarButtonItem(title: "记一笔", style: .done, target: self, action: #selector(addExpense)),
+            UIBarButtonItem(title: "📷小票", style: .plain, target: self, action: #selector(scanReceipt)),
+        ]
+    }
+
+    // MARK: - 拍照小票
+    @objc private func scanReceipt() {
+        guard !store.members.isEmpty else { addExpense(); return }   // 复用"先加成员"提示
+        guard UIImagePickerController.isSourceTypeAvailable(.camera) else {
+            let a = UIAlertController(title: "无可用相机", message: "此设备/模拟器没有相机。", preferredStyle: .alert)
+            a.addAction(UIAlertAction(title: "好", style: .default)); present(a, animated: true); return
+        }
+        let picker = UIImagePickerController()
+        picker.sourceType = .camera
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    func imagePickerController(_ picker: UIImagePickerController,
+                              didFinishPickingMediaWithInfo info: [UIImagePickerController.InfoKey: Any]) {
+        picker.dismiss(animated: true)
+        guard let image = info[.originalImage] as? UIImage else { return }
+        pendingReceipt = store.saveReceipt(image)
+        let progress = UIAlertController(title: "识别中…", message: "正在读取小票金额", preferredStyle: .alert)
+        present(progress, animated: true)
+        ReceiptOCR.recognizeText(image) { [weak self] text in
+            progress.dismiss(animated: true) {
+                let cents = ReceiptOCR.guessAmountCents(text)
+                self?.presentAddExpense(prefillCents: cents, note: cents == nil ? "未识别到金额，请手填（图片已存）" : "已识别金额，可修改")
+            }
+        }
+    }
+
+    func imagePickerControllerDidCancel(_ picker: UIImagePickerController) {
+        picker.dismiss(animated: true)
+        pendingReceipt = nil
     }
 
     private func reload() { table.reloadData() }
@@ -44,10 +82,20 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
             a.addAction(UIAlertAction(title: "好", style: .default))
             present(a, animated: true); return
         }
-        let a = UIAlertController(title: "记一笔", message: "费用将在全体成员间平均分摊", preferredStyle: .alert)
+        pendingReceipt = nil
+        presentAddExpense(prefillCents: nil, note: nil)
+    }
+
+    private func presentAddExpense(prefillCents: Int?, note: String?) {
+        var msg = "费用将在全体成员间平均分摊"
+        if let note = note { msg += "\n" + note }
+        let a = UIAlertController(title: "记一笔", message: msg, preferredStyle: .alert)
         a.addTextField { $0.placeholder = "项目（如 午餐 / 油费）" }
-        a.addTextField { $0.placeholder = "金额（元）"; $0.keyboardType = .decimalPad }
-        a.addAction(UIAlertAction(title: "取消", style: .cancel))
+        a.addTextField {
+            $0.placeholder = "金额（元）"; $0.keyboardType = .decimalPad
+            if let c = prefillCents { $0.text = Ledger.yuan(c) }
+        }
+        a.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in self?.pendingReceipt = nil })
         a.addAction(UIAlertAction(title: "下一步：选付款人", style: .default) { [weak self] _ in
             guard let self = self else { return }
             let title = a.textFields?.first?.text?.trimmingCharacters(in: .whitespaces) ?? ""
@@ -65,14 +113,15 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
             sheet.addAction(UIAlertAction(title: m.name, style: .default) { [weak self] _ in
                 guard let self = self else { return }
                 self.store.addExpense(title: title, payerId: m.id, amountCents: cents,
-                                      participantIds: self.store.members.map { $0.id })
+                                      participantIds: self.store.members.map { $0.id },
+                                      receiptPath: self.pendingReceipt)
+                self.pendingReceipt = nil
                 self.reload()
             })
         }
-        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
-        // iPad 兼容：actionSheet 需要 anchor
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel) { [weak self] _ in self?.pendingReceipt = nil })
         if let pop = sheet.popoverPresentationController {
-            pop.barButtonItem = navigationItem.rightBarButtonItem
+            pop.barButtonItem = navigationItem.rightBarButtonItems?.first
         }
         present(sheet, animated: true)
     }
@@ -119,10 +168,10 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
                 cell.textLabel?.textColor = .gray
             } else {
                 let e = store.expenses[ip.row]
-                cell.textLabel?.text = "\(e.title)  ¥\(Ledger.yuan(e.amountCents))"
                 cell.textLabel?.numberOfLines = 0
                 let payer = store.name(of: e.payerId)
-                cell.textLabel?.text = "\(e.title)  ¥\(Ledger.yuan(e.amountCents))\n\(payer) 垫付 · \(e.participantIds.count) 人分摊"
+                let receipt = e.receiptPath != nil ? "📷 " : ""
+                cell.textLabel?.text = "\(receipt)\(e.title)  ¥\(Ledger.yuan(e.amountCents))\n\(payer) 垫付 · \(e.participantIds.count) 人分摊"
             }
         case .settlement:
             let transfers = Ledger.settle(Ledger.balances(members: store.members, expenses: store.expenses))

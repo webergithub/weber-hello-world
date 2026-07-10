@@ -1,4 +1,4 @@
-import Foundation
+import UIKit
 
 // 记账领域模型 + AA 结算算法（纯逻辑，iOS 12 可用）。金额一律用「分」整数，杜绝浮点误差。
 
@@ -13,6 +13,7 @@ struct Expense: Codable {
     var payerId: String
     var amountCents: Int
     var participantIds: [String]   // 参与分摊的成员（快照）
+    var receiptPath: String?       // 小票照片文件名（可选）
 }
 
 struct Transfer {
@@ -119,10 +120,19 @@ final class LedgerStore {
         save()
     }
 
-    func addExpense(title: String, payerId: String, amountCents: Int, participantIds: [String]) {
+    func addExpense(title: String, payerId: String, amountCents: Int, participantIds: [String], receiptPath: String? = nil) {
         expenses.insert(Expense(id: UUID().uuidString, title: title, payerId: payerId,
-                                amountCents: amountCents, participantIds: participantIds), at: 0)
+                                amountCents: amountCents, participantIds: participantIds,
+                                receiptPath: receiptPath), at: 0)
         save()
+    }
+
+    // 保存小票图片到 Documents，返回文件名
+    func saveReceipt(_ image: UIImage) -> String? {
+        guard let data = image.jpegData(compressionQuality: 0.6) else { return nil }
+        let name = "receipt_\(UUID().uuidString).jpg"
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent(name)
+        do { try data.write(to: url); return name } catch { return nil }
     }
 
     func removeExpense(id: String) {
