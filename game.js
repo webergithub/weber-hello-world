@@ -103,7 +103,7 @@ zh: {
   bounty_tag: (b) => `悬赏 ${b}💰`,
   av_btn: '👤 自定义形象', av_title: '👤 自定义你的形象', av_skin: '肤色', av_shirt: '上衣', av_pants: '裤子', av_hair: '发色', av_save: '✅ 保存', av_random: '🎲 随机',
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
-  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头' },
+  area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
   spots: {
     tower: '一座高塔脚下的背阴处', fountain: '水池边沿的外侧', reed: '一丛细长植物的中间',
@@ -194,7 +194,7 @@ en: {
   bounty_tag: (b) => `Bounty ${b}💰`,
   av_btn: '👤 Avatar', av_title: '👤 Customize your avatar', av_skin: 'Skin', av_shirt: 'Shirt', av_pants: 'Pants', av_hair: 'Hair', av_save: '✅ Save', av_random: '🎲 Random',
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
-  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul' },
+  area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
   spots: {
     tower: 'the shaded foot of a tall tower', fountain: 'the outer rim of a water basin', reed: 'among a clump of tall reeds',
@@ -1573,6 +1573,28 @@ function buildLondonLandmark(city, g, lm) {
       cone2.position.set(x, 34, z); cone2.castShadow = true; g.add(cone2);
       city.circles.push({ x, z, r: 5.2 });
       city.spots.push({ x: x + 6, z: z + 3, prop: 'tower', label: tSpot('tower') });
+      break;
+    }
+    case 'burj': {         // 阶梯式通天塔
+      [[13, 60, 0, 0], [10, 120, 3, 2], [7, 170, -3, -2], [4.5, 205, 0, 0]].forEach(([r, hh, ox, oz]) => {
+        const seg = new THREE.Mesh(new THREE.CylinderGeometry(r * 0.7, r, hh, 6), new THREE.MeshLambertMaterial({ color: 0xb9c9d6 }));
+        seg.position.set(x + ox, hh / 2, z + oz);
+        seg.castShadow = true; g.add(seg);
+      });
+      const spire2 = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 1.2, 40, 6), lambert(0x9aa0a6));
+      spire2.position.set(x, 225, z); g.add(spire2);
+      city.circles.push({ x, z, r: 14 });
+      city.spots.push({ x: x + 15.5, z: z + 5, prop: 'shard', label: tSpot('shard') });
+      break;
+    }
+    case 'mofuture': {     // 银色圆环建筑
+      const ring3 = new THREE.Mesh(new THREE.TorusGeometry(11, 4.2, 12, 28), new THREE.MeshLambertMaterial({ color: 0xc9ccd2 }));
+      ring3.position.set(x, 15, z);
+      ring3.castShadow = true; g.add(ring3);
+      const base3 = new THREE.Mesh(new THREE.CylinderGeometry(10, 12, 4, 16), lambert(0x6faf68));
+      base3.position.set(x, 2, z); base3.receiveShadow = true; g.add(base3);
+      city.circles.push({ x, z, r: 12.5 });
+      city.spots.push({ x: x + 14, z: z - 4, prop: 'gherkin', label: tSpot('gherkin') });
       break;
     }
     case 'pavilion': {     // 古典园林亭子（翘檐）
@@ -3552,6 +3574,18 @@ $('modeHot').addEventListener('click', () => { $('modeHot').classList.add('sel')
     localStorage.setItem('hs_simMul', String(SIM.mul));
     renderSim();
   });
+}
+
+/* Google Maps API Key（照片级 3D 底板，待接入） */
+{
+  const gk = $('gKey');
+  if (gk) {
+    gk.value = localStorage.getItem('ct_gkey') || '';
+    gk.addEventListener('change', () => {
+      localStorage.setItem('ct_gkey', gk.value.trim());
+      if (gk.value.trim()) showToast('🔑 API Key 已保存。Google 3D 底板将在下个版本启用！', 'gold');
+    });
+  }
 }
 
 /* 城市选择 */

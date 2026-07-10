@@ -224,9 +224,9 @@
         <div class="cityCard sel" data-city="town">🏙 随机小镇<small>程序生成</small></div>
         <div class="cityCard" data-city="london">🇬🇧 伦敦<small>真实地图数据</small><span class="new">NEW</span></div>
         <div class="cityCard" data-city="istanbul">🇹🇷 伊斯坦布尔<small>真实地图数据</small><span class="new">NEW</span></div>
-        <div class="cityCard locked" data-city="dubai">🇦🇪 迪拜<small>敬请期待</small></div>
+        <div class="cityCard" data-city="dubai">🇦🇪 迪拜<small>真实地图数据</small><span class="new">NEW</span></div>
         <div class="cityCard" data-city="shanghai">🇨🇳 上海<small>真实地图数据</small><span class="new">NEW</span></div>
-        <div class="cityCard locked" data-city="newyork">🇺🇸 纽约<small>敬请期待</small></div>
+        <div class="cityCard" data-city="newyork">🇺🇸 纽约<small>真实地图数据</small><span class="new">NEW</span></div>
       </div>
       <div class="modeBtns">
         <div class="modeCard sel" id="modeAI">
@@ -255,6 +255,10 @@
           <b id="simSpeedVal" style="color:#ffd166; min-width:70px;">3× 现实</b>
         </div>
         <small id="adminHint" style="color:#8fa2bc; width:100%; text-align:center;">人物与交通工具的移动速度 = 现实速度 × n（默认 3）</small>
+        <div class="cfgItem" style="flex:1; width:100%;">
+          <label style="white-space:nowrap;">🔑 Google Maps Key</label>
+          <input type="text" id="gKey" placeholder="粘贴 API Key 以启用照片级 3D 底板（可选）" style="flex:1; font-size:12.5px;">
+        </div>
       </div>
       <div><button class="btn" id="startBtn" style="font-size:19px; padding:12px 44px; margin-top:8px;">开 始 游 戏</button>
       <button class="btn secondary" id="avatarBtn" style="margin-top:8px;">👤 自定义形象</button></div>
