@@ -43,7 +43,7 @@ $SUDO systemctl enable --now nginx
 echo "==> [3/5] 部署静态文件到 $WEBROOT"
 $SUDO mkdir -p "$WEBROOT"
 $SUDO cp -f "$SRC/index.html" "$SRC/game.js" "$SRC/cities.js" "$WEBROOT/"
-$SUDO cp -rf "$SRC/lib" "$WEBROOT/"
+$SUDO cp -rf "$SRC/lib" "$SRC/data" "$WEBROOT/"
 $SUDO cp -f "$SRC/deploy/homepage-card.html" "$WEBROOT/homepage-card.html" 2>/dev/null || true
 # SELinux（Oracle Linux 默认开启）：允许 nginx 读取
 if command -v restorecon >/dev/null 2>&1; then $SUDO restorecon -R "$WEBROOT" || true; fi
