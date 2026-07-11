@@ -52,6 +52,6 @@ jobs:
           ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
           rsync -avz --delete \
             -e "ssh -i ~/.ssh/deploy_key" \
-            index.html game.js cities.js lib README.md \
+            index.html game.js cities.js lib data README.md \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
           echo "✅ 部署完成 → http://$DEPLOY_HOST/ (视你的 web 服务配置而定)"

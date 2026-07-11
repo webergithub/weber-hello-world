@@ -14,7 +14,7 @@
 | 🇺🇸 纽约 | ✅ NEW | **真实地图数据**：地铁 1/4·5·6/N·Q 线真实站名（Times Sq、Grand Central…）、百老汇斜穿曼哈顿网格、中央公园、布鲁克林大桥、东河轮渡、帝国大厦/世贸一号/克莱斯勒 |
 | 🇦🇪 迪拜 | ✅ NEW | **真实地图数据**：地铁红线真实站名、谢赫扎耶德路超高层长廊、哈利法塔（205m 游戏最高）、未来博物馆圆环、迪拜水渠与河湾 **Abra 摆渡** |
 
-伦敦地铁数据来源：[nicola/tubemaps](https://github.com/nicola/tubemaps)（维基百科/TfL 公开数据），由 `tools/bake-london.js` 烘焙为 `cities.js`；河流/街道/公园/地标按真实经纬度描摹。
+**全部五城均使用真实建筑轮廓**：14 万栋建筑（形状/朝向/真实高度）来自 [Overture Maps](https://overturemaps.org) 开放数据（Meta/微软/亚马逊共建，免 key），由 `tools/bake-buildings.py` 从 S3 按城市范围抽取烘焙。伦敦地铁数据来源：[nicola/tubemaps](https://github.com/nicola/tubemaps)（维基百科/TfL 公开数据）；河流/街道/公园/地标按真实经纬度描摹。
 
 ## 🚀 试玩
 

@@ -1288,8 +1288,13 @@ function genRealCity(cityKey) {
   /* ---- 地铁 ---- */
   buildLondonTransit(city, g, D);
 
-  /* ---- 建筑填充 ---- */
-  buildLondonBuildings(city, g, D);
+  /* ---- 建筑填充：优先 Overture 真实轮廓，否则程序化 ---- */
+  if (window.CITY_BUILDINGS && window.CITY_BUILDINGS[cityKey]) {
+    buildRealBuildings(city, g, D, window.CITY_BUILDINGS[cityKey]);
+  } else {
+    buildLondonBuildings(city, g, D);
+  }
+  buildCollisionHash(city);
 
   /* ---- 街头道具 & 藏点 ---- */
   buildLondonProps(city, g, D, treePlace);
@@ -1758,6 +1763,74 @@ function buildLondonTransit(city, g, D) {
       cost: 2,
     });
   });
+}
+
+/* ---- Overture 真实建筑轮廓渲染 ---- */
+function buildRealBuildings(city, g, D, RB) {
+  const zoneFor = (x, z) => (D.zones || []).find((zn) => {
+    const x1 = Math.min(zn.r[0], zn.r[2]), x2 = Math.max(zn.r[0], zn.r[2]);
+    const z1 = Math.min(zn.r[1], zn.r[3]), z2 = Math.max(zn.r[1], zn.r[3]);
+    return x >= x1 && x <= x2 && z >= z1 && z <= z2;
+  }) || D.zoneDefault;
+  const palHex = {};
+  LONDON_PAL.forEach(([n, h]) => { (palHex[n] = palHex[n] || []).push(h); });
+  const CHUNK = 2200;
+  const tmp = new THREE.Color();
+  const roofC = new THREE.Color(0x44474c);
+  for (let start = 0; start < RB.b.length; start += CHUNK) {
+    const slice = RB.b.slice(start, start + CHUNK);
+    const pos = [], col = [], idx = [];
+    slice.forEach((bld, bi) => {
+      const [h, flat, roofIdx] = bld;
+      const n = flat.length / 2;
+      let cx = 0, cz = 0;
+      for (let i = 0; i < n; i++) { cx += flat[i * 2]; cz += flat[i * 2 + 1]; }
+      cx /= n; cz /= n;
+      const zone = zoneFor(cx, cz);
+      const name = zone.pal[(bi + n) % zone.pal.length];
+      const opts = palHex[name] || palHex['米白'];
+      tmp.setHex(opts[(bi * 7 + n) % opts.length]).offsetHSL(0, 0, ((bi * 131) % 13) / 100 - 0.06);
+      const base = pos.length / 3;
+      // 墙体
+      for (let i = 0; i < n; i++) {
+        const j = (i + 1) % n;
+        const x1 = flat[i * 2], z1 = flat[i * 2 + 1], x2 = flat[j * 2], z2 = flat[j * 2 + 1];
+        const b0 = pos.length / 3;
+        pos.push(x1, 0, z1, x2, 0, z2, x2, h, z2, x1, h, z1);
+        const shade = 0.82 + ((i * 37) % 5) * 0.045; // 面向差异明暗
+        for (let k = 0; k < 4; k++) col.push(tmp.r * shade, tmp.g * shade, tmp.b * shade);
+        idx.push(b0, b0 + 2, b0 + 1, b0, b0 + 3, b0 + 2);
+      }
+      // 屋顶
+      const r0 = pos.length / 3;
+      for (let i = 0; i < n; i++) {
+        pos.push(flat[i * 2], h, flat[i * 2 + 1]);
+        col.push(roofC.r, roofC.g, roofC.b);
+      }
+      for (let i = 0; i < roofIdx.length; i += 3) {
+        idx.push(r0 + roofIdx[i], r0 + roofIdx[i + 2], r0 + roofIdx[i + 1]);
+      }
+      // 碰撞 AABB + 线索用建筑记录（抽样）
+      let x1 = 1e9, z1 = 1e9, x2 = -1e9, z2 = -1e9;
+      for (let i = 0; i < n; i++) {
+        x1 = Math.min(x1, flat[i * 2]); x2 = Math.max(x2, flat[i * 2]);
+        z1 = Math.min(z1, flat[i * 2 + 1]); z2 = Math.max(z2, flat[i * 2 + 1]);
+      }
+      city.aabbs.push({ x1, z1, x2, z2 });
+      if ((start + bi) % 12 === 0) {
+        city.buildings.push({ x: cx, z: cz, w: x2 - x1, d: z2 - z1, h, colorName: name === '彩' ? '彩色' : name });
+      }
+      void base;
+    });
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    const mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    mesh.castShadow = mesh.receiveShadow = true;
+    g.add(mesh);
+  }
 }
 
 /* ---- 建筑填充（避开路/河/园/轨/地标） ---- */
@@ -2483,9 +2556,35 @@ function updateBus(dt) {
 /* ============================================================
  * 碰撞
  * ============================================================ */
+function buildCollisionHash(city) {
+  if (city.aabbs.length < 400) return;
+  const cell = 40, map = new Map();
+  city.aabbs.forEach((b) => {
+    for (let gx = Math.floor(b.x1 / cell); gx <= Math.floor(b.x2 / cell); gx++) {
+      for (let gz = Math.floor(b.z1 / cell); gz <= Math.floor(b.z2 / cell); gz++) {
+        const k = gx + '|' + gz;
+        let arr = map.get(k);
+        if (!arr) { arr = []; map.set(k, arr); }
+        arr.push(b);
+      }
+    }
+  });
+  city._hash = { cell, map };
+}
+function nearbyAabbs(c, x, z) {
+  if (!c._hash) return c.aabbs;
+  const { cell, map } = c._hash;
+  const gx = Math.floor(x / cell), gz = Math.floor(z / cell);
+  let out = [];
+  for (let dx = -1; dx <= 1; dx++) for (let dz = -1; dz <= 1; dz++) {
+    const arr = map.get((gx + dx) + '|' + (gz + dz));
+    if (arr) out = out.concat(arr);
+  }
+  return out;
+}
 function collide(x, z, r = 0.55) {
   const c = G.city;
-  for (const b of c.aabbs) {
+  for (const b of nearbyAabbs(c, x, z)) {
     const nx = clamp(x, b.x1, b.x2), nz = clamp(z, b.z1, b.z2);
     const dx = x - nx, dz = z - nz;
     const d2 = dx * dx + dz * dz;
