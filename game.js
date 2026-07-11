@@ -102,6 +102,7 @@ zh: {
   err_banned: (w) => `不可以出现地点词「${w}」！换个说法试试～`,
   bounty_tag: (b) => `悬赏 ${b}💰`,
   av_btn: '👤 自定义形象', av_title: '👤 自定义你的形象', av_skin: '肤色', av_shirt: '上衣', av_pants: '裤子', av_hair: '发色', av_save: '✅ 保存', av_random: '🎲 随机',
+  p_night: '🌙 天黑了！按 <kbd>L</kbd> 打开手电筒', p_scope: '🔭 按住 <kbd>T</kbd> 使用望远镜',
   p_drive: '🚗 按 <kbd>F</kbd> 驾驶汽车', p_driving: '🚗 W/S 油门刹车 · A/D 转向 · <kbd>F</kbd> 下车', drive_on: '🚗 上车！WASD 驾驶，F 下车', drive_off: '🚗 你下车了', p_door: '🚪 按 <kbd>E</kbd> 开/关门', poi_found: (n) => `📍 你发现了景点：<b>${n}</b>！探索奖励 +5💰`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
@@ -198,6 +199,7 @@ en: {
   err_banned: (w) => `The location word “${w}” is not allowed! Try another phrasing`,
   bounty_tag: (b) => `Bounty ${b}💰`,
   av_btn: '👤 Avatar', av_title: '👤 Customize your avatar', av_skin: 'Skin', av_shirt: 'Shirt', av_pants: 'Pants', av_hair: 'Hair', av_save: '✅ Save', av_random: '🎲 Random',
+  p_night: '🌙 Night has fallen! Press <kbd>L</kbd> for your flashlight', p_scope: '🔭 Hold <kbd>T</kbd> to use binoculars',
   p_drive: '🚗 Press <kbd>F</kbd> to drive', p_driving: '🚗 W/S throttle · A/D steer · <kbd>F</kbd> exit', drive_on: '🚗 In the car! WASD to drive, F to exit', drive_off: '🚗 You got out', p_door: '🚪 Press <kbd>E</kbd> to open/close the door', poi_found: (n) => `📍 Landmark discovered: <b>${n}</b>! +5💰 explorer bonus`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
@@ -409,6 +411,7 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+let flashlight = null, hemiLight = null, nightHinted = false;
 function makeScene() {
   scene = new THREE.Scene();
   const sky = 0xa9d7ef;
@@ -416,6 +419,12 @@ function makeScene() {
   scene.fog = new THREE.Fog(sky, 140, 520);
   const hemi = new THREE.HemisphereLight(0xcfe8ff, 0xb0a284, 0.55);
   scene.add(hemi);
+  hemiLight = hemi;
+  flashlight = new THREE.SpotLight(0xfff2d0, 0, 70, 0.42, 0.45, 1.2);
+  flashlight.visible = false;
+  scene.add(flashlight);
+  scene.add(flashlight.target);
+  nightHinted = false;
   sunLight = new THREE.DirectionalLight(0xfff2dc, 0.95);
   sunLight.position.set(150, 210, 90);
   sunLight.castShadow = true;
@@ -2981,6 +2990,7 @@ function handleKey(code) {
     if (code === 'KeyE') tryInteract();
     else if (code === 'KeyF') tryDrive();
     else if (code === 'KeyH' && player.riding === 'car') { AudioSys.beep(440, 0.25, 'square', 0.2); AudioSys.beep(349, 0.3, 'square', 0.18, 0.06); }
+    else if (code === 'KeyL') { flashlight.visible = !flashlight.visible; AudioSys.click(); }
     else if (code === 'KeyR') tryRadar();
     else if (code === 'KeyM') toggleBigMap();
     else if (code === 'KeyB') tryBike();
@@ -4023,6 +4033,36 @@ function tick() {
     updateInteractPrompt();
     // HUD 时间
     updateHUD();
+    // 昼夜循环：一局从白天到黑夜
+    {
+      const dayT = clamp(1 - G.timeLeft / G.totalTime, 0, 1);
+      const nf = Math.max(0, (dayT - 0.55) / 0.45); // 后 45% 时间入夜
+      sunLight.intensity = 0.95 * (1 - nf * 0.92);
+      hemiLight.intensity = 0.55 * (1 - nf * 0.8);
+      const sky = new THREE.Color(0xa9d7ef).lerp(new THREE.Color(0x0c1630), nf);
+      scene.background = sky;
+      if (scene.fog) scene.fog.color.copy(sky);
+      flashlight.intensity = flashlight.visible ? 1.3 : 0;
+      if (flashlight.visible) {
+        flashlight.position.set(player.x, 1.7 + (player.y || 0), player.z);
+        flashlight.target.position.set(
+          player.x - Math.sin(player.yaw) * 12,
+          1.1,
+          player.z - Math.cos(player.yaw) * 12);
+      }
+      if (nf > 0.25 && !nightHinted) {
+        nightHinted = true;
+        showToast(tr('p_night'), 'gold');
+      }
+    }
+    // 望远镜（按住 T 变焦）
+    {
+      const targetFov = keys['KeyT'] && player.riding === null ? 20 : 62;
+      if (Math.abs(camera.fov - targetFov) > 0.5) {
+        camera.fov += (targetFov - camera.fov) * Math.min(1, dt * 7);
+        camera.updateProjectionMatrix();
+      }
+    }
     // 小地图节流（窗口关闭/最小化时不绘制）
     miniTimer -= dt;
     if (miniTimer <= 0) {
