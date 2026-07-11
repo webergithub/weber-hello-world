@@ -115,6 +115,7 @@ zh: {
     stpauls: '宏伟建筑的侧面立柱后', shard: '尖顶玻璃巨塔的墙角', gherkin: '圆滚滚玻璃楼旁的花坛',
     castle: '古老城墙的墙角', column: '高大纪念柱的基座后', palace: '金色围栏尽头的石墩后',
     door: '一扇关着的木门后面',
+    indoor: '一间小店室内的柜台后面',
   },
   clues: {
     water: '我能听到近处传来的流水声', park: '空气里满是青草和泥土的味道', traffic: '不时有车辆从我身旁驶过',
@@ -125,6 +126,7 @@ zh: {
     pipe: '我蜷缩在一个圆滚滚的东西里面', trash: '我旁边有一股淡淡的酸味，不太好闻', bush: '有叶子轻轻扎着我的后背',
     booth: '我躲在一个又高又窄的小空间旁边', bench: '我旁边有一个可以坐下歇脚的东西', reed: '细长的植物在我身边随风摇晃',
     door: '我躲在一扇虚掩的门后面，光线很暗',
+    indoor: '我在一个室内空间里，说话有回声，还有暖暖的灯光',
     bigbell: '每隔一阵子，我能听到浑厚悠扬的钟声', river: '我能听到河水拍岸的声音，还有海鸥的叫声',
     trains: '我能听到列车进站出站的轰鸣和广播声', tourists: '我周围游人如织，快门声此起彼伏',
     bridge: '我头顶上方是巨大的拱形结构，很阴凉', coffee: '空气里飘着咖啡和烘焙点心的香气',
@@ -209,6 +211,7 @@ en: {
     stpauls: 'behind a column of a grand building', shard: 'at the corner of a glass spire', gherkin: 'by a rounded glass tower',
     castle: 'at the corner of ancient walls', column: 'behind the base of a tall column', palace: 'behind a plinth by golden railings',
     door: 'behind a closed wooden door',
+    indoor: 'behind the counter inside a little shop',
   },
   clues: {
     water: 'I can hear running water nearby', park: 'The air is full of the smell of grass and earth', traffic: 'Cars keep passing right by me',
@@ -219,6 +222,7 @@ en: {
     pipe: 'I am curled up inside something big and round', trash: 'There is a faint sour smell next to me', bush: 'Leaves keep tickling my back',
     booth: 'I am next to a tall, narrow little box', bench: 'There is something to sit on right beside me', reed: 'Tall thin plants sway around me',
     door: 'I am behind a door left ajar — it is dim in here',
+    indoor: 'I am indoors — my voice echoes, and there is a warm lamp glowing',
     bigbell: 'Every so often I hear deep, resonant bell tolls', river: 'I can hear water lapping, and seagulls crying',
     trains: 'I hear the rumble and announcements of trains', tourists: 'Crowds bustle around me, camera shutters clicking',
     bridge: 'A huge arched structure looms right above me', coffee: 'The air smells of coffee and fresh pastries',
@@ -350,7 +354,7 @@ const HIDER_NAMES = I18N[LANG].names;
 /* 线索模板：key -> 文案（保证不含地点词，走 i18n 词典） */
 const CLUE_TMPL = {};
 ['water', 'park', 'traffic', 'quiet', 'shade', 'chime', 'busStop', 'market', 'dust',
-  'tall', 'low', 'bcolor', 'pipe', 'trash', 'bush', 'booth', 'bench', 'reed', 'door']
+  'tall', 'low', 'bcolor', 'pipe', 'trash', 'bush', 'booth', 'bench', 'reed', 'door', 'indoor']
   .forEach((k) => { CLUE_TMPL[k] = (...a) => tClue(k, ...a); });
 
 /* ---------------- 全局状态 ---------------- */
@@ -1389,6 +1393,60 @@ function genRealCity(cityKey) {
     if (i % 2 === 0) city.spots.push({ x: bx, z: bz, prop: 'door', label: tSpot('door') });
   }
 
+  /* ---- 可进入的店面（PUBG 式室内搜索） ---- */
+  city.shops = [];
+  for (let i = 0; i < 6; i++) {
+    const st = D.streets[(i * 3 + 2) % D.streets.length];
+    const path = buildPath(st.pts);
+    const p = pathPoint(path, path.total * (0.3 + (i % 3) * 0.18));
+    const side = i % 2 ? 1 : -1;
+    let sx = p.x - p.dz * (st.w / 2 + 5.5) * side, sz = p.z + p.dx * (st.w / 2 + 5.5) * side;
+    sx = Math.round(sx); sz = Math.round(sz);
+    // 朝向取轴对齐（保证墙体 AABB 精确）
+    const face = Math.round(Math.atan2(p.dz * side, -p.dx * side) / (Math.PI / 2)) * (Math.PI / 2);
+    const grp = new THREE.Group();
+    const wallM = lambert(pick([0x9c8a72, 0x8a5a48, 0xa89f90]));
+    const floor = new THREE.Mesh(new THREE.BoxGeometry(6, 0.2, 5), lambert(0x6e5a44));
+    floor.position.y = 0.1; grp.add(floor);
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(6.6, 0.3, 5.6), lambert(0x4a4640));
+    roof.position.y = 3.6; roof.castShadow = true; grp.add(roof);
+    // 后墙/侧墙/前墙两段（中间留 1.9m 门洞）
+    const walls = [
+      [6, 3.4, 0.3, 0, -2.35], [0.3, 3.4, 5, -2.85, 0], [0.3, 3.4, 5, 2.85, 0],
+      [2.05, 3.4, 0.3, -1.98, 2.35], [2.05, 3.4, 0.3, 1.98, 2.35],
+    ];
+    walls.forEach(([w2, h2, d2, ox, oz]) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w2, h2, d2), wallM);
+      m.position.set(ox, 1.7 + 0.2, oz); m.castShadow = true; grp.add(m);
+    });
+    // 柜台 + 货架 + 暖光灯
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(3, 1.05, 0.8), lambert(0x8a6a4a));
+    counter.position.set(-0.6, 0.72, -1.2); counter.castShadow = true; grp.add(counter);
+    const shelf = new THREE.Mesh(new THREE.BoxGeometry(0.5, 2.2, 3.4), lambert(0x74584c));
+    shelf.position.set(2.4, 1.3, -0.4); grp.add(shelf);
+    const lampGlow = new THREE.Mesh(new THREE.SphereGeometry(0.14, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffd9a0 }));
+    lampGlow.position.set(0, 3.1, 0); grp.add(lampGlow);
+    const lamp = new THREE.PointLight(0xffc98a, 0.9, 9);
+    lamp.position.set(0, 2.9, 0); grp.add(lamp);
+    grp.position.set(sx, 0, sz);
+    grp.rotation.y = face;
+    g.add(grp);
+    // 旋转后的墙体 AABB（轴对齐旋转：手动变换）
+    const cosF = Math.round(Math.cos(face)), sinF = Math.round(Math.sin(face));
+    const rot = (ox, oz) => [sx + ox * cosF + oz * sinF, sz - ox * sinF + oz * cosF];
+    walls.forEach(([w2, h2, d2, ox, oz]) => {
+      const [wx, wz] = rot(ox, oz);
+      const hw = (Math.abs(cosF) ? w2 : d2) / 2, hd = (Math.abs(cosF) ? d2 : w2) / 2;
+      city.aabbs.push({ x1: wx - hw, z1: wz - hd, x2: wx + hw, z2: wz + hd });
+    });
+    const [ctX, ctZ] = rot(-0.6, -1.2);
+    city.aabbs.push({ x1: ctX - 1.1, z1: ctZ - 0.5, x2: ctX + 1.1, z2: ctZ + 0.5 });
+    // 室内藏点：柜台后
+    const [spX, spZ] = rot(-0.6, -1.95);
+    if (i % 2 === 0) city.spots.push({ x: spX, z: spZ, prop: 'indoor', label: tSpot('indoor') });
+    city.shops.push({ x: sx, z: sz });
+  }
+
   /* ---- 景点发现（探索奖励） ---- */
   city.poiVisited = new Set();
 
@@ -2125,7 +2183,7 @@ function londonComputeAttrs(city) {
       a.tall = nb.h > 40;
       a.low = nb.h < 16;
     }
-    a.propKey = { trash: 'trash', bench: 'bench', booth: 'booth', door: 'door' }[s.prop] || null;
+    a.propKey = { trash: 'trash', bench: 'bench', booth: 'booth', door: 'door', indoor: 'indoor' }[s.prop] || null;
     s.attrs = a;
     s.taken = false;
     s.blockType = city.cityKey;
@@ -2362,6 +2420,11 @@ function updateLondon(dt, t) {
     car.x = cx3; car.z = cz3;
     car.mesh.position.set(car.x, 0, car.z);
     car.mesh.rotation.y = car.h;
+    car.snd = (car.snd || 0) - dt;
+    if (car.snd <= 0 && Math.abs(car.speed) > 0.5) {
+      AudioSys.beep(70 + Math.abs(car.speed) * 11, 0.13, 'sawtooth', 0.045);
+      car.snd = 0.14;
+    }
     player.x = car.x; player.z = car.z;
     player.yaw = car.h + Math.PI;
     player.mesh.position.set(car.x, 0.6, car.z);
@@ -2917,6 +2980,7 @@ function handleKey(code) {
   if (G.phase === 'seek' && !G.paused) {
     if (code === 'KeyE') tryInteract();
     else if (code === 'KeyF') tryDrive();
+    else if (code === 'KeyH' && player.riding === 'car') { AudioSys.beep(440, 0.25, 'square', 0.2); AudioSys.beep(349, 0.3, 'square', 0.18, 0.06); }
     else if (code === 'KeyR') tryRadar();
     else if (code === 'KeyM') toggleBigMap();
     else if (code === 'KeyB') tryBike();
