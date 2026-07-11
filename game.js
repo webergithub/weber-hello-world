@@ -44,7 +44,7 @@ zh: {
   cfg_hiders: '躲藏 n =', cfg_seekers: '寻找 m =', cfg_diff: '难度', cfg_time: '时限',
   diff: ['简单', '普通', '困难'], times: ['5 分钟', '8 分钟', '12 分钟'],
   btn_start: '开 始 游 戏',
-  help: '<kbd>W A S D</kbd> 移动 · <kbd>Shift</kbd> 奔跑 · 按住鼠标拖动转视角 · <kbd>E</kbd> 抓人 / 上下车<br><kbd>B</kbd> 借还单车 · <kbd>M</kbd> 打车 · <kbd>R</kbd> 雷达测距 · <kbd>V</kbd> 切换视角 · <kbd>C</kbd> 收起线索',
+  help: '<kbd>W A S D</kbd> 移动 · <kbd>空格</kbd> 跳跃 · <kbd>Shift</kbd> 奔跑 · 拖动鼠标转视角 · <kbd>E</kbd> 抓人/上下车/开门<br><kbd>F</kbd> 驾驶汽车 · <kbd>B</kbd> 单车 · <kbd>M</kbd> 打车 · <kbd>R</kbd> 雷达 · <kbd>V</kbd> 视角 · <kbd>C</kbd> 线索',
   admin_label: '⚙️ 管理员 · 世界倍速', admin_hint: '人物与交通工具的移动速度 = 现实速度 × n（默认 3）',
   admin_val: (n) => `${n}× 现实`,
   city_town: '🏙 随机小镇', city_town_sub: '程序生成', city_london_sub: '真实地图数据', city_soon: '敬请期待', city_wip: '开发中，敬请期待!',
@@ -102,6 +102,7 @@ zh: {
   err_banned: (w) => `不可以出现地点词「${w}」！换个说法试试～`,
   bounty_tag: (b) => `悬赏 ${b}💰`,
   av_btn: '👤 自定义形象', av_title: '👤 自定义你的形象', av_skin: '肤色', av_shirt: '上衣', av_pants: '裤子', av_hair: '发色', av_save: '✅ 保存', av_random: '🎲 随机',
+  p_drive: '🚗 按 <kbd>F</kbd> 驾驶汽车', p_driving: '🚗 W/S 油门刹车 · A/D 转向 · <kbd>F</kbd> 下车', drive_on: '🚗 上车！WASD 驾驶，F 下车', drive_off: '🚗 你下车了', p_door: '🚪 按 <kbd>E</kbd> 开/关门', poi_found: (n) => `📍 你发现了景点：<b>${n}</b>！探索奖励 +5💰`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
@@ -113,6 +114,7 @@ zh: {
     bridge: '一座大桥的桥墩旁', abbey: '古老石墙的墙根处', eye: '巨大钢架支脚的后面',
     stpauls: '宏伟建筑的侧面立柱后', shard: '尖顶玻璃巨塔的墙角', gherkin: '圆滚滚玻璃楼旁的花坛',
     castle: '古老城墙的墙角', column: '高大纪念柱的基座后', palace: '金色围栏尽头的石墩后',
+    door: '一扇关着的木门后面',
   },
   clues: {
     water: '我能听到近处传来的流水声', park: '空气里满是青草和泥土的味道', traffic: '不时有车辆从我身旁驶过',
@@ -122,6 +124,7 @@ zh: {
     bcolor: (c) => `离我最近的一栋建筑是${c}色的`,
     pipe: '我蜷缩在一个圆滚滚的东西里面', trash: '我旁边有一股淡淡的酸味，不太好闻', bush: '有叶子轻轻扎着我的后背',
     booth: '我躲在一个又高又窄的小空间旁边', bench: '我旁边有一个可以坐下歇脚的东西', reed: '细长的植物在我身边随风摇晃',
+    door: '我躲在一扇虚掩的门后面，光线很暗',
     bigbell: '每隔一阵子，我能听到浑厚悠扬的钟声', river: '我能听到河水拍岸的声音，还有海鸥的叫声',
     trains: '我能听到列车进站出站的轰鸣和广播声', tourists: '我周围游人如织，快门声此起彼伏',
     bridge: '我头顶上方是巨大的拱形结构，很阴凉', coffee: '空气里飘着咖啡和烘焙点心的香气',
@@ -135,7 +138,7 @@ en: {
   cfg_hiders: 'Hiders n =', cfg_seekers: 'Seekers m =', cfg_diff: 'Difficulty', cfg_time: 'Time',
   diff: ['Easy', 'Normal', 'Hard'], times: ['5 min', '8 min', '12 min'],
   btn_start: 'S T A R T',
-  help: '<kbd>W A S D</kbd> move · <kbd>Shift</kbd> run · drag mouse to look · <kbd>E</kbd> catch / board & alight<br><kbd>B</kbd> rent/return bike · <kbd>M</kbd> taxi map · <kbd>R</kbd> radar ping · <kbd>V</kbd> camera · <kbd>C</kbd> toggle clues',
+  help: '<kbd>W A S D</kbd> move · <kbd>Space</kbd> jump · <kbd>Shift</kbd> run · drag to look · <kbd>E</kbd> catch/board/doors<br><kbd>F</kbd> drive cars · <kbd>B</kbd> bike · <kbd>M</kbd> taxi · <kbd>R</kbd> radar · <kbd>V</kbd> camera · <kbd>C</kbd> clues',
   admin_label: '⚙️ Admin · world speed', admin_hint: 'People & vehicles move at n× real-world speed (default 3)',
   admin_val: (n) => `${n}× real`,
   city_town: '🏙 Random Town', city_town_sub: 'procedural', city_london_sub: 'real map data', city_soon: 'coming soon', city_wip: 'In development!',
@@ -193,6 +196,7 @@ en: {
   err_banned: (w) => `The location word “${w}” is not allowed! Try another phrasing`,
   bounty_tag: (b) => `Bounty ${b}💰`,
   av_btn: '👤 Avatar', av_title: '👤 Customize your avatar', av_skin: 'Skin', av_shirt: 'Shirt', av_pants: 'Pants', av_hair: 'Hair', av_save: '✅ Save', av_random: '🎲 Random',
+  p_drive: '🚗 Press <kbd>F</kbd> to drive', p_driving: '🚗 W/S throttle · A/D steer · <kbd>F</kbd> exit', drive_on: '🚗 In the car! WASD to drive, F to exit', drive_off: '🚗 You got out', p_door: '🚪 Press <kbd>E</kbd> to open/close the door', poi_found: (n) => `📍 Landmark discovered: <b>${n}</b>! +5💰 explorer bonus`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
@@ -204,6 +208,7 @@ en: {
     bridge: 'beside the pier of a big bridge', abbey: 'at the base of an ancient stone wall', eye: 'behind a giant steel support leg',
     stpauls: 'behind a column of a grand building', shard: 'at the corner of a glass spire', gherkin: 'by a rounded glass tower',
     castle: 'at the corner of ancient walls', column: 'behind the base of a tall column', palace: 'behind a plinth by golden railings',
+    door: 'behind a closed wooden door',
   },
   clues: {
     water: 'I can hear running water nearby', park: 'The air is full of the smell of grass and earth', traffic: 'Cars keep passing right by me',
@@ -213,6 +218,7 @@ en: {
     bcolor: (c) => `The nearest building to me is ${c}`,
     pipe: 'I am curled up inside something big and round', trash: 'There is a faint sour smell next to me', bush: 'Leaves keep tickling my back',
     booth: 'I am next to a tall, narrow little box', bench: 'There is something to sit on right beside me', reed: 'Tall thin plants sway around me',
+    door: 'I am behind a door left ajar — it is dim in here',
     bigbell: 'Every so often I hear deep, resonant bell tolls', river: 'I can hear water lapping, and seagulls crying',
     trains: 'I hear the rumble and announcements of trains', tourists: 'Crowds bustle around me, camera shutters clicking',
     bridge: 'A huge arched structure looms right above me', coffee: 'The air smells of coffee and fresh pastries',
@@ -226,6 +232,7 @@ const t = (k, ...a) => {
   if (s === undefined) return k;
   return typeof s === 'function' ? s(...a) : s;
 };
+const tr = (...a) => t(...a); // updateLondon 内 t 被时间参数遮蔽时使用
 const tClue = (k, ...a) => {
   const d = I18N[LANG].clues[k] || I18N.zh.clues[k];
   return typeof d === 'function' ? d(...a) : d;
@@ -343,7 +350,7 @@ const HIDER_NAMES = I18N[LANG].names;
 /* 线索模板：key -> 文案（保证不含地点词，走 i18n 词典） */
 const CLUE_TMPL = {};
 ['water', 'park', 'traffic', 'quiet', 'shade', 'chime', 'busStop', 'market', 'dust',
-  'tall', 'low', 'bcolor', 'pipe', 'trash', 'bush', 'booth', 'bench', 'reed']
+  'tall', 'low', 'bcolor', 'pipe', 'trash', 'bush', 'booth', 'bench', 'reed', 'door']
   .forEach((k) => { CLUE_TMPL[k] = (...a) => tClue(k, ...a); });
 
 /* ---------------- 全局状态 ---------------- */
@@ -1317,6 +1324,74 @@ function genRealCity(cityKey) {
     city.cars.push({ mesh: grp, path, s: R(0, path.total), dir: rng() < 0.5 ? 1 : -1, speed: R(7, 12) });
   }
 
+
+  /* ---- 可驾驶汽车（PUBG 式自由驾驶） ---- */
+  city.driveCars = [];
+  for (let i = 0; i < 6; i++) {
+    const st = D.streets[i % D.streets.length];
+    const path = buildPath(st.pts);
+    const p = pathPoint(path, path.total * (0.25 + (i % 3) * 0.22));
+    const grp = new THREE.Group();
+    const colr = pick([0xd97b2c, 0x2f7fd6, 0xc0281c, 0x2a2d31, 0xe6cf6f]);
+    const body = new THREE.Mesh(new THREE.BoxGeometry(3.6, 1.1, 1.7), lambert(colr));
+    body.position.y = 0.8; body.castShadow = true; grp.add(body);
+    const cab = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.75, 1.55), lambert(0x223140));
+    cab.position.set(-0.15, 1.6, 0); grp.add(cab);
+    for (let w = 0; w < 4; w++) {
+      const wh = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.38, 0.32, 8), lambert(0x1c1e22));
+      wh.rotation.x = Math.PI / 2;
+      wh.position.set(-1.15 + (w % 2) * 2.3, 0.38, w < 2 ? -0.88 : 0.88);
+      grp.add(wh);
+    }
+    const cx2 = p.x - p.dz * (st.w / 2 - 2), cz2 = p.z + p.dx * (st.w / 2 - 2);
+    grp.position.set(cx2, 0, cz2);
+    const h0 = Math.atan2(p.dx, p.dz);
+    grp.rotation.y = h0;
+    g.add(grp);
+    city.driveCars.push({ mesh: grp, x: cx2, z: cz2, h: h0, speed: 0, driving: false });
+  }
+
+  /* ---- 可开关的门（不开门看不见门后的人！） ---- */
+  city.doors = [];
+  for (let i = 0; i < 8; i++) {
+    const st = D.streets[(i * 2 + 1) % D.streets.length];
+    const path = buildPath(st.pts);
+    const p = pathPoint(path, path.total * (0.15 + (i % 4) * 0.2));
+    const side = i % 2 ? 1 : -1;
+    const dx2 = p.x - p.dz * (st.w / 2 + 3.5) * side, dz2 = p.z + p.dx * (st.w / 2 + 3.5) * side;
+    const grp = new THREE.Group();
+    // 门斗：三面墙 + 顶
+    const wallM = lambert(0x8a7a66);
+    [[-1.1, 0.35, 0.25, 2.8, 1.9], [1.1, 0.35, 0.25, 2.8, 1.9], [0, -0.6, 2.45, 2.8, 0.25]].forEach(([ox, oz, w2, h2, d2]) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w2, h2, d2), wallM);
+      m.position.set(ox, 1.4, oz); m.castShadow = true; grp.add(m);
+    });
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.25, 2.2), lambert(0x5f554a));
+    roof.position.set(0, 2.9, -0.25); roof.castShadow = true; grp.add(roof);
+    // 门板（铰链在左侧）
+    const hinge = new THREE.Group();
+    const panel = new THREE.Mesh(new THREE.BoxGeometry(1.9, 2.7, 0.1), lambert(0x6e4a2a));
+    panel.position.set(0.95, 1.35, 0);
+    panel.castShadow = true;
+    hinge.add(panel);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), lambert(0xd9c05a));
+    knob.position.set(1.68, 1.3, 0.09); hinge.add(knob);
+    hinge.position.set(-0.95, 0, 0.35);
+    grp.add(hinge);
+    grp.position.set(dx2, 0, dz2);
+    const face = Math.atan2(p.dz * side, -p.dx * side);
+    grp.rotation.y = face;
+    g.add(grp);
+    city.aabbs.push({ x1: dx2 - 1.4, z1: dz2 - 1.4, x2: dx2 + 1.4, z2: dz2 + 1.4 });
+    city.doors.push({ hinge, x: dx2, z: dz2, open: false, anim: 0 });
+    // 门后藏点（凹进门斗内）
+    const bx = dx2 + Math.sin(face) * -0.9, bz = dz2 + Math.cos(face) * -0.9;
+    if (i % 2 === 0) city.spots.push({ x: bx, z: bz, prop: 'door', label: tSpot('door') });
+  }
+
+  /* ---- 景点发现（探索奖励） ---- */
+  city.poiVisited = new Set();
+
   /* ---- 藏点属性 ---- */
   londonComputeAttrs(city);
 
@@ -1324,6 +1399,8 @@ function genRealCity(cityKey) {
   city.bannedExtra = [...D.stations.map((s) => s.name.toLowerCase()), ...(D.banned || [])];
 
   city.spawn = D.spawn || { x: 0, z: 20, yaw: Math.PI };
+
+
   scene.add(g);
   return city;
 }
@@ -2048,7 +2125,7 @@ function londonComputeAttrs(city) {
       a.tall = nb.h > 40;
       a.low = nb.h < 16;
     }
-    a.propKey = { trash: 'trash', bench: 'bench', booth: 'booth' }[s.prop] || null;
+    a.propKey = { trash: 'trash', bench: 'bench', booth: 'booth', door: 'door' }[s.prop] || null;
     s.attrs = a;
     s.taken = false;
     s.blockType = city.cityKey;
@@ -2261,6 +2338,47 @@ function updateLondon(dt, t) {
     c.mesh.position.set(p.x - p.dz * off, 0, p.z + p.dx * off);
     c.mesh.rotation.y = Math.atan2(p.dx * c.dir, p.dz * c.dir);
   });
+  // 门动画
+  city.doors.forEach((d) => {
+    const target = d.open ? -1.85 : 0;
+    d.hinge.rotation.y += (target - d.hinge.rotation.y) * Math.min(1, dt * 8);
+  });
+  // 驾驶物理
+  const car = city.driveCars.find((c) => c.driving);
+  if (car && G.phase === 'seek') {
+    const k = simK();
+    let acc = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) acc = 14;
+    if (keys['KeyS'] || keys['ArrowDown']) acc = -10;
+    car.speed += acc * k * dt;
+    car.speed *= (1 - Math.min(1, dt * (acc === 0 ? 1.6 : 0.15)));
+    car.speed = clamp(car.speed, -8 * k, 26 * k);
+    const steer = (keys['KeyA'] || keys['ArrowLeft'] ? 1 : 0) - (keys['KeyD'] || keys['ArrowRight'] ? 1 : 0);
+    car.h += steer * Math.min(1.6, Math.abs(car.speed) * 0.09) * dt * Math.sign(car.speed || 1);
+    let nx = car.x + Math.sin(car.h) * car.speed * dt;
+    let nz = car.z + Math.cos(car.h) * car.speed * dt;
+    const [cx3, cz3] = collide(nx, nz, 1.3);
+    if (Math.hypot(cx3 - nx, cz3 - nz) > 0.05) car.speed *= 0.25; // 撞墙减速
+    car.x = cx3; car.z = cz3;
+    car.mesh.position.set(car.x, 0, car.z);
+    car.mesh.rotation.y = car.h;
+    player.x = car.x; player.z = car.z;
+    player.yaw = car.h + Math.PI;
+    player.mesh.position.set(car.x, 0.6, car.z);
+  }
+  // 景点发现
+  if (G.phase === 'seek') {
+    city.landmarks.forEach((lm) => {
+      if (city.poiVisited.has(lm.zh)) return;
+      if (dist2d(player.x, player.z, lm.p[0], lm.p[1]) < 32) {
+        city.poiVisited.add(lm.zh);
+        G.credits += 5; G.earned += 5;
+        AudioSys.coin();
+        showToast(tr('poi_found', lm.zh), 'gold');
+        updateHUD();
+      }
+    });
+  }
   updateNPCs(city, dt, t);
   if (city.eyeWheel) city.eyeWheel.rotation.z += dt * 0.06;
   if (city.waterMesh) city.waterMesh.material.opacity = 0.9 + Math.sin(t * 1.4) * 0.04;
@@ -2282,6 +2400,42 @@ function updateLondon(dt, t) {
 
 /* ---- 乘车交互 ---- */
 const vIcon = (v) => (v.kind === 'train' ? '🚇' : v.kind === 'ferry' ? '⛴️' : '🚌');
+
+function nearestDoor() {
+  if (G.city.kind !== 'real' || !G.city.doors) return null;
+  let best = null, bd = 1e9;
+  G.city.doors.forEach((d) => {
+    const dd = dist2d(player.x, player.z, d.x, d.z);
+    if (dd < 3 && dd < bd) { bd = dd; best = d; }
+  });
+  return best;
+}
+
+function tryDrive() {
+  if (G.phase !== 'seek' || G.paused || G.city.kind !== 'real') return;
+  const cur = G.city.driveCars.find((c) => c.driving);
+  if (cur) {
+    cur.driving = false;
+    player.riding = null;
+    [player.x, player.z] = collide(cur.x + Math.cos(cur.h) * 2.2, cur.z - Math.sin(cur.h) * 2.2);
+    player.mesh.visible = true;
+    AudioSys.click();
+    showToast(t('drive_off'));
+    return;
+  }
+  if (player.riding !== null) return;
+  let best = null, bd = 1e9;
+  G.city.driveCars.forEach((c) => {
+    const d = dist2d(player.x, player.z, c.x, c.z);
+    if (d < 4 && d < bd) { bd = d; best = c; }
+  });
+  if (best) {
+    best.driving = true;
+    player.riding = 'car';
+    AudioSys.taxi();
+    showToast(t('drive_on'), 'gold');
+  }
+}
 
 function transitNear() {
   if (G.city.kind !== 'real') return null;
@@ -2436,6 +2590,7 @@ function makePersonMesh(bodyColor, hatColor) {
 
 const player = {
   x: 0, z: 20, yaw: 0, pitch: -0.25,
+  y: 0, vy: 0,
   mesh: null, bikeMesh: null,
   riding: null,         // null | 'bike' | 'bus'
   stamina: 100,
@@ -2761,6 +2916,7 @@ const raycaster = new THREE.Raycaster();
 function handleKey(code) {
   if (G.phase === 'seek' && !G.paused) {
     if (code === 'KeyE') tryInteract();
+    else if (code === 'KeyF') tryDrive();
     else if (code === 'KeyR') tryRadar();
     else if (code === 'KeyM') toggleBigMap();
     else if (code === 'KeyB') tryBike();
@@ -2810,6 +2966,12 @@ function tryInteract() {
   if (h && h.d < 3.2 && player.riding !== 'bus' && player.riding !== 'transit') { captureHider(h.hider); return; }
   // 伦敦：地铁/公交
   if (G.city.kind === 'real') {
+    const door = nearestDoor();
+    if (door && player.riding === null) {
+      door.open = !door.open;
+      AudioSys.beep(door.open ? 340 : 260, 0.18, 'triangle', 0.16);
+      return;
+    }
     if (player.riding === 'transit') { alightTransit(); return; }
     const v = transitNear();
     if (v && player.riding === null) { boardTransit(v); return; }
@@ -2986,7 +3148,7 @@ function callTaxi(x, z) {
 const flyCam = { x: 0, y: 90, z: 80 };
 
 function updatePlayer(dt) {
-  if (player.riding === 'bus' || player.riding === 'transit') {
+  if (player.riding === 'bus' || player.riding === 'transit' || player.riding === 'car') {
     updateCamera(dt);
     return;
   }
@@ -3008,6 +3170,15 @@ function updatePlayer(dt) {
   $('staminaBar').style.width = player.stamina + '%';
   $('staminaBar').style.background = player.stamina < 25 ? '#ef6b6b' : '#22c1a3';
 
+  // 跳跃（PUBG 手感：短促有力）
+  if (keys['Space'] && player.y <= 0.001 && player.riding === null) {
+    player.vy = 5.4;
+  }
+  if (player.y > 0 || player.vy !== 0) {
+    player.vy -= 13.5 * dt;
+    player.y = Math.max(0, player.y + player.vy * dt);
+    if (player.y === 0 && player.vy < 0) player.vy = 0;
+  }
   if (moving) {
     const len = Math.hypot(mx, mz);
     mx /= len; mz /= len;
@@ -3024,7 +3195,7 @@ function updatePlayer(dt) {
     while (dr < -Math.PI) dr += Math.PI * 2;
     player.mesh.rotation.y += dr * Math.min(1, dt * 12);
   }
-  player.mesh.position.set(player.x, 0.05, player.z);
+  player.mesh.position.set(player.x, 0.05 + player.y, player.z);
   // 拟真步态：走 0.5 / 跑 0.95 / 骑车与静止 0
   let s01 = 0;
   if (player.riding !== 'bike' && moving) s01 = sp > SPEED.walk * simK() * 1.2 ? 0.95 : 0.5;
@@ -3034,7 +3205,7 @@ function updatePlayer(dt) {
 
 function updateCamera() {
   const onVehicle = player.riding === 'bus' || player.riding === 'transit';
-  const py = onVehicle ? 3.6 : 1.6;
+  const py = (onVehicle ? 3.6 : 1.6) + (player.y || 0);
   if (G.view3rd) {
     const cd = player.camDist;
     const cx = player.x + Math.sin(player.yaw) * cd * Math.cos(player.pitch);
@@ -3823,6 +3994,11 @@ function updateInteractPrompt() {
     return;
   }
   if (G.city.kind === 'real') {
+    if (player.riding === 'car') { setPrompt(t('p_driving')); return; }
+    const door = nearestDoor();
+    if (door && player.riding === null) { setPrompt(t('p_door')); return; }
+    const dcar = G.city.driveCars && G.city.driveCars.find((c) => !c.driving && dist2d(player.x, player.z, c.x, c.z) < 4);
+    if (dcar && player.riding === null) { setPrompt(t('p_drive')); return; }
     if (player.riding === 'transit') {
       const v = player.tv;
       setPrompt(v && v.state === 'dwell'
