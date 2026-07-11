@@ -103,7 +103,7 @@ zh: {
   bounty_tag: (b) => `悬赏 ${b}💰`,
   av_btn: '👤 自定义形象', av_title: '👤 自定义你的形象', av_skin: '肤色', av_shirt: '上衣', av_pants: '裤子', av_hair: '发色', av_save: '✅ 保存', av_random: '🎲 随机',
   p_night: '🌙 天黑了！按 <kbd>L</kbd> 打开手电筒', p_scope: '🔭 按住 <kbd>T</kbd> 使用望远镜',
-  w_drone: '无人机', p_dronefly: (s) => `🛸 无人机侦察中 ${s}s — WASD 飞行 · 拖动鼠标环视`, drone_end: '🛸 无人机返航，回到你的视角',
+  w_drone: '无人机', toast_rain: '🌧 这局是雨天——能见度低，听觉线索更重要了', p_drift: '漂移', p_dronefly: (s) => `🛸 无人机侦察中 ${s}s — WASD 飞行 · 拖动鼠标环视`, drone_end: '🛸 无人机返航，回到你的视角',
   p_drive: '🚗 按 <kbd>F</kbd> 驾驶汽车', p_driving: '🚗 W/S 油门刹车 · A/D 转向 · <kbd>F</kbd> 下车', drive_on: '🚗 上车！WASD 驾驶，F 下车', drive_off: '🚗 你下车了', p_door: '🚪 按 <kbd>E</kbd> 开/关门', poi_found: (n) => `📍 你发现了景点：<b>${n}</b>！探索奖励 +5💰`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
@@ -201,7 +201,7 @@ en: {
   bounty_tag: (b) => `Bounty ${b}💰`,
   av_btn: '👤 Avatar', av_title: '👤 Customize your avatar', av_skin: 'Skin', av_shirt: 'Shirt', av_pants: 'Pants', av_hair: 'Hair', av_save: '✅ Save', av_random: '🎲 Random',
   p_night: '🌙 Night has fallen! Press <kbd>L</kbd> for your flashlight', p_scope: '🔭 Hold <kbd>T</kbd> to use binoculars',
-  w_drone: 'Drone', p_dronefly: (s) => `🛸 Drone recon ${s}s — WASD to fly · drag to look`, drone_end: '🛸 Drone returned to you',
+  w_drone: 'Drone', toast_rain: '🌧 Rainy round — low visibility, listen carefully', p_drift: 'drift', p_dronefly: (s) => `🛸 Drone recon ${s}s — WASD to fly · drag to look`, drone_end: '🛸 Drone returned to you',
   p_drive: '🚗 Press <kbd>F</kbd> to drive', p_driving: '🚗 W/S throttle · A/D steer · <kbd>F</kbd> exit', drive_on: '🚗 In the car! WASD to drive, F to exit', drive_off: '🚗 You got out', p_door: '🚪 Press <kbd>E</kbd> to open/close the door', poi_found: (n) => `📍 Landmark discovered: <b>${n}</b>! +5💰 explorer bonus`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
@@ -280,6 +280,23 @@ const AudioSys = {
   chime(v = 0.15) { this.beep(392, 0.8, 'sine', v); this.beep(262, 1.2, 'sine', v * 0.8, 0.5); },
   giggle(v = 0.1) { this.beep(1200, 0.07, 'sine', v); this.beep(1500, 0.07, 'sine', v, 0.09); this.beep(1350, 0.09, 'sine', v * 0.8, 0.18); },
   chirp(v = 0.08) { this.beep(2400, 0.06, 'sine', v, 0, 800); this.beep(2100, 0.08, 'sine', v, 0.1, 600); },
+  rainOn() {
+    if (!this.ctx || this.rainSrc) return;
+    const len = this.ctx.sampleRate * 2;
+    const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buf; src.loop = true;
+    const filt = this.ctx.createBiquadFilter();
+    filt.type = 'lowpass'; filt.frequency.value = 900;
+    const g = this.ctx.createGain(); g.gain.value = 0.05;
+    src.connect(filt); filt.connect(g); g.connect(this.ctx.destination);
+    src.start();
+    this.rainSrc = src;
+  },
+  rainOff() { if (this.rainSrc) { try { this.rainSrc.stop(); } catch (e) {} this.rainSrc = null; } },
+  thunder() { this.beep(55, 1.6, 'sawtooth', 0.16, 0, -25); this.beep(40, 2.2, 'sine', 0.14, 0.15, -15); },
 };
 
 /* ---------------- 常量 ---------------- */
@@ -2423,9 +2440,21 @@ function updateLondon(dt, t) {
     car.speed *= (1 - Math.min(1, dt * (acc === 0 ? 1.6 : 0.15)));
     car.speed = clamp(car.speed, -8 * k, 26 * k);
     const steer = (keys['KeyA'] || keys['ArrowLeft'] ? 1 : 0) - (keys['KeyD'] || keys['ArrowRight'] ? 1 : 0);
-    car.h += steer * Math.min(1.6, Math.abs(car.speed) * 0.09) * dt * Math.sign(car.speed || 1);
-    let nx = car.x + Math.sin(car.h) * car.speed * dt;
-    let nz = car.z + Math.cos(car.h) * car.speed * dt;
+    const drifting = keys['Space'] && Math.abs(car.speed) > 6;
+    car.h += steer * Math.min(1.6, Math.abs(car.speed) * 0.09) * (drifting ? 2.1 : 1) * dt * Math.sign(car.speed || 1);
+    if (car.vh === undefined) car.vh = car.h;
+    // 速度方向滞后于车头（漂移时滞后更多）
+    let dh = car.h - car.vh;
+    while (dh > Math.PI) dh -= Math.PI * 2;
+    while (dh < -Math.PI) dh += Math.PI * 2;
+    car.vh += dh * Math.min(1, dt * (drifting ? 2.2 : 9));
+    if (drifting) {
+      car.speed *= (1 - dt * 0.35);
+      car.skid = (car.skid || 0) - dt;
+      if (car.skid <= 0) { AudioSys.beep(160, 0.12, 'sawtooth', 0.06, 0, 60); car.skid = 0.13; }
+    }
+    let nx = car.x + Math.sin(car.vh) * car.speed * dt;
+    let nz = car.z + Math.cos(car.vh) * car.speed * dt;
     const [cx3, cz3] = collide(nx, nz, 1.3);
     if (Math.hypot(cx3 - nx, cz3 - nz) > 0.05) car.speed *= 0.25; // 撞墙减速
     car.x = cx3; car.z = cz3;
@@ -3516,6 +3545,48 @@ function renderCluePanel() {
   });
 }
 
+/* ---------------- 雨天 ---------------- */
+let rainMesh = null;
+function setupRain(on) {
+  if (rainMesh) { scene.remove(rainMesh); rainMesh.geometry.dispose(); rainMesh = null; }
+  AudioSys.rainOff();
+  if (!on) return;
+  const N = 1100;
+  const pos = new Float32Array(N * 6);
+  for (let i = 0; i < N; i++) {
+    const x = R(-30, 30), y = R(0, 40), z = R(-30, 30);
+    pos.set([x, y, z, x, y - R(0.8, 1.4), z], i * 6);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  rainMesh = new THREE.LineSegments(geo,
+    new THREE.LineBasicMaterial({ color: 0x9fb8cc, transparent: true, opacity: 0.45 }));
+  rainMesh.frustumCulled = false;
+  scene.add(rainMesh);
+}
+function updateRain(dt) {
+  if (!rainMesh) return;
+  AudioSys.rainOn();
+  const p = rainMesh.geometry.attributes.position.array;
+  const fall = 28 * dt;
+  for (let i = 0; i < p.length; i += 6) {
+    p[i + 1] -= fall; p[i + 4] -= fall;
+    if (p[i + 1] < 0) {
+      const ny = 38 + R(0, 4);
+      p[i + 1] = ny; p[i + 4] = ny - R(0.8, 1.4);
+      p[i] = p[i + 3] = R(-30, 30);
+      p[i + 2] = p[i + 5] = R(-30, 30);
+    }
+  }
+  rainMesh.geometry.attributes.position.needsUpdate = true;
+  rainMesh.position.set(player.x, 0, player.z);
+  G.thunderT -= dt;
+  if (G.thunderT <= 0) {
+    G.thunderT = R(18, 40);
+    AudioSys.thunder();
+  }
+}
+
 /* ============================================================
  * 浮动窗口系统：拖动 / 缩放 / 最小化 / 关闭 / 恢复托盘
  * ============================================================ */
@@ -3690,6 +3761,9 @@ function startGame() {
   G.captures = 0; G.spent = 0; G.earned = 0;
   G.credits = G.startCredits;
   G.timeLeft = G.totalTime;
+  G.weather = rng() < 0.4 ? 'rain' : 'clear';
+  G.thunderT = R(15, 30);
+  setupRain(G.weather === 'rain');
   G.curSeeker = 0;
   G.seekers = [];
   for (let i = 0; i < G.mSeekers; i++) {
@@ -3842,6 +3916,7 @@ function beginSeekPhase() {
   $('hideBanner').classList.add('hidden');
   updateHUD();
   renderCluePanel();
+  if (G.weather === 'rain') showToast(t('toast_rain'));
   if (G.mode === 'ai') {
     showToast(t('toast_ai_ready', G.nHiders), 'gold');
   } else {
@@ -4056,13 +4131,15 @@ function tick() {
     updateInteractPrompt();
     // HUD 时间
     updateHUD();
+    if (G.weather === 'rain') updateRain(dt);
     // 昼夜循环：一局从白天到黑夜
     {
+      const rainDim = G.weather === 'rain' ? 0.55 : 1;
       const dayT = clamp(1 - G.timeLeft / G.totalTime, 0, 1);
       const nf = Math.max(0, (dayT - 0.55) / 0.45); // 后 45% 时间入夜
-      sunLight.intensity = 0.95 * (1 - nf * 0.92);
-      hemiLight.intensity = 0.55 * (1 - nf * 0.8);
-      const sky = new THREE.Color(0xa9d7ef).lerp(new THREE.Color(0x0c1630), nf);
+      sunLight.intensity = 0.95 * rainDim * (1 - nf * 0.92);
+      hemiLight.intensity = 0.55 * (rainDim + 0.2) * (1 - nf * 0.8);
+      const sky = new THREE.Color(G.weather === 'rain' ? 0x707d8a : 0xa9d7ef).lerp(new THREE.Color(0x0c1630), nf);
       scene.background = sky;
       if (scene.fog) scene.fog.color.copy(sky);
       flashlight.intensity = flashlight.visible ? 1.3 : 0;
