@@ -1475,6 +1475,23 @@ function genRealCity(cityKey) {
     city.shops.push({ x: sx, z: sz });
   }
 
+  /* ---- 街头行人（沿人行道巡走） ---- */
+  city.walkers = [];
+  for (let i = 0; i < 14; i++) {
+    const st = D.streets[i % D.streets.length];
+    const path = buildPath(st.pts);
+    const side = i % 2 ? 1 : -1;
+    const mesh = makeHuman(makeHumanPalette());
+    mesh.scale.setScalar(R(0.9, 1.0));
+    scene.add(mesh);
+    city.walkers.push({
+      mesh, path, s: R(0.1, 0.9) * path.total,
+      dir: i % 3 === 0 ? -1 : 1,
+      off: (st.w / 2 + R(1.5, 3)) * side,
+      sp: R(1.1, 1.7),
+    });
+  }
+
   /* ---- 景点发现（探索奖励） ---- */
   city.poiVisited = new Set();
 
@@ -2482,6 +2499,17 @@ function updateLondon(dt, t) {
       }
     });
   }
+  // 街头行人巡走
+  city.walkers.forEach((w) => {
+    w.s += w.dir * w.sp * simK() * dt;
+    if (w.s >= w.path.total) { w.s = w.path.total; w.dir = -1; }
+    if (w.s <= 0) { w.s = 0; w.dir = 1; }
+    const p = pathPoint(w.path, w.s);
+    const wx = p.x - p.dz * w.off, wz = p.z + p.dx * w.off;
+    w.mesh.position.set(wx, 0.03, wz);
+    w.mesh.rotation.y = Math.atan2(p.dx * w.dir, p.dz * w.dir);
+    animateHuman(w.mesh.userData.human, t, 0.45);
+  });
   updateNPCs(city, dt, t);
   if (city.eyeWheel) city.eyeWheel.rotation.z += dt * 0.06;
   if (city.waterMesh) city.waterMesh.material.opacity = 0.9 + Math.sin(t * 1.4) * 0.04;
