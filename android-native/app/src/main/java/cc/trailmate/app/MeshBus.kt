@@ -36,6 +36,12 @@ object Identity {
         val v = code.trim().ifEmpty { "public" }
         ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).edit().putString("team", v).apply()
     }
+
+    // 新队伍码：6 位大写字母数字，去掉易混字符（与 iOS newTeamCode 同字符集）
+    fun newTeamCode(): String {
+        val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+        return (1..6).map { chars[Random.nextInt(chars.length)] }.joinToString("")
+    }
 }
 
 /**

@@ -9,7 +9,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.fragment.app.Fragment
 import com.google.android.material.bottomnavigation.BottomNavigationView
 
-// 底部导航宿主：记账 / 跟车 / 营地 / 变声（后续补 队伍）。
+// 底部导航宿主：记账 / 跟车 / 营地 / 变声 / 队伍。
 class MainActivity : AppCompatActivity() {
 
     companion object {
@@ -36,6 +36,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.nav_convoy -> show(ConvoyFragment())
                 R.id.nav_camp -> show(CampFragment())
                 R.id.nav_voice -> show(VoiceFragment())
+                R.id.nav_team -> show(TeamFragment())
                 else -> return@setOnItemSelectedListener false
             }
             true
