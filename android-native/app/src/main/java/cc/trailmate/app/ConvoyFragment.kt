@@ -10,21 +10,34 @@ import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
 import android.widget.LinearLayout
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.Fragment
+import org.json.JSONObject
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.OnlineTileSourceBase
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
 import org.osmdroid.util.MapTileIndex
 import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import org.osmdroid.views.overlay.mylocation.GpsMyLocationProvider
 import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 
-// 跟车：osmdroid 地图（道路/卫星切换）+ 定位。
+// 跟车：osmdroid 地图（道路/卫星切换）+ 定位 + 经蓝牙 Mesh 与同行者互见位置（含 iOS 同伴，离线可用）。
 class ConvoyFragment : Fragment() {
     private var map: MapView? = null
     private var myLoc: MyLocationNewOverlay? = null
+    private val peerMarkers = HashMap<String, Marker>()
+    private val ticker = Handler(Looper.getMainLooper())
+    private val broadcastLoop = object : Runnable {
+        override fun run() {
+            broadcastMyLocation()
+            ticker.postDelayed(this, 3000)   // 节流：每 3 秒广播一次
+        }
+    }
 
     // 卫星瓦片源（ESRI World Imagery，无需 key）
     private val esri = object : OnlineTileSourceBase(
@@ -74,7 +87,42 @@ class ConvoyFragment : Fragment() {
                 overlay.myLocation?.let { m.controller.animateTo(it); m.controller.setZoom(16.0) }
             }
         }
+
+        // 蓝牙 Mesh：订阅同行者位置（同队伍码；跨 iOS/安卓）。
+        // 每次重建都注册：MeshBus 为"每类型单 handler"，新实例自动顶替旧实例。
+        MeshBus.subscribe(MeshBus.KIND_LOC) { body -> onPeerLocation(body) }
+        MeshBus.start(ctx)   // 幂等；蓝牙权限未授时静默失败，营地页会引导授权
         return root
+    }
+
+    private fun broadcastMyLocation() {
+        val ctx = context ?: return
+        val loc = myLoc?.myLocation ?: return
+        val json = JSONObject()
+            .put("id", Identity.deviceId(ctx)).put("n", Identity.nick(ctx))
+            .put("lat", loc.latitude).put("lng", loc.longitude)
+            .put("ts", System.currentTimeMillis() / 1000.0)
+        MeshBus.send(MeshBus.KIND_LOC, json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun onPeerLocation(body: ByteArray) {
+        val ctx = context ?: return
+        val m = map ?: return
+        try {
+            val o = JSONObject(String(body, Charsets.UTF_8))
+            val id = o.getString("id")
+            if (id == Identity.deviceId(ctx)) return
+            val point = GeoPoint(o.getDouble("lat"), o.getDouble("lng"))
+            val marker = peerMarkers.getOrPut(id) {
+                Marker(m).also {
+                    it.setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    m.overlays.add(it)
+                }
+            }
+            marker.position = point
+            marker.title = o.optString("n", "同伴")
+            m.invalidate()
+        } catch (_: Exception) {}
     }
 
     private fun recenter() {
@@ -83,9 +131,16 @@ class ConvoyFragment : Fragment() {
         map?.controller?.setZoom(16.0)
     }
 
-    override fun onResume() { super.onResume(); map?.onResume() }
-    override fun onPause() { super.onPause(); map?.onPause() }
-    override fun onDestroyView() { super.onDestroyView(); myLoc?.disableMyLocation() }
+    override fun onResume() {
+        super.onResume(); map?.onResume(); ticker.post(broadcastLoop)
+    }
+    override fun onPause() {
+        super.onPause(); map?.onPause(); ticker.removeCallbacks(broadcastLoop)
+    }
+    override fun onDestroyView() {
+        super.onDestroyView(); ticker.removeCallbacks(broadcastLoop)
+        myLoc?.disableMyLocation(); peerMarkers.clear()
+    }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
     private fun rowLp() = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f).apply { marginEnd = dp(6) }

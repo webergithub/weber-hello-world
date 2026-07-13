@@ -8,4 +8,8 @@
         android:id="@+id/nav_convoy"
         android:icon="@android:drawable/ic_menu_mylocation"
         android:title="跟车" />
+    <item
+        android:id="@+id/nav_camp"
+        android:icon="@android:drawable/ic_menu_share"
+        android:title="营地" />
 </menu>
