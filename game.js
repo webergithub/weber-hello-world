@@ -105,6 +105,8 @@ zh: {
   p_night: '🌙 天黑了！按 <kbd>L</kbd> 打开手电筒', p_scope: '🔭 按住 <kbd>T</kbd> 使用望远镜',
   w_drone: '无人机', toast_rain: '🌧 这局是雨天——能见度低，听觉线索更重要了', p_drift: '漂移', p_dronefly: (s) => `🛸 无人机侦察中 ${s}s — WASD 飞行 · 拖动鼠标环视`, drone_end: '🛸 无人机返航，回到你的视角',
   p_drive: '🚗 按 <kbd>F</kbd> 驾驶汽车', p_driving: '🚗 W/S 油门刹车 · A/D 转向 · <kbd>F</kbd> 下车', drive_on: '🚗 上车！WASD 驾驶，F 下车', drive_off: '🚗 你下车了', p_door: '🚪 按 <kbd>E</kbd> 开/关门', poi_found: (n) => `📍 你发现了景点：<b>${n}</b>！探索奖励 +5💰`,
+  loot_credits: (n) => `🎁 拾取街头物资：+${n}💰`, loot_energy: '⚡ 能量饮料！体力全满，短暂加速', loot_radar: '📡 雷达芯片！下一次雷达免费', radar_free: '📡 消耗雷达芯片——本次测距免费！',
+  airdrop_in: '🪂 空投正在降落！去地图上的橙色🪂标记处抢物资', airdrop_land: '📦 空投已落地，先到先得！', airdrop_get: (n) => `📦 你打开了空投箱：+${n}💰 + 一枚雷达芯片！`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
@@ -203,6 +205,8 @@ en: {
   p_night: '🌙 Night has fallen! Press <kbd>L</kbd> for your flashlight', p_scope: '🔭 Hold <kbd>T</kbd> to use binoculars',
   w_drone: 'Drone', toast_rain: '🌧 Rainy round — low visibility, listen carefully', p_drift: 'drift', p_dronefly: (s) => `🛸 Drone recon ${s}s — WASD to fly · drag to look`, drone_end: '🛸 Drone returned to you',
   p_drive: '🚗 Press <kbd>F</kbd> to drive', p_driving: '🚗 W/S throttle · A/D steer · <kbd>F</kbd> exit', drive_on: '🚗 In the car! WASD to drive, F to exit', drive_off: '🚗 You got out', p_door: '🚪 Press <kbd>E</kbd> to open/close the door', poi_found: (n) => `📍 Landmark discovered: <b>${n}</b>! +5💰 explorer bonus`,
+  loot_credits: (n) => `🎁 Street supplies: +${n}💰`, loot_energy: '⚡ Energy drink! Stamina refilled + short speed boost', loot_radar: '📡 Radar chip! Your next radar ping is free', radar_free: '📡 Radar chip used — this ping is free!',
+  airdrop_in: '🪂 Supply drop incoming! Race to the orange 🪂 marker on the map', airdrop_land: '📦 The supply crate has landed — first come, first served!', airdrop_get: (n) => `📦 Crate opened: +${n}💰 + a radar chip!`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
@@ -1492,6 +1496,35 @@ function genRealCity(cityKey) {
     });
   }
 
+  /* ---- 街头物资（PUBG 式拾取） + 空投 ---- */
+  city.loot = [];
+  const lootKinds = ['credits', 'credits', 'energy', 'radar'];
+  for (let i = 0; i < 16; i++) {
+    let lx = 0, lz = 0;
+    for (let tries = 0; tries < 8; tries++) {
+      const st = D.streets[(i * 3 + 1 + tries * 5) % D.streets.length];
+      const path = buildPath(st.pts);
+      const p = pathPoint(path, R(0.12, 0.88) * path.total);
+      const side = (i + tries) % 2 ? 1 : -1;
+      lx = p.x - p.dz * (st.w / 2 + R(2, 4)) * side;
+      lz = p.z + p.dx * (st.w / 2 + R(2, 4)) * side;
+      const blocked = nearbyAabbs(city, lx, lz).some((a) =>
+        lx > a.x1 - 0.7 && lx < a.x2 + 0.7 && lz > a.z1 - 0.7 && lz < a.z2 + 0.7);
+      if (!blocked) break;
+    }
+    const kind = lootKinds[i % lootKinds.length];
+    const colr = kind === 'credits' ? 0xffd166 : kind === 'energy' ? 0x39d98a : 0x61b3ff;
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.9, 0.9),
+      new THREE.MeshLambertMaterial({ color: colr, emissive: colr, emissiveIntensity: 0.55 }));
+    box.position.set(lx, 0.8, lz);
+    const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 26, 6, 1, true),
+      new THREE.MeshBasicMaterial({ color: colr, transparent: true, opacity: 0.34, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+    beam.position.set(lx, 13, lz);
+    scene.add(box); scene.add(beam);
+    city.loot.push({ kind, x: lx, z: lz, box, beam, taken: false, amt: 8 + ((i * 7) % 13) });
+  }
+  city.airdrop = { state: 'wait', timer: R(50, 80) };
+
   /* ---- 景点发现（探索奖励） ---- */
   city.poiVisited = new Set();
 
@@ -2510,6 +2543,70 @@ function updateLondon(dt, t) {
     w.mesh.rotation.y = Math.atan2(p.dx * w.dir, p.dz * w.dir);
     animateHuman(w.mesh.userData.human, t, 0.45);
   });
+  // 街头物资拾取
+  city.loot.forEach((L) => {
+    if (L.taken) return;
+    L.box.rotation.y = t * 1.4;
+    L.box.position.y = 0.8 + Math.sin(t * 2.2 + L.x) * 0.15;
+    if (G.phase !== 'seek' || G.paused) return;
+    if (dist2d(player.x, player.z, L.x, L.z) < 2.4) {
+      L.taken = true;
+      L.box.visible = L.beam.visible = false;
+      AudioSys.coin();
+      if (L.kind === 'credits') { G.credits += L.amt; G.earned += L.amt; showToast(tr('loot_credits', L.amt), 'gold'); }
+      else if (L.kind === 'energy') { player.stamina = 100; player.boostT = 8; showToast(tr('loot_energy'), 'gold'); }
+      else { G.freeRadar = true; showToast(tr('loot_radar'), 'gold'); }
+      updateHUD();
+    }
+  });
+  // 空投状态机：等待 → 降落 → 落地待拾取
+  const A = city.airdrop;
+  if (G.phase === 'seek' && !G.paused && A.state !== 'done') {
+    if (A.state === 'wait') {
+      A.timer -= dt;
+      if (A.timer <= 0) {
+        const st = city.streets[Math.floor(rng() * city.streets.length)];
+        const path = buildPath(st.pts);
+        const p = pathPoint(path, (0.2 + rng() * 0.6) * path.total);
+        A.x = p.x; A.z = p.z;
+        const crate = new THREE.Group();
+        const bx = new THREE.Mesh(new THREE.BoxGeometry(1.6, 1.2, 1.6), new THREE.MeshLambertMaterial({ color: 0xd97b29 }));
+        bx.position.y = 0.6; bx.castShadow = true; crate.add(bx);
+        const chute = new THREE.Mesh(new THREE.ConeGeometry(3.2, 2.4, 10, 1, true),
+          new THREE.MeshLambertMaterial({ color: 0xef6b6b, side: THREE.DoubleSide }));
+        chute.position.y = 4.6; crate.add(chute);
+        const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 60, 6, 1, true),
+          new THREE.MeshBasicMaterial({ color: 0xff9f43, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide }));
+        beam.position.y = 30; crate.add(beam);
+        crate.position.set(A.x, 150, A.z);
+        scene.add(crate);
+        A.mesh = crate; A.chute = chute;
+        A.state = 'fall';
+        AudioSys.chime(0.2);
+        showToast(tr('airdrop_in'), 'gold');
+      }
+    } else if (A.state === 'fall') {
+      A.mesh.position.y -= 9 * simK() * dt;
+      A.mesh.rotation.y += dt * 0.4;
+      A.mesh.position.x = A.x + Math.sin(t * 0.9) * 1.2;
+      if (A.mesh.position.y <= 0) {
+        A.mesh.position.set(A.x, 0, A.z);
+        A.mesh.rotation.y = 0;
+        A.chute.visible = false;
+        A.state = 'land';
+        showToast(tr('airdrop_land'), 'gold');
+      }
+    } else if (A.state === 'land') {
+      if (dist2d(player.x, player.z, A.x, A.z) < 2.8) {
+        A.state = 'done';
+        A.mesh.visible = false;
+        AudioSys.coin();
+        G.credits += 40; G.earned += 40; G.freeRadar = true;
+        showToast(tr('airdrop_get', 40), 'gold');
+        updateHUD();
+      }
+    }
+  }
   updateNPCs(city, dt, t);
   if (city.eyeWheel) city.eyeWheel.rotation.z += dt * 0.06;
   if (city.waterMesh) city.waterMesh.material.opacity = 0.9 + Math.sin(t * 1.4) * 0.04;
@@ -2724,7 +2821,7 @@ const player = {
   y: 0, vy: 0,
   mesh: null, bikeMesh: null,
   riding: null,         // null | 'bike' | 'bus'
-  stamina: 100,
+  stamina: 100, boostT: 0,
   camDist: 7.5,
 };
 
@@ -3150,7 +3247,8 @@ function tryInteract() {
 
 function tryRadar() {
   if (G.phase !== 'seek' || G.paused) return;
-  if (!spendCredits(COST.radar, t('w_radar'))) return;
+  if (G.freeRadar) { G.freeRadar = false; showToast(t('radar_free'), 'gold'); }
+  else if (!spendCredits(COST.radar, t('w_radar'))) return;
   const h = nearestActiveHider();
   AudioSys.radar();
   if (!h) { showToast(t('radar_none')); return; }
@@ -3307,6 +3405,7 @@ function updatePlayer(dt) {
     sp = SPEED.run;
     player.stamina = Math.max(0, player.stamina - 26 * dt);
   }
+  if (player.boostT > 0) { player.boostT -= dt; sp *= 1.3; }
   sp *= simK();
   if (!(wantRun && moving) || player.riding === 'bike') player.stamina = Math.min(100, player.stamina + 15 * dt);
   $('staminaBar').style.width = player.stamina + '%';
@@ -3473,6 +3572,21 @@ function drawMap(ctx, size, big) {
           ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1;
           ctx.beginPath(); ctx.arc(TX(hp.x), TZ(hp.z), big ? 6 : 4, 0, Math.PI * 2); ctx.stroke();
         }
+      });
+      // 空投标记（脉冲）
+      const A = c.airdrop;
+      if (A && (A.state === 'fall' || A.state === 'land')) {
+        const pu = 0.5 + 0.5 * Math.sin(performance.now() / 180);
+        ctx.fillStyle = `rgba(255,159,67,${(0.5 + 0.5 * pu).toFixed(2)})`;
+        ctx.beginPath(); ctx.arc(TX(A.x), TZ(A.z), (big ? 5.5 : 3.5) + pu * 2, 0, Math.PI * 2); ctx.fill();
+        ctx.font = big ? '13px sans-serif' : '10px sans-serif';
+        ctx.fillText('🪂', TX(A.x) - (big ? 7 : 5), TZ(A.z) - (big ? 8 : 5));
+      }
+      // 大地图显示未拾取的物资点
+      if (big && c.loot) c.loot.forEach((L) => {
+        if (L.taken) return;
+        ctx.fillStyle = L.kind === 'credits' ? '#ffd166' : L.kind === 'energy' ? '#39d98a' : '#61b3ff';
+        ctx.beginPath(); ctx.arc(TX(L.x), TZ(L.z), 2.2, 0, Math.PI * 2); ctx.fill();
       });
     }
   } else {
@@ -3787,6 +3901,7 @@ function startGame() {
   readConfig();
   resetWorld();
   G.captures = 0; G.spent = 0; G.earned = 0;
+  G.freeRadar = false;
   G.credits = G.startCredits;
   G.timeLeft = G.totalTime;
   G.weather = rng() < 0.4 ? 'rain' : 'clear';
@@ -3937,6 +4052,7 @@ function beginSeekPhase() {
   player.tv = null;
   player.bikeMesh.visible = false;
   player.stamina = 100;
+  player.boostT = 0;
   if (G.city.bus) G.city.bus.riding = false;
   if (G.city.vehicles) G.city.vehicles.forEach((v) => { v.riding = false; });
   G.turnTimer = 75;
