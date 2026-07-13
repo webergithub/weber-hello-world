@@ -12,4 +12,8 @@
         android:id="@+id/nav_camp"
         android:icon="@android:drawable/ic_menu_share"
         android:title="营地" />
+    <item
+        android:id="@+id/nav_voice"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:title="变声" />
 </menu>
