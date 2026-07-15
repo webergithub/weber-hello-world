@@ -3763,9 +3763,10 @@ function renderCluePanel() {
 }
 
 /* ---------------- 雨天 ---------------- */
-let rainMesh = null;
+let rainMesh = null, rippleGroup = null, ripples = [];
 function setupRain(on) {
   if (rainMesh) { scene.remove(rainMesh); rainMesh.geometry.dispose(); rainMesh = null; }
+  if (rippleGroup) { scene.remove(rippleGroup); rippleGroup = null; ripples = []; }
   AudioSys.rainOff();
   if (!on) return;
   const N = 1100;
@@ -3780,6 +3781,19 @@ function setupRain(on) {
     new THREE.LineBasicMaterial({ color: 0x9fb8cc, transparent: true, opacity: 0.45 }));
   rainMesh.frustumCulled = false;
   scene.add(rainMesh);
+  // 雨滴落地涟漪：一圈圈扩散的水环（自然生灭，不会突兀弹出）
+  rippleGroup = new THREE.Group();
+  const ringGeo = new THREE.RingGeometry(0.62, 1.0, 20);
+  for (let i = 0; i < 30; i++) {
+    const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({
+      color: 0xbcd6e8, transparent: true, opacity: 0, depthWrite: false, side: THREE.DoubleSide }));
+    m.rotation.x = -Math.PI / 2;
+    const rx = player.x + R(-26, 26), rz = player.z + R(-26, 26);
+    m.position.set(rx, 0.05, rz);
+    rippleGroup.add(m);
+    ripples.push({ mesh: m, age: R(0, 0.9), life: R(0.4, 0.9), r: R(0.6, 1.5) });
+  }
+  scene.add(rippleGroup);
 }
 function updateRain(dt) {
   if (!rainMesh) return;
@@ -3797,6 +3811,19 @@ function updateRain(dt) {
   }
   rainMesh.geometry.attributes.position.needsUpdate = true;
   rainMesh.position.set(player.x, 0, player.z);
+  // 地面涟漪
+  for (let k = 0; k < ripples.length; k++) {
+    const rp = ripples[k];
+    rp.age += dt;
+    if (rp.age >= rp.life) {
+      rp.age = 0; rp.life = R(0.4, 0.9); rp.r = R(0.6, 1.5);
+      rp.mesh.position.set(player.x + R(-26, 26), 0.05, player.z + R(-26, 26));
+    }
+    const pr = rp.age / rp.life;
+    const s = (0.15 + pr * 1.1) * rp.r;
+    rp.mesh.scale.set(s, s, s);
+    rp.mesh.material.opacity = (1 - pr) * 0.4;
+  }
   G.thunderT -= dt;
   if (G.thunderT <= 0) {
     G.thunderT = R(18, 40);
@@ -4596,6 +4623,6 @@ updateHUD();
 tick();
 
 // 调试钩子（仅用于自动化测试/研究地图）
-window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider };
+window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain, rippleInfo: () => ({ n: ripples.length, active: ripples.filter((r) => r.mesh.material.opacity > 0.01).length }) };
 
 })();
