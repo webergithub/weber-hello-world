@@ -34,9 +34,32 @@
 
 ---
 
-## 轨道 B · iPhone 装 IPA（Sideloadly，免费 Apple ID）
+## 轨道 B · iPhone 装 IPA（免费 Apple ID）
 
-> 需要：一台 Windows 或 Mac 电脑、一根数据线、你的 Apple ID。免费签名 **7 天过期**，过期重签即可；一个免费 Apple ID 同时最多 3 个自签 App。
+> **免费 Apple ID 无法用 CI 出"直接可装的签名 IPA"**（那需要付费开发者账号 $99/年 来导出证书与描述文件）。
+> 免费账号的现实方案是在**一台电脑上重签一次**，把 CI 出的 `trailmate-ios12-unsigned-ipa` 装进手机。
+> 共同前提：免费签名 **7 天过期**，一个免费 Apple ID 同时最多 **3 个**自签 App。
+
+**先选哪种：**
+- 🌟 **推荐 · AltStore**：电脑装一次，之后**同一 WiFi 下每 7 天自动后台重签**，手机端几乎不用管 → 见 **B-Alt**。
+- ⚡ **图省事一次性 · Sideloadly**：几分钟装好，但 **7 天后要手动再来一遍** → 见 **B-Side**。
+
+---
+
+### B-Alt · AltStore（推荐：装一次，自动续签）
+
+1. 电脑打开 [altstore.io](https://altstore.io) 下载 **AltServer**（Windows/Mac），安装。Windows 另需装 **iTunes + iCloud**（Apple 官网非 Microsoft Store 版）。
+2. 数据线连 iPhone，手机点"信任此电脑"。
+3. 电脑运行 AltServer（在托盘/菜单栏），点 **Install AltStore → 选你的设备**，输入 Apple ID 登录（这一步在手机上装好 AltStore 这个"商店"App）。
+4. 手机 `设置 → 通用 → VPN 与设备管理` 里**信任**你的 Apple ID 证书。
+5. 把 CI 下载的 `*.ipa` 传到手机（隔空投送/文件 App/网盘均可），在手机 **AltStore → My Apps → 左上角 ➕ → 选这个 ipa** 安装。
+6. 保持电脑上的 AltServer 与手机**同一 WiFi、且电脑开机**，AltStore 会在快过期时自动续签；也可手机里手动点一次 **Refresh All**。
+
+> 之后日常就手机操作即可；只有电脑长期不开机、证书过期后，才需再连一次电脑。
+
+---
+
+### B-Side · Sideloadly（一次性快装）
 
 **B1. 装 Sideloadly**：电脑打开 [sideloadly.io](https://sideloadly.io) 下载安装。
 Windows 另需装 **iTunes** 和 **iCloud**（用 Apple 官网的非 Microsoft Store 版本），Sideloadly 靠它们与设备通信。
@@ -53,10 +76,7 @@ Windows 另需装 **iTunes** 和 **iCloud**（用 Apple 官网的非 Microsoft S
 
 **B6. 打开 App**：回主屏点开，首次授权蓝牙/定位/麦克风。
 
-✅ 完成。**7 天后**若打不开，用 Sideloadly 重复 B3–B5 重签一次即可。
-
-### 备选：AltStore（免电脑手动重签）
-装 **AltStore + AltServer**（电脑与手机同一 WiFi），可在证书快过期时**自动后台重签**，不用每 7 天手动来一次。步骤见 [altstore.io](https://altstore.io)。
+✅ 完成。**7 天后**若打不开，用 Sideloadly 重复 B3–B5 重签一次即可（想省掉这步就改用上面的 AltStore）。
 
 ---
 
@@ -69,5 +89,6 @@ Windows 另需装 **iTunes** 和 **iCloud**（用 Apple 官网的非 Microsoft S
 | iPhone 提示"无法验证 App" | 没做 B5 信任证书；或证书已过期（重签） |
 | 提示 Apple ID 密码错误 | 开了两步验证要用 App 专用密码，不是登录密码 |
 | 想装到 iOS 12 老机 | 本 App 部署目标就是 iOS 12.0，正常可装；Sideloadly 同样支持老系统 |
+| CI 的「签名 IPA」工作流用不了 | `ios12-signed` 需**付费开发者账号（$99/年）**的证书与描述文件；免费 Apple ID 请走本轨道 B（Sideloadly/AltStore 重签），无需 Secrets |
 
 装完两台后，照 `docs/REAL-DEVICE-TEST.md` 的清单做蓝牙互通实测。
