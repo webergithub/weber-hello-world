@@ -251,6 +251,22 @@ const tClue = (k, ...a) => {
 };
 const tSpot = (k) => I18N[LANG].spots[k] || I18N.zh.spots[k] || k;
 const tColor = (c) => I18N[LANG].colors[c] || c;
+// 地标名英文对照（数据里只存中文描述名，此处按中文名映射英文）
+const LANDMARK_EN = {
+  '大本钟': 'Big Ben', '西敏寺': 'Westminster Abbey', '议会大厦': 'Houses of Parliament',
+  '摩天轮': 'The Giant Wheel', '碎片大厦': 'The Shard', '小黄瓜大楼': 'The Gherkin',
+  '圆顶大教堂': 'Domed Cathedral', '通天塔': 'The Great Tower', '古堡': 'Old Castle',
+  '宫墙': 'Palace Walls', '古方尖碑': 'Ancient Obelisk', '环岛纪念柱': 'Roundabout Column',
+  '纪念塔': 'Memorial Tower', '纪念柱': 'Memorial Column', '钟楼大楼': 'Clock Tower',
+  '石塔': 'Stone Tower', '宝塔楼': 'Pagoda Tower', '尖顶摩天楼': 'Spired Skyscraper',
+  '银环建筑': 'Silver Ring', '大圆顶殿': 'Great Domed Hall', '蓝顶殿': 'Blue-Domed Hall',
+  '大剧院': 'Grand Theatre', '宫殿': 'The Palace', '巨型商场': 'Grand Mall',
+  '滨水宫殿': 'Waterfront Palace', '石柱大楼': 'Colonnade Building', '古亭': 'Old Pavilion',
+  '球塔': 'Orb Tower', '双子尖楼·一': 'Twin Spire · I', '双子尖楼·二': 'Twin Spire · II',
+  '银色尖楼': 'Silver Spire', '玻璃尖塔': 'Glass Spire', '螺旋巨塔': 'Spiral Tower',
+  '会展巨楼': 'Convention Hall', '开瓶器楼': 'Bottle-Opener Tower', '石板巨楼': 'Stone Slab Tower',
+};
+const tLandmark = (zh) => (LANG === 'en' ? (LANDMARK_EN[zh] || zh) : zh);
 
 /* ---------------- 音效（WebAudio 合成，无素材） ---------------- */
 const AudioSys = {
@@ -2527,7 +2543,7 @@ function updateLondon(dt, t) {
         city.poiVisited.add(lm.zh);
         G.credits += 5; G.earned += 5;
         AudioSys.coin();
-        showToast(tr('poi_found', lm.zh), 'gold');
+        showToast(tr('poi_found', tLandmark(lm.zh)), 'gold');
         updateHUD();
       }
     });
@@ -3652,6 +3668,65 @@ function drawMap(ctx, size, big) {
   }
 }
 
+/* ---- PUBG 式罗盘条 ---- */
+let _compassCtx = null;
+function drawCompass() {
+  const cv = $('compass');
+  if (!cv) return;
+  const ctx = _compassCtx || (_compassCtx = cv.getContext('2d'));
+  const W = cv.width, H = cv.height, midX = W / 2, PPD = 2.9;
+  ctx.clearRect(0, 0, W, H);
+  const forward = ((-player.yaw * 180 / Math.PI) % 360 + 360) % 360;
+  const norm180 = (d) => ((d + 180) % 360 + 360) % 360 - 180;
+  const sx = (bearing) => midX + norm180(bearing - forward) * PPD;
+  const bearingTo = (tx, tz) => (Math.atan2(tx - player.x, -(tz - player.z)) * 180 / Math.PI + 360) % 360;
+
+  // 中心指示（当前朝向）：顶部小三角 + 底部准星线，中间留出标签空间
+  ctx.fillStyle = '#2be0bd';
+  ctx.beginPath(); ctx.moveTo(midX, 5); ctx.lineTo(midX - 4, 0); ctx.lineTo(midX + 4, 0); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = 'rgba(43,224,189,0.9)';
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(midX, 17); ctx.lineTo(midX, H); ctx.stroke();
+
+  // 刻度
+  ctx.strokeStyle = 'rgba(255,255,255,0.30)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  for (let b = 0; b < 360; b += 15) {
+    const x = sx(b);
+    if (x < 2 || x > W - 2) continue;
+    ctx.moveTo(x, H - 1); ctx.lineTo(x, H - (b % 45 === 0 ? 11 : 6));
+  }
+  ctx.stroke();
+
+  // 方位标签
+  const dirs = [[0, 'N', '#ff6b6b'], [45, 'NE'], [90, 'E'], [135, 'SE'], [180, 'S'], [225, 'SW'], [270, 'W'], [315, 'NW']];
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  dirs.forEach(([b, label, col]) => {
+    const x = sx(b);
+    if (x < 9 || x > W - 9) return;
+    ctx.fillStyle = col || '#dfe8f5';
+    ctx.font = (col ? 'bold 13px' : '11px') + ' sans-serif';
+    ctx.fillText(label, x, 13);
+  });
+
+  // 地标 / 空投方位标记（不标记躲藏者，避免破坏玩法）
+  const mark = (tx, tz, color) => {
+    const x = sx(bearingTo(tx, tz));
+    if (x < 5 || x > W - 5) return;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x, 17); ctx.lineTo(x - 3.5, 24); ctx.lineTo(x + 3.5, 24);
+    ctx.closePath(); ctx.fill();
+  };
+  const c = G.city;
+  (c.landmarks || []).forEach((lm) => {
+    if (dist2d(player.x, player.z, lm.p[0], lm.p[1]) < 350) mark(lm.p[0], lm.p[1], '#ffd166');
+  });
+  const A = c.airdrop;
+  if (A && (A.state === 'fall' || A.state === 'land')) mark(A.x, A.z, '#ff9f43');
+}
+
 /* ============================================================
  * UI 辅助
  * ============================================================ */
@@ -4307,6 +4382,8 @@ function tick() {
         camera.updateProjectionMatrix();
       }
     }
+    // 罗盘（每帧绘制，跟随转视角平滑滚动）
+    drawCompass();
     // 小地图节流（窗口关闭/最小化时不绘制）
     miniTimer -= dt;
     if (miniTimer <= 0) {
