@@ -12,6 +12,15 @@
 
 > 📱 **不区分机型互联**：iPhone、安卓手机、网页端使用**同一套协议**互通——群组走同一验证码房间，蓝牙 Mesh 用**相同的 Service/Characteristic UUID 与分片协议**，WebRTC 用平台无关的随机标识。因此 iOS 与 Android 混合队伍可直接互相连接、互发位置/语音/消息。跟车页顶部会实时显示同行设备机型分布（如「iPhone×2 · 安卓×1」）。
 
+## 测试与安装文档
+
+| 文档 | 用途 |
+| --- | --- |
+| [`docs/INSTALL.md`](docs/INSTALL.md) | 装包上手：从 GitHub Actions 下载安装包 → 安卓 APK 侧载 / iPhone 用 Sideloadly 免费重签 |
+| [`docs/REAL-DEVICE-TEST.md`](docs/REAL-DEVICE-TEST.md) | 两台真机蓝牙互通实测清单（扫码进队 / 营地互聊 / 跟车互见 / 离线记账 / 变声，含排障） |
+
+原生 App 源码见 [`ios12/`](ios12/)（iOS 12+ 纯原生）与 [`android-native/`](android-native/)（Kotlin 原生），二者共用同一蓝牙 Mesh 线协议，可跨平台互通。
+
 ## 快速开始
 
 ```bash
