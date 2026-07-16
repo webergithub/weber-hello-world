@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>LinkTalk · room</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand" style="font-size:18px"><span class="dot"></span> LinkTalk</div>
+      <div class="pill">Room <b id="room-code">------</b></div>
+    </div>
+
+    <!-- Invite / host panel -->
+    <div class="card" id="invite-card">
+      <h2>Invite people</h2>
+      <p class="hint">Scan the QR, open the link, or share it face-to-face.</p>
+      <div class="qr-wrap">
+        <img id="qr-img" alt="Join QR code" />
+      </div>
+      <div class="invite-link">
+        <input id="invite-url" type="text" readonly />
+        <button class="icon-btn" id="copy-btn">Copy</button>
+      </div>
+      <div class="share-grid">
+        <button class="btn secondary" id="share-btn">Share (AirDrop / Nearby)</button>
+        <button class="btn secondary" id="nfc-btn">Tap to NFC</button>
+      </div>
+      <p class="small" id="share-note" style="margin-top:10px"></p>
+      <details style="margin-top:8px">
+        <summary>Hide invite once everyone's in</summary>
+        <button class="btn ghost" id="collapse-invite">Collapse this panel</button>
+      </details>
+    </div>
+
+    <!-- Language settings -->
+    <div class="card">
+      <h2>Your languages</h2>
+      <p class="hint">You speak in one language and read the room in up to two (a primary and an optional secondary).</p>
+      <label for="speak-lang">I speak</label>
+      <select id="speak-lang"></select>
+      <div class="row">
+        <div>
+          <label for="recv-primary">I read (primary)</label>
+          <select id="recv-primary"></select>
+        </div>
+        <div>
+          <label for="recv-secondary">I read (secondary)</label>
+          <select id="recv-secondary"></select>
+        </div>
+      </div>
+      <label style="display:flex;align-items:center;gap:8px;margin-top:14px">
+        <input type="checkbox" id="speak-aloud" style="width:auto" />
+        <span class="small">Read incoming messages aloud in my primary language</span>
+      </label>
+    </div>
+
+    <!-- People -->
+    <div class="card">
+      <h2>In this room</h2>
+      <div class="members" id="members"></div>
+    </div>
+
+    <!-- Conversation -->
+    <div class="card">
+      <h2>Conversation</h2>
+      <div class="feed" id="feed"></div>
+      <div class="composer">
+        <button class="mic" id="mic-btn" title="Hold to speak">🎤</button>
+        <textarea id="composer" rows="1" placeholder="Type or speak…"></textarea>
+        <button class="send" id="send-btn" title="Send">➤</button>
+      </div>
+      <p class="small" id="mic-note" style="margin-top:8px"></p>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/js/room.js"></script>
+</body>
+</html>

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>LinkTalk · live translation rooms</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand"><span class="dot"></span> LinkTalk</div>
+    <p class="tagline">Everyone speaks their own language. Everyone reads their own.</p>
+
+    <div class="card">
+      <h2>Start a room</h2>
+      <p class="hint">You become the host. Invite others by QR code, link, or a face-to-face share.</p>
+      <label for="host-name">Your name</label>
+      <input id="host-name" type="text" placeholder="e.g. Weber" autocomplete="name" />
+      <label for="host-lang">You speak</label>
+      <select id="host-lang"></select>
+      <button class="btn" id="create-btn">Create room →</button>
+    </div>
+
+    <div class="divider">or</div>
+
+    <div class="card">
+      <h2>Join a room</h2>
+      <p class="hint">Enter the 6-character code from the host (or open their invite link / scan their QR).</p>
+      <label for="join-name">Your name</label>
+      <input id="join-name" type="text" placeholder="e.g. Alex" autocomplete="name" />
+      <label for="join-code">Room code</label>
+      <input id="join-code" type="text" placeholder="ABC234" maxlength="6"
+             autocapitalize="characters" autocomplete="off" style="letter-spacing:4px;text-transform:uppercase" />
+      <button class="btn secondary" id="join-btn">Join room →</button>
+    </div>
+
+    <details>
+      <summary>How does joining face-to-face work?</summary>
+      <p class="small">
+        When you create a room, the invite screen offers a <b>Share</b> button. On iPhone that
+        opens the system share sheet including <b>AirDrop</b>; on Android it opens
+        <b>Nearby Share</b>. Android Chrome can also write the invite to an <b>NFC</b> tag so
+        another phone joins by tapping. All of these just carry the same room link.
+      </p>
+    </details>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script type="module">
+    import { fillLangSelect } from '/js/langs.js';
+
+    const $ = (id) => document.getElementById(id);
+    const toast = (m) => {
+      const t = $('toast'); t.textContent = m; t.classList.add('show');
+      setTimeout(() => t.classList.remove('show'), 2200);
+    };
+
+    // Remember the last name / language used.
+    const saved = JSON.parse(localStorage.getItem('linktalk.profile') || '{}');
+    fillLangSelect($('host-lang'), { selected: saved.speakLang || 'en' });
+    $('host-name').value = saved.name || '';
+    $('join-name').value = saved.name || '';
+
+    function persist(name, speakLang) {
+      localStorage.setItem('linktalk.profile',
+        JSON.stringify({ ...saved, name, speakLang }));
+    }
+
+    $('create-btn').addEventListener('click', async () => {
+      const name = $('host-name').value.trim() || 'Host';
+      const speakLang = $('host-lang').value;
+      persist(name, speakLang);
+      try {
+        const r = await fetch('/api/rooms', { method: 'POST' });
+        const { code } = await r.json();
+        location.href = `/room.html?room=${code}&host=1`;
+      } catch {
+        toast('Could not reach the server.');
+      }
+    });
+
+    $('join-btn').addEventListener('click', async () => {
+      const name = $('join-name').value.trim() || 'Guest';
+      const code = $('join-code').value.trim().toUpperCase();
+      if (code.length !== 6) return toast('Enter the 6-character room code.');
+      persist(name, saved.speakLang || 'en');
+      const r = await fetch(`/api/rooms/${code}`);
+      if (!r.ok) return toast('That room was not found.');
+      location.href = `/room.html?room=${code}`;
+    });
+
+    // Uppercase the code as it is typed.
+    $('join-code').addEventListener('input', (e) => {
+      e.target.value = e.target.value.toUpperCase();
+    });
+  </script>
+</body>
+</html>
