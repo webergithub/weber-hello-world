@@ -3021,6 +3021,51 @@ function collide(x, z, r = 0.55) {
 /* ============================================================
  * 躲藏者
  * ============================================================ */
+let _footGeo = null;
+function footGeo() {
+  if (!_footGeo) {
+    _footGeo = new THREE.CircleGeometry(1, 10);
+    _footGeo.rotateX(-Math.PI / 2);   // 平铺到地面
+    _footGeo.scale(0.13, 1, 0.30);    // 拉成脚印椭圆（长轴沿 Z）
+  }
+  return _footGeo;
+}
+// 躲藏者留下的脚印：从随机方向走向藏点，靠近才显形
+function makeFootprints(spot) {
+  const CNT = 7, STEP = 1.15, LAT = 0.32;
+  // 从若干候选方向里挑一个尽量不穿墙的
+  let best = 0, bestOpen = -1;
+  for (let tryi = 0; tryi < 6; tryi++) {
+    const a = R(0, Math.PI * 2);
+    const ux = Math.sin(a), uz = Math.cos(a);
+    let open = 0;
+    for (let i = 1; i <= CNT; i++) {
+      const px = spot.x + ux * i * STEP, pz = spot.z + uz * i * STEP;
+      const blocked = nearbyAabbs(G.city, px, pz).some((ab) =>
+        px > ab.x1 && px < ab.x2 && pz > ab.z1 && pz < ab.z2);
+      if (!blocked) open++;
+    }
+    if (open > bestOpen) { bestOpen = open; best = a; }
+    if (open === CNT) break;
+  }
+  const ux = Math.sin(best), uz = Math.cos(best);
+  const heading = Math.atan2(ux, uz);
+  const tracks = [];
+  for (let i = 1; i <= CNT; i++) {
+    const side = i % 2 ? 1 : -1;                     // 左右交替步态
+    const px = spot.x + ux * i * STEP - uz * LAT * side;
+    const pz = spot.z + uz * i * STEP + ux * LAT * side;
+    const m = new THREE.Mesh(footGeo(), new THREE.MeshBasicMaterial({
+      color: 0x2b2622, transparent: true, opacity: 0, depthWrite: false }));
+    m.position.set(px, 0.045, pz);
+    m.rotation.y = heading;
+    m.userData.fade = 1 - (i - 1) / CNT * 0.55;      // 越远越淡
+    scene.add(m);
+    tracks.push(m);
+  }
+  return tracks;
+}
+
 function createHider(spot, name, emoji, clue, bounty, isHuman, ownerLabel) {
   const bodyC = pick([0xd96b6c, 0xe0995c, 0x83bf78, 0xa38ad6, 0xe3a0bd, 0x6fc4c4]);
   const hatC = pick([0xffd166, 0x22c1a3, 0xef6b6b, 0x6e8fd6]);
@@ -3031,7 +3076,7 @@ function createHider(spot, name, emoji, clue, bounty, isHuman, ownerLabel) {
   scene.add(mesh);
   spot.taken = true;
   return {
-    spot, name, emoji, clue, bounty, mesh,
+    spot, name, emoji, clue, bounty, mesh, tracks: makeFootprints(spot),
     found: false, isHuman, ownerLabel: ownerLabel || name,
     giggleCd: R(2, 5), foundBy: null, capAnim: 0,
   };
@@ -3070,6 +3115,8 @@ function updateHiders(dt, t) {
         h.mesh.rotation.y += dt * 9;
         if (h.capAnim <= 0) h.mesh.visible = false;
       }
+      // 抓到后脚印淡出
+      if (h.tracks) h.tracks.forEach((m) => { if (m.material.opacity > 0) m.material.opacity = Math.max(0, m.material.opacity - dt * 0.8); });
       return;
     }
     if (G.phase !== 'seek') return;
@@ -3081,6 +3128,13 @@ function updateHiders(dt, t) {
     if (d < 12 && h.giggleCd <= 0) {
       AudioSys.giggle(clamp(0.16 * (1 - d / 14), 0.02, 0.16));
       h.giggleCd = R(2.5, 5);
+    }
+    // 脚印痕迹：26m 内随距离显形（越近越清晰），远处完全不可见——避免破坏寻找难度
+    if (h.tracks) {
+      const reveal = d < 26 ? clamp((26 - d) / 20, 0, 1) : 0;
+      for (let i = 0; i < h.tracks.length; i++) {
+        h.tracks[i].material.opacity = reveal * 0.55 * h.tracks[i].userData.fade;
+      }
     }
   });
 }
