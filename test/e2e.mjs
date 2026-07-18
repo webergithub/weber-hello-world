@@ -54,6 +54,21 @@ async function main() {
   ok(t4.translated === false && t4.text === 'unlisted sentence here',
     'unknown phrase falls back to original');
 
+  // --- Whisper transcription (mock mode) ---
+  const wstat = await (await fetch(`${BASE}/api/transcribe/status`)).json();
+  ok(wstat.mock === true, 'transcribe status reports mock mode');
+  const tr = await fetch(`${BASE}/api/transcribe?lang=en`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/webm' },
+    body: Buffer.from([1, 2, 3, 4, 5]),
+  });
+  const trBody = await tr.json();
+  ok(tr.ok && trBody.text === 'hello', `mock transcribe returns text = ${trBody.text}`);
+  const trEmpty = await fetch(`${BASE}/api/transcribe?lang=en`, {
+    method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: Buffer.alloc(0),
+  });
+  ok(trEmpty.status === 400, 'empty audio rejected with 400');
+
   // --- WebSocket relay: two clients in the same room ---
   await relayTest(CODE);
 

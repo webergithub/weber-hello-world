@@ -12,51 +12,18 @@
   <div class="wrap">
     <div class="topbar">
       <div class="brand" style="font-size:18px"><span class="dot"></span> LinkTalk</div>
-      <div class="pill">Room <b id="room-code">------</b></div>
-    </div>
-
-    <!-- Invite / host panel -->
-    <div class="card" id="invite-card">
-      <h2>Invite people</h2>
-      <p class="hint">Scan the QR, open the link, or share it face-to-face.</p>
-      <div class="qr-wrap">
-        <img id="qr-img" alt="Join QR code" />
-      </div>
-      <div class="invite-link">
-        <input id="invite-url" type="text" readonly />
-        <button class="icon-btn" id="copy-btn">Copy</button>
-      </div>
-      <div class="share-grid">
-        <button class="btn secondary" id="share-btn">Share (AirDrop / Nearby)</button>
-        <button class="btn secondary" id="nfc-btn">Tap to NFC</button>
-      </div>
-      <p class="small" id="share-note" style="margin-top:10px"></p>
-      <details style="margin-top:8px">
-        <summary>Hide invite once everyone's in</summary>
-        <button class="btn ghost" id="collapse-invite">Collapse this panel</button>
-      </details>
-    </div>
-
-    <!-- Language settings -->
-    <div class="card">
-      <h2>Your languages</h2>
-      <p class="hint">You speak in one language and read the room in up to two (a primary and an optional secondary).</p>
-      <label for="speak-lang">I speak</label>
-      <select id="speak-lang"></select>
-      <div class="row">
-        <div>
-          <label for="recv-primary">I read (primary)</label>
-          <select id="recv-primary"></select>
-        </div>
-        <div>
-          <label for="recv-secondary">I read (secondary)</label>
-          <select id="recv-secondary"></select>
+      <div class="topbar-right">
+        <div class="pill">Room <b id="room-code">------</b></div>
+        <!-- My menu -->
+        <div class="menu">
+          <button class="icon-btn menu-btn" id="menu-btn" aria-haspopup="true" aria-expanded="false" title="Menu">☰</button>
+          <div class="menu-drop hidden" id="menu-drop" role="menu">
+            <button class="menu-item" id="menu-settings" role="menuitem">⚙️ Settings</button>
+            <button class="menu-item" id="menu-invite" role="menuitem">🔗 Invite people</button>
+            <button class="menu-item danger" id="menu-leave" role="menuitem">🚪 Leave room</button>
+          </div>
         </div>
       </div>
-      <label style="display:flex;align-items:center;gap:8px;margin-top:14px">
-        <input type="checkbox" id="speak-aloud" style="width:auto" />
-        <span class="small">Read incoming messages aloud in my primary language</span>
-      </label>
     </div>
 
     <!-- People -->
@@ -70,11 +37,71 @@
       <h2>Conversation</h2>
       <div class="feed" id="feed"></div>
       <div class="composer">
-        <button class="mic" id="mic-btn" title="Hold to speak">🎤</button>
-        <textarea id="composer" rows="1" placeholder="Type or speak…"></textarea>
+        <button class="mic" id="mic-btn" title="Tap to record">🎤</button>
+        <textarea id="composer" rows="1" placeholder="Type or tap the mic to speak…"></textarea>
         <button class="send" id="send-btn" title="Send">➤</button>
       </div>
       <p class="small" id="mic-note" style="margin-top:8px"></p>
+    </div>
+  </div>
+
+  <!-- Settings sheet (opened from My menu → Settings) -->
+  <div class="sheet-backdrop hidden" id="settings-sheet">
+    <div class="sheet" role="dialog" aria-label="Settings">
+      <div class="sheet-head">
+        <h2>Settings</h2>
+        <button class="icon-btn" data-close="settings-sheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <h3>Your languages</h3>
+        <p class="hint">You speak in one language and read the room in up to two (a primary and an optional secondary).</p>
+        <label for="speak-lang">I speak</label>
+        <select id="speak-lang"></select>
+        <div class="row">
+          <div>
+            <label for="recv-primary">I read (primary)</label>
+            <select id="recv-primary"></select>
+          </div>
+          <div>
+            <label for="recv-secondary">I read (secondary)</label>
+            <select id="recv-secondary"></select>
+          </div>
+        </div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:14px">
+          <input type="checkbox" id="speak-aloud" style="width:auto" />
+          <span class="small">Read incoming messages aloud in my primary language</span>
+        </label>
+
+        <h3 style="margin-top:22px">Voice input</h3>
+        <p class="hint">Speech is recognised with <b>Whisper</b>. Tap the mic to record, tap again to stop — your audio is transcribed and sent in your speak language.</p>
+        <label for="whisper-status" class="small">Engine status</label>
+        <div class="small" id="whisper-status" style="margin-top:4px">Checking…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Invite sheet (opened from My menu → Invite; auto-opens for the host) -->
+  <div class="sheet-backdrop hidden" id="invite-sheet">
+    <div class="sheet" role="dialog" aria-label="Invite people">
+      <div class="sheet-head">
+        <h2>Invite people</h2>
+        <button class="icon-btn" data-close="invite-sheet" aria-label="Close">✕</button>
+      </div>
+      <div class="sheet-body">
+        <p class="hint">Scan the QR, open the link, or share it face-to-face.</p>
+        <div class="qr-wrap">
+          <img id="qr-img" alt="Join QR code" />
+        </div>
+        <div class="invite-link">
+          <input id="invite-url" type="text" readonly />
+          <button class="icon-btn" id="copy-btn">Copy</button>
+        </div>
+        <div class="share-grid">
+          <button class="btn secondary" id="share-btn">Share (AirDrop / Nearby)</button>
+          <button class="btn secondary" id="nfc-btn">Tap to NFC</button>
+        </div>
+        <p class="small" id="share-note" style="margin-top:10px"></p>
+      </div>
     </div>
   </div>
 

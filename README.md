@@ -24,9 +24,12 @@ Android with nothing to install — and installs to the home screen if you want.
 | 生成邀请二维码或链接 (invite QR code / link) | The host screen shows a **QR code** and a copyable **invite link** (`/room.html?room=CODE`). Scanning or opening either lands the guest straight in the room. |
 | 扫码或添加链接加入 (join by scan or link) | Open the link / scan the QR → auto‑join. Or type the 6‑character code on the home screen. |
 | AirDrop / NFC 面对面碰接加入 (face‑to‑face join) | The **Share** button uses the Web Share API — on iPhone that surfaces **AirDrop**, on Android **Nearby Share**. Android Chrome also gets a **Tap to NFC** button that writes the invite to an NFC tag for tap‑to‑join. All of them just carry the same room link. |
-| 一人发言同步到其他人屏幕 (one person's speech syncs to all screens) | Messages relay through a WebSocket server to every device in the room instantly. You can **type** or **dictate** (Web Speech API speech‑to‑text); interim words even preview live as you speak. |
-| 接收方设定默认发言语言和接收语言 (per‑user speak + receive language) | Each person sets **I speak** (one language) and **I read (primary)**. Choices are remembered on the device. |
+| 一人发言同步到其他人屏幕 (one person's speech syncs to all screens) | Messages relay through a WebSocket server to every device in the room instantly. You can **type** or **speak**: tapping the mic records a clip and transcribes it with **Whisper** (see below). |
+| 接收方设定默认发言语言和接收语言 (per‑user speak + receive language) | Under **My menu → Settings**, each person sets **I speak** (one language) and **I read (primary)**. Choices are remembered on the device. |
 | 最多支持 2 个，一主一次 (max 2, one primary + one secondary) | A second **I read (secondary)** slot (optional). Every incoming message is shown in your primary language, then your secondary, with the original kept underneath. |
+
+Settings, invites, and "leave room" all live under the **☰ My menu** in the top
+bar, keeping the room screen focused on the conversation.
 
 Bonus niceties: optional **read‑aloud** (text‑to‑speech) of incoming messages in
 your primary language, live roster of who's in the room, and auto‑reconnect.
@@ -48,6 +51,9 @@ your primary language, live roster of who's in the room, and auto‑reconnect.
 - **`public/`** — the PWA. `index.html` (create / join), `room.html` (the room),
   `js/room.js` (the client), `js/langs.js` (language table), `css/style.css`.
 - **`phrasebook.js`** — a small offline phrasebook fallback (see below).
+
+The server also exposes **`/api/transcribe`**, which forwards recorded audio to
+**Whisper** for speech‑to‑text (see *Voice input*).
 
 **Translation happens on the receiver's device.** The server relays only the
 original text plus its source language; each receiving phone translates into
@@ -75,12 +81,12 @@ the phone reached the server through.
 ### Tests
 
 ```bash
-# REST + translation chain + WebSocket relay
-PORT=3111 node server.js &
+# REST + translation chain + Whisper (mock) + WebSocket relay
+WHISPER_MOCK=1 PORT=3111 node server.js &
 node test/e2e.mjs
 
-# Full browser flow (two phones, real translation rendering) — needs Chromium
-PORT=3111 node server.js &
+# Full browser flow (two phones, translation + voice input) — needs Chromium
+WHISPER_MOCK=1 PORT=3111 node server.js &
 node test/browser.mjs
 ```
 
@@ -106,6 +112,37 @@ language, clearly labelled, until the live provider is reachable.
 
 ---
 
+## Voice input (Whisper)
+
+Tapping the mic records an audio clip in the browser (`MediaRecorder`), uploads it
+to the server's `/api/transcribe`, and the server runs it through **Whisper**. The
+returned text is sent as a message in your speak language, then translated on every
+receiver's device like any other message. The current engine status is shown under
+**My menu → Settings → Voice input**.
+
+The endpoint speaks the **OpenAI audio‑transcription** API shape, so it works with
+OpenAI directly *or* a self‑hosted server that mimics it (whisper.cpp,
+faster‑whisper, etc.). Configure with env vars:
+
+| Variable | Meaning | Default |
+| --- | --- | --- |
+| `WHISPER_API_KEY` | Bearer token for the transcription endpoint (required for real use) | — |
+| `WHISPER_URL` | Transcription endpoint | `https://api.openai.com/v1/audio/transcriptions` |
+| `WHISPER_MODEL` | Model name | `whisper-1` |
+| `WHISPER_MOCK` | set to `1` to return a canned transcript (test the record→send pipeline with no key) | off |
+
+```bash
+# Real Whisper (OpenAI):
+WHISPER_API_KEY=sk-... npm start
+
+# Self-hosted whisper.cpp server:
+WHISPER_URL=http://localhost:8080/inference WHISPER_API_KEY=x npm start
+```
+
+If Whisper isn't configured, the mic reports it in Settings and typing still works.
+
+---
+
 ## Notes & limitations
 
 - **Rooms are in memory.** A room disappears when its last device leaves; there's
@@ -115,5 +152,8 @@ language, clearly labelled, until the live provider is reachable.
   *invokes* AirDrop / Nearby Share) and Web NFC where the platform allows. A native
   iOS/Android wrapper could deepen this, but the join payload — the room link —
   is identical.
-- **Speech‑to‑text** relies on the browser's Web Speech API (great on Chrome and
-  Safari; absent elsewhere). Typing always works as a fallback.
+- **Speech‑to‑text uses Whisper** via the server (batch, not streaming): you tap to
+  record, tap to stop, and the clip is transcribed and sent. It needs a configured
+  Whisper backend (`WHISPER_API_KEY`, or a self‑hosted `WHISPER_URL`); without one,
+  Settings says so and typing remains the fallback. Recording needs a secure
+  context (HTTPS or `localhost`).

@@ -11,8 +11,23 @@ const ok = (c, l) => { console.log(`${c ? '✅' : '❌'} ${l}`); if (!c) failure
 
 const browser = await chromium.launch({
   executablePath: EXEC,
-  args: ['--no-sandbox', '--use-fake-ui-for-media-stream'],
+  args: [
+    '--no-sandbox',
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+  ],
 });
+
+// Open My menu -> Settings so the language selects are interactable.
+async function openSettings(page) {
+  await page.click('#menu-btn');
+  await page.click('#menu-settings');
+  await page.waitForSelector('#settings-sheet:not(.hidden)');
+}
+async function closeSettings(page) {
+  await page.click('#settings-sheet [data-close]');
+  await page.waitForSelector('#settings-sheet', { state: 'hidden' });
+}
 
 try {
   // ---- Host creates a room ----
@@ -35,19 +50,26 @@ try {
   }, { timeout: 5000 });
   ok(true, 'QR code rendered on host screen');
 
-  // Invite link is populated.
+  // Invite link is populated (invite sheet auto-opens for the host).
   const inviteVal = await host.inputValue('#invite-url');
   ok(inviteVal.includes(roomCode), 'invite link contains room code');
+  // Close it so the host can chat.
+  await host.click('#invite-sheet [data-close]');
+  await host.waitForSelector('#invite-sheet', { state: 'hidden' });
 
   // ---- Guest joins the same room, reading in Chinese ----
   const guestCtx = await browser.newContext();
   const guest = await guestCtx.newPage();
   guest.on('pageerror', (e) => errors.push(String(e)));
   await guest.goto(`${BASE}/room.html?room=${roomCode}`);
-  await guest.waitForSelector('#speak-lang');
+  await guest.waitForSelector('#menu-btn');
+  await openSettings(guest);                           // settings live under My menu now
   await guest.selectOption('#speak-lang', 'zh');       // guest speaks Chinese
   await guest.selectOption('#recv-primary', 'zh');     // and reads Chinese
   await guest.selectOption('#recv-secondary', 'fr');   // secondary: French
+  const whisperStatus = await guest.textContent('#whisper-status');
+  ok(/mock|whisper|configured/i.test(whisperStatus || ''), `settings shows Whisper status (${whisperStatus?.trim()})`);
+  await closeSettings(guest);
 
   // Wait for both to appear in the roster (2 members).
   await guest.waitForFunction(
@@ -88,7 +110,9 @@ try {
   ok(hostOwnCount === 1, `host sees its own message once (got ${hostOwnCount})`);
 
   // ---- Guest replies in Chinese; host reads English ----
+  await openSettings(host);
   await host.selectOption('#recv-primary', 'en');
+  await closeSettings(host);
   await guest.fill('#composer', '你好');
   await guest.click('#send-btn');
   await host.waitForFunction(() => {
@@ -96,6 +120,19 @@ try {
     return msgs.some((m) => (m.querySelector('.primary')?.textContent || '').toLowerCase().includes('hello'));
   }, { timeout: 8000 });
   ok(true, 'host received guest reply translated to English (hello)');
+
+  // ---- Whisper voice input: record → transcribe (mock) → send ----
+  // Guest speaks Chinese; the mock Whisper returns "hello", which the host
+  // (reading English) should receive. Fake media devices supply the audio.
+  const beforeCount = await host.evaluate(() =>
+    document.querySelectorAll('#feed .msg').length);
+  await guest.click('#mic-btn');                 // start recording
+  await guest.waitForTimeout(700);
+  await guest.click('#mic-btn');                 // stop -> upload -> transcribe
+  const voiceArrived = await host.waitForFunction((n) =>
+    document.querySelectorAll('#feed .msg').length > n, beforeCount, { timeout: 12000 })
+    .then(() => true).catch(() => false);
+  ok(voiceArrived, 'voice message transcribed by Whisper and relayed');
 
   ok(errors.length === 0, `no client-side JS errors (${errors.length})`);
   if (errors.length) console.log(errors.join('\n'));

@@ -9,9 +9,10 @@
 //      available underneath.
 //
 // Translation goes through the server's /api/translate proxy (key-less, cached).
-// Speech-to-text uses the browser's Web Speech API where available.
+// Speech-to-text records audio (MediaRecorder) and posts it to the server's
+// /api/transcribe endpoint, which runs it through Whisper.
 
-import { LANGS, langName, speechLocale, fillLangSelect } from '/js/langs.js';
+import { langName, speechLocale, fillLangSelect } from '/js/langs.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -66,7 +67,6 @@ $('speak-lang').addEventListener('change', (e) => {
   state.speakLang = e.target.value;
   savePrefs();
   send({ type: 'setLang', speakLang: state.speakLang });
-  setupRecognition(); // speech locale follows the speak language
 });
 $('recv-primary').addEventListener('change', (e) => {
   state.recvPrimary = e.target.value;
@@ -81,15 +81,41 @@ $('speak-aloud').addEventListener('change', (e) => {
   savePrefs();
 });
 
-// ---- Invite panel ---------------------------------------------------------
+// ---- My menu + sheets -----------------------------------------------------
+const menuBtn = $('menu-btn');
+const menuDrop = $('menu-drop');
+
+function toggleMenu(open) {
+  const show = open ?? menuDrop.classList.contains('hidden');
+  menuDrop.classList.toggle('hidden', !show);
+  menuBtn.setAttribute('aria-expanded', String(show));
+}
+menuBtn.addEventListener('click', (e) => { e.stopPropagation(); toggleMenu(); });
+document.addEventListener('click', () => toggleMenu(false));
+
+function openSheet(id) { $(id).classList.remove('hidden'); toggleMenu(false); }
+function closeSheet(id) { $(id).classList.add('hidden'); }
+
+// Close buttons and backdrop taps.
+document.querySelectorAll('[data-close]').forEach((b) =>
+  b.addEventListener('click', () => closeSheet(b.dataset.close)));
+document.querySelectorAll('.sheet-backdrop').forEach((bd) =>
+  bd.addEventListener('click', (e) => { if (e.target === bd) closeSheet(bd.id); }));
+
+$('menu-settings').addEventListener('click', () => openSheet('settings-sheet'));
+$('menu-invite').addEventListener('click', () => openSheet('invite-sheet'));
+$('menu-leave').addEventListener('click', () => {
+  if (ws) ws.close();
+  location.href = '/';
+});
+
+// ---- Invite sheet ---------------------------------------------------------
 $('room-code').textContent = ROOM;
 const inviteUrl = `${location.origin}/room.html?room=${ROOM}`;
 $('invite-url').value = inviteUrl;
 
-if (!IS_HOST) {
-  // Guests don't need to see the big QR block; keep it collapsible though.
-  $('invite-card').classList.add('hidden');
-}
+// The host lands on an empty room, so surface the invite immediately.
+if (IS_HOST) openSheet('invite-sheet');
 
 fetch(`/api/qr?room=${ROOM}`)
   .then((r) => r.json())
@@ -137,10 +163,6 @@ if ('NDEFReader' in window) {
 } else {
   $('nfc-btn').disabled = true;
 }
-
-$('collapse-invite').addEventListener('click', () =>
-  $('invite-card').classList.add('hidden')
-);
 
 // ---- WebSocket ------------------------------------------------------------
 let ws;
@@ -371,86 +393,109 @@ function speakAloud(text, lang) {
   speechSynthesis.speak(u);
 }
 
-// ---- Speech-to-text (Web Speech API) --------------------------------------
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-let listening = false;
-
-function setupRecognition() {
-  if (!SR) return;
-  if (recognition) recognition.abort();
-  recognition = new SR();
-  recognition.lang = speechLocale(state.speakLang);
-  recognition.interimResults = true;
-  recognition.continuous = true;
-
-  let finalBuffer = '';
-
-  recognition.addEventListener('result', (e) => {
-    let interim = '';
-    for (let i = e.resultIndex; i < e.results.length; i++) {
-      const chunk = e.results[i][0].transcript;
-      if (e.results[i].isFinal) {
-        finalBuffer += chunk + ' ';
-      } else {
-        interim += chunk;
-      }
-    }
-    // Broadcast a live preview of what I'm saying.
-    send({ type: 'partial', text: (finalBuffer + interim).trim(), srcLang: state.speakLang });
-    $('composer').value = (finalBuffer + interim).trim();
-    autoGrow();
-  });
-
-  recognition.addEventListener('end', () => {
-    if (finalBuffer.trim()) {
-      sendText(finalBuffer.trim());
-      finalBuffer = '';
-    }
-    $('composer').value = '';
-    autoGrow();
-    if (listening) {
-      // continuous mode sometimes stops on silence — restart while held on
-      try { recognition.start(); } catch {}
-    }
-  });
-
-  recognition.addEventListener('error', (e) => {
-    if (e.error === 'not-allowed') {
-      toast('Microphone permission denied');
-      listening = false;
-      $('mic-btn').classList.remove('on');
-    }
-  });
-}
-
-function startListening() {
-  if (!recognition) return;
-  listening = true;
-  $('mic-btn').classList.add('on');
-  try { recognition.start(); } catch {}
-}
-function stopListening() {
-  listening = false;
-  $('mic-btn').classList.remove('on');
-  try { recognition.stop(); } catch {}
-}
-
+// ---- Speech-to-text (Whisper) ---------------------------------------------
+// Tap the mic to record audio; tap again to stop. The clip is uploaded to
+// /api/transcribe, which runs Whisper, and the returned text is sent as a
+// message in the speaker's language.
 const micBtn = $('mic-btn');
-if (SR) {
-  setupRecognition();
-  // Tap to toggle (mobile-friendly); also supports press-and-hold.
-  micBtn.addEventListener('click', () => {
-    if (listening) stopListening();
-    else startListening();
+const canRecord =
+  typeof MediaRecorder !== 'undefined' &&
+  navigator.mediaDevices &&
+  navigator.mediaDevices.getUserMedia;
+
+let mediaRecorder = null;
+let recStream = null;
+let recChunks = [];
+let recording = false;
+
+function pickMime() {
+  const prefs = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+  return prefs.find((t) => MediaRecorder.isTypeSupported?.(t)) || '';
+}
+
+async function startRecording() {
+  try {
+    recStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch {
+    toast('Microphone permission denied');
+    return;
+  }
+  const mime = pickMime();
+  mediaRecorder = new MediaRecorder(recStream, mime ? { mimeType: mime } : undefined);
+  recChunks = [];
+  mediaRecorder.addEventListener('dataavailable', (e) => {
+    if (e.data && e.data.size) recChunks.push(e.data);
   });
-  $('mic-note').textContent =
-    'Tap the mic to start/stop dictation in your speak language. Interim words preview live to the room.';
+  mediaRecorder.addEventListener('stop', onRecordingStop);
+  mediaRecorder.start();
+  recording = true;
+  micBtn.classList.add('on');
+  // Let others know I've started talking.
+  send({ type: 'partial', text: '🎙️ recording…', srcLang: state.speakLang });
+}
+
+function stopRecording() {
+  if (!mediaRecorder) return;
+  recording = false;
+  micBtn.classList.remove('on');
+  try { mediaRecorder.stop(); } catch {}
+}
+
+async function onRecordingStop() {
+  recStream?.getTracks().forEach((t) => t.stop());
+  const blob = new Blob(recChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+  recChunks = [];
+  if (!blob.size) return;
+
+  micBtn.classList.add('busy');
+  micBtn.disabled = true;
+  const prev = $('mic-note').textContent;
+  $('mic-note').textContent = 'Transcribing with Whisper…';
+  try {
+    const r = await fetch(`/api/transcribe?lang=${encodeURIComponent(state.speakLang)}`, {
+      method: 'POST',
+      headers: { 'Content-Type': blob.type },
+      body: blob,
+    });
+    const data = await r.json();
+    if (data.text && data.text.trim()) {
+      sendText(data.text.trim());
+    } else {
+      toast(data.error === 'not_configured'
+        ? 'Whisper is not configured on the server'
+        : 'Nothing transcribed — try again');
+    }
+  } catch {
+    toast('Transcription failed');
+  } finally {
+    micBtn.classList.remove('busy');
+    micBtn.disabled = false;
+    $('mic-note').textContent = prev;
+  }
+}
+
+if (canRecord) {
+  micBtn.addEventListener('click', () => {
+    if (recording) stopRecording();
+    else startRecording();
+  });
+  $('mic-note').textContent = 'Tap the mic to record; tap again to stop and send (Whisper).';
 } else {
   micBtn.disabled = true;
-  $('mic-note').textContent =
-    'Live dictation needs a browser with the Web Speech API (Chrome / Safari). You can still type.';
+  $('mic-note').textContent = 'Audio recording is unavailable in this browser. You can still type.';
 }
+
+// Reflect the Whisper engine's status inside Settings.
+fetch('/api/transcribe/status')
+  .then((r) => r.json())
+  .then((s) => {
+    const el = $('whisper-status');
+    if (!el) return;
+    if (s.mock) el.textContent = '🧪 Mock mode (returns a canned transcript for testing).';
+    else if (s.configured) el.textContent = `✅ Whisper ready · model ${s.model}`;
+    else el.textContent = '⚠️ Not configured — set WHISPER_API_KEY (and optionally WHISPER_URL/MODEL) on the server.';
+  })
+  .catch(() => {});
 
 // ---- Go --------------------------------------------------------------------
 connect();

@@ -189,6 +189,92 @@ app.post('/api/translate', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Speech-to-text via Whisper.
+//
+// The browser records an audio clip and POSTs the raw bytes here; we forward it
+// to a Whisper-compatible transcription endpoint. Configure with env vars:
+//   WHISPER_URL     default https://api.openai.com/v1/audio/transcriptions
+//   WHISPER_MODEL   default whisper-1
+//   WHISPER_API_KEY bearer token for the endpoint (required for real use)
+//   WHISPER_MOCK=1  return a canned transcript (for local testing without a key)
+//
+// This matches the OpenAI audio-transcription API shape, and works unchanged
+// against a self-hosted whisper.cpp / faster-whisper server that mimics it.
+// ---------------------------------------------------------------------------
+
+const WHISPER_URL =
+  process.env.WHISPER_URL || 'https://api.openai.com/v1/audio/transcriptions';
+const WHISPER_MODEL = process.env.WHISPER_MODEL || 'whisper-1';
+const WHISPER_MOCK = process.env.WHISPER_MOCK === '1';
+
+const MIME_EXT = {
+  'audio/webm': 'webm',
+  'audio/ogg': 'ogg',
+  'audio/mp4': 'mp4',
+  'audio/mpeg': 'mp3',
+  'audio/wav': 'wav',
+  'audio/x-wav': 'wav',
+};
+
+app.get('/api/transcribe/status', (_req, res) => {
+  res.json({
+    mock: WHISPER_MOCK,
+    configured: WHISPER_MOCK || Boolean(process.env.WHISPER_API_KEY),
+    model: WHISPER_MODEL,
+  });
+});
+
+app.post(
+  '/api/transcribe',
+  express.raw({ type: () => true, limit: '25mb' }),
+  async (req, res) => {
+    const lang = String(req.query.lang || '').slice(0, 8) || undefined;
+    const audio = req.body;
+    if (!audio || !audio.length) {
+      return res.status(400).json({ error: 'no_audio' });
+    }
+
+    // Mock mode: skip the network, echo a deterministic phrase so the whole
+    // record → transcribe → translate → relay pipeline is testable offline.
+    if (WHISPER_MOCK) {
+      return res.json({ text: process.env.WHISPER_MOCK_TEXT || 'hello', mock: true });
+    }
+    if (!process.env.WHISPER_API_KEY) {
+      return res.status(503).json({ error: 'not_configured' });
+    }
+
+    try {
+      const ctype = (req.headers['content-type'] || 'audio/webm').split(';')[0].trim();
+      const ext = MIME_EXT[ctype] || 'webm';
+      const form = new FormData();
+      form.append('file', new Blob([audio], { type: ctype }), `speech.${ext}`);
+      form.append('model', WHISPER_MODEL);
+      if (lang) form.append('language', lang);
+      form.append('response_format', 'json');
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      const resp = await fetch(WHISPER_URL, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${process.env.WHISPER_API_KEY}` },
+        body: form,
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!resp.ok) {
+        const detail = await resp.text();
+        return res.status(502).json({ error: 'whisper_failed', status: resp.status, detail });
+      }
+      const data = await resp.json();
+      res.json({ text: (data.text || '').trim() });
+    } catch (err) {
+      res.status(500).json({ error: 'transcribe_error', detail: String(err) });
+    }
+  }
+);
+
+// ---------------------------------------------------------------------------
 // WebSocket relay
 // ---------------------------------------------------------------------------
 
