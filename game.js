@@ -293,6 +293,7 @@ const AudioSys = {
   click()   { this.beep(1250, 0.05, 'triangle', 0.12); },
   deny()    { this.beep(150, 0.2, 'square', 0.15); this.beep(110, 0.25, 'square', 0.12, 0.1); },
   coin()    { this.beep(988, 0.09, 'square', 0.12); this.beep(1319, 0.18, 'square', 0.12, 0.08); },
+  step(run, alt) { this.beep(alt ? 96 : 112, 0.045, 'triangle', run ? 0.065 : 0.045); },
   capture() { [523, 659, 784, 1047, 1319].forEach((f, i) => this.beep(f, 0.22, 'triangle', 0.2, i * 0.09)); },
   radar()   { this.beep(880, 0.5, 'sine', 0.18, 0, -500); },
   busDing(v = 0.18) { this.beep(660, 0.12, 'sine', v); this.beep(880, 0.2, 'sine', v, 0.13); },
@@ -3113,7 +3114,10 @@ function updateHiders(dt, t) {
         h.capAnim -= dt;
         h.mesh.position.y = 0.05 + Math.max(0, Math.sin((1.2 - h.capAnim) * 6)) * 1.2;
         h.mesh.rotation.y += dt * 9;
-        if (h.capAnim <= 0) h.mesh.visible = false;
+        if (h.capAnim <= 0) {
+          h.mesh.visible = false;
+          if (G.capFocus === h) G.capFocus = null;
+        }
       }
       // 抓到后脚印淡出
       if (h.tracks) h.tracks.forEach((m) => { if (m.material.opacity > 0) m.material.opacity = Math.max(0, m.material.opacity - dt * 0.8); });
@@ -3367,6 +3371,8 @@ function nearestActiveHider() {
 function captureHider(h) {
   h.found = true;
   h.capAnim = 1.2;
+  h.capAngle = player.yaw + Math.PI;
+  G.capFocus = h;
   h.foundBy = G.seekers[G.curSeeker].name;
   const reward = COST.captureBase + h.bounty;
   G.credits += reward;
@@ -3480,6 +3486,16 @@ function updatePlayer(dt) {
   if (!(wantRun && moving) || player.riding === 'bike') player.stamina = Math.min(100, player.stamina + 15 * dt);
   $('staminaBar').style.width = player.stamina + '%';
   $('staminaBar').style.background = player.stamina < 25 ? '#ef6b6b' : '#22c1a3';
+  // 脚步声：走/跑节奏不同，左右脚音高交替
+  if (moving && player.y === 0 && player.riding === null && G.phase === 'seek') {
+    player.stepT = (player.stepT || 0) - dt;
+    if (player.stepT <= 0) {
+      const running = wantRun && player.stamina > 1;
+      player.stepAlt = !player.stepAlt;
+      AudioSys.step(running, player.stepAlt);
+      player.stepT = (running ? 0.30 : 0.46) / simK();
+    }
+  } else player.stepT = 0;
 
   // 跳跃（PUBG 手感：短促有力）
   if (keys['Space'] && player.y <= 0.001 && player.riding === null) {
@@ -3515,6 +3531,18 @@ function updatePlayer(dt) {
 }
 
 function updateCamera() {
+  // 抓捕特写：1.2 秒环绕运镜聚焦被抓者
+  const cap = G.capFocus;
+  if (cap && cap.capAnim > 0) {
+    const k = 1.2 - cap.capAnim;
+    const ang = cap.capAngle + k * 2.0;
+    const rad = 5.0 - k * 1.6;
+    camera.position.set(cap.spot.x + Math.sin(ang) * rad, 2.6 - k * 0.8, cap.spot.z + Math.cos(ang) * rad);
+    camera.lookAt(cap.spot.x, 1.1, cap.spot.z);
+    sunLight.position.set(player.x + 150, 210, player.z + 90);
+    sunLight.target.position.set(player.x, 0, player.z);
+    return;
+  }
   const onVehicle = player.riding === 'bus' || player.riding === 'transit';
   const py = (onVehicle ? 3.6 : 1.6) + (player.y || 0);
   if (G.view3rd) {
