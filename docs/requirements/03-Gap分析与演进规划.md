@@ -76,7 +76,7 @@
 | 编号 | 差距 | 现状(证据) | 目标 PR | 级别 |
 |---|---|---|---|---|
 | G-LG-1 | 账目无导出/备份 | 仅本地存储（①FR-4.8） | PR-P1-5 | L3 |
-| G-LG-2 | Web 摊分与原生差 1 分 | split.ts:38 逐人 Math.round（①FR-4.4，附录 B #3） | PR-P1-6 | L4 |
+| G-LG-2 | Web 摊分逐人金额与原生不一致（勘误：总额守恒，差异仅在非末位取整） | split.ts 非末位曾用 Math.round，原生整除（①FR-4.4，附录 B #3 勘误） | PR-P1-6 | L4 |
 | G-LG-3 | Android 无小票 OCR | 无拍照入口（①FR-4.7） | PR-P2-3 | L4 |
 
 ### 3.4 G-VC 变声
@@ -195,14 +195,14 @@ E0 恒为稳定性/可测性收口——在补自检与夹具之前堆新功能 
 | G-DR-2 | L4 | ②§3.1 | PR-P2-1 | E2 / v0.4.0 | 未启动 |
 | G-DR-3 | L4 | ②§7 | PR-P2-4 | E3 / v0.5.0 | 未启动 |
 | G-LG-1 | L3 | ①FR-4.8 | PR-P1-5 | E1 / v0.3.0 | 未启动 |
-| G-LG-2 | L4 | B#3 | PR-P1-6 | E0 / v0.2.0 | 未启动 |
+| G-LG-2 | L4 | B#3 | PR-P1-6 | E0 / v0.2.0 | 已关闭（验收通过） |
 | G-LG-3 | L4 | ①FR-4.7 | PR-P2-3 | E2 / v0.4.0 | 未启动 |
 | G-VC-1 | L4 | B#5 | PR-P2-2 | E2 / v0.4.0 | 未启动 |
 | G-VC-2 | L4 | ①FR-5.4 | PR-P3-1 | E3 / v0.5.0 | 未启动 |
 | G-VC-3 | L4 | ①§9 | PR-P2-2 | E2 / v0.4.0 | 未启动 |
 | G-PF-1 | L4 | B#6 | PR-P2-* | E3 / v0.5.0 | 未启动 |
 | G-PF-2 | L4 | ①KI-5 | PR-P0-1 关联 | E2 / v0.4.0 | 未启动 |
-| G-PF-3 | L5 | B#7 | PR-P1-6 | E0 / v0.2.0 | 未启动 |
+| G-PF-3 | L5 | B#7 | PR-P1-6 | E0 / v0.2.0 | 已修复（待 100 次切页验收） |
 | G-SEC-1 | L3 | B#8 | PR-P1-4 | E1 / v0.3.0 | 未启动 |
 | G-SEC-2 | L4 | ②§7 | PR-P1-3 关联 | E1 / v0.3.0 | 未启动 |
 | G-ENG-1 | L5 | ②§11 | PR-P1(可测) | E0 / v0.2.0 | 未启动 |
@@ -215,7 +215,7 @@ E0 恒为稳定性/可测性收口——在补自检与夹具之前堆新功能 
 |---|---|---|
 | B#1 | iOS/Android BLE 协议逐字节一致 | 对比 `BleMesh.swift:17-24` 与 `BleMesh.kt:48-55`：Service/Char UUID、HEADER=13、PAYLOAD=180、MAX_TTL=4 全一致；帧写入 `BleMesh.swift:106` vs `BleMesh.kt:270` 字节序一致 |
 | B#2 | MeshBus 信封与 kind | `MeshBus.swift:27` 与 `MeshBus.kt:74` 均 `[kind][teamLen][team][payload]`；kind chat=1/loc=2（`MeshBus.swift:9`，`MeshBus.kt:54`） |
-| B#3 | Web 摊分逐人取整 | 读 `split.ts:38` `Math.round(amount*w/totalW)` 逐人四舍五入；原生 `LedgerModel.swift:34` 注释"余数给最后一人"。结论：Web 合计可能差 1 分 |
+| B#3 | Web 摊分逐人取整（勘误） | 初稿仅 grep 到 `split.ts:38` 的 `Math.round` 即下结论"合计差 1 分"——复核全函数发现 `split.ts:35-36` 本有"最后一人吸收余数"，**总额恒守恒**；真实差异是非末位成员 Math.round vs 原生整除导致逐人金额可不同（50÷4 案例）。已改 Web 为 Math.floor，esbuild 编译真实 split.ts 与原生算法 11 组除不尽金额逐人比对全等 |
 | B#4 | 营地无语音/视频 mesh | grep MeshBus kind 仅 chat/loc，无音视频类型；CampFragment 仅发文字 JSON（`CampFragment.kt:101`）。授权页文案含"语音/视频"（`CampApp.tsx`）——宣称>实现 |
 | B#5 | Android 变声预设数 | `VoiceFragment.kt:30-37` 仅 6 预设，无小猪佩奇/孙悟空/机器人；iOS `VoiceViewController.swift:15-24` 为 9 预设 |
 | B#6 | 群码 vs 队伍码空间 | `id.ts:9` joinCode 6 位数字；`Identity.swift:29`/`MeshBus.kt:44` newTeamCode 6 位 `ABCDEFGHJKLMNPQRSTUVWXYZ23456789` |

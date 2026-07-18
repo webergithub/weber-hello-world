@@ -35,7 +35,8 @@ export function shareOf(exp: Expense): Record<string, number> {
     if (i === ids.length - 1) {
       result[id] = exp.amountCents - allocated // 最后一人吸收余数
     } else {
-      const v = Math.round((exp.amountCents * weights[id]) / totalW)
+      // 向下取整，与原生端 LedgerModel.swift / Ledger.kt 的整除一致，保证跨端逐人金额相同
+      const v = Math.floor((exp.amountCents * weights[id]) / totalW)
       result[id] = v
       allocated += v
     }

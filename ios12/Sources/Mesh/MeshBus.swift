@@ -11,8 +11,10 @@ final class MeshBus: BleMeshDelegate {
 
     private let mesh = BleMesh()
     private var started = false
-    private var handlers: [UInt8: [(Data) -> Void]] = [:]
-    private var peerHandlers: [(Int) -> Void] = []
+    // 每类型单 handler：后注册者替换前者。VC 重建时新实例自动顶替旧实例，
+    // 避免向单例累积闭包造成旧 VC 泄漏与消息重复处理（与 Android MeshBus.kt 行为一致）。
+    private var handlers: [UInt8: (Data) -> Void] = [:]
+    private var peerHandlers: [String: (Int) -> Void] = [:]
     private(set) var peerCount = 0
 
     private init() { mesh.delegate = self }
@@ -32,14 +34,14 @@ final class MeshBus: BleMeshDelegate {
         mesh.send(d)
     }
 
-    // 订阅某类型消息（负载已去掉类型字节）。VC 只在创建时订阅一次。
+    // 订阅某类型消息（负载已去掉类型字节）。同类型重复订阅时新 handler 顶替旧的。
     func subscribe(_ kind: UInt8, _ handler: @escaping (Data) -> Void) {
-        handlers[kind, default: []].append(handler)
+        handlers[kind] = handler
     }
 
-    // 邻居数变化观察（立即回调一次当前值）
-    func onPeers(_ handler: @escaping (Int) -> Void) {
-        peerHandlers.append(handler)
+    // 邻居数变化观察（立即回调一次当前值）；同 tag 重复注册时顶替
+    func onPeers(_ tag: String = "default", _ handler: @escaping (Int) -> Void) {
+        peerHandlers[tag] = handler
         handler(peerCount)
     }
 
@@ -54,11 +56,11 @@ final class MeshBus: BleMeshDelegate {
         let team = String(bytes: bytes[2..<(2 + tlen)], encoding: .utf8) ?? ""
         if team != Identity.team { return }
         let body = payload.subdata(in: (2 + tlen)..<payload.count)
-        handlers[kind]?.forEach { $0(body) }
+        handlers[kind]?(body)
     }
 
     func bleMeshDidUpdatePeers(_ count: Int) {
         peerCount = count
-        peerHandlers.forEach { $0(count) }
+        peerHandlers.values.forEach { $0(count) }
     }
 }
