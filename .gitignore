@@ -20,3 +20,4 @@ android-native/local.properties
 android-native/gradlew
 android-native/gradlew.bat
 android-native/gradle/wrapper/gradle-wrapper.jar
+tests/mesh-fixture/.split.bundle.mjs

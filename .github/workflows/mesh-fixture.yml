@@ -1,0 +1,28 @@
+name: Mesh 回归夹具 (G-ENG-1)
+
+# ③E0 出口标准：分片/去重/多跳 TTL/队伍过滤/结算 可自动回归，
+# 并对 Swift/Kotlin 协议常量做防漂移比对——协议改动未同步两端时此处报红。
+on:
+  push:
+    paths:
+      - 'tests/**'
+      - 'src/**'
+      - 'ios12/Sources/Camp/BleMesh.swift'
+      - 'ios12/Sources/Mesh/**'
+      - 'android-native/app/src/main/java/cc/trailmate/app/BleMesh.kt'
+      - 'android-native/app/src/main/java/cc/trailmate/app/MeshBus.kt'
+      - '.github/workflows/mesh-fixture.yml'
+  workflow_dispatch:
+
+jobs:
+  fixture:
+    name: 协议与结算回归
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: node tests/mesh-fixture/run.mjs
