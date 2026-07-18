@@ -1,0 +1,88 @@
+name: 原生 iOS12 签名 IPA（手动）
+
+# 产出**已签名、可直接安装**的 IPA（无需 Sideloadly 重签）。
+# 仅手动触发（workflow_dispatch），平时不运行，不影响其它 CI。
+# 需先在仓库 Settings → Secrets and variables → Actions 配置以下 Secrets（见 ios12/SIGNING.md）：
+#   APPLE_CERT_P12_BASE64          分发/开发证书 .p12 的 base64
+#   APPLE_CERT_PASSWORD            .p12 导出密码
+#   APPLE_PROVISION_PROFILE_BASE64 描述文件 .mobileprovision 的 base64
+#   APPLE_PROVISION_PROFILE_NAME   描述文件名称（Manual 签名指定用）
+#   APPLE_TEAM_ID                  10 位 Team ID
+
+on:
+  workflow_dispatch:
+    inputs:
+      method:
+        description: '导出方式：development（真机调试证书）/ ad-hoc / app-store'
+        default: 'development'
+        required: true
+
+jobs:
+  signed:
+    name: 签名 IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 安装 XcodeGen 并生成工程
+        run: |
+          brew install xcodegen
+          cd ios12 && xcodegen generate
+
+      - name: 导入签名证书
+        uses: apple-actions/import-codesign-certs@v3
+        with:
+          p12-file-base64: ${{ secrets.APPLE_CERT_P12_BASE64 }}
+          p12-password: ${{ secrets.APPLE_CERT_PASSWORD }}
+
+      - name: 安装描述文件
+        run: |
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          echo "${{ secrets.APPLE_PROVISION_PROFILE_BASE64 }}" | base64 --decode \
+            > ~/Library/MobileDevice/Provisioning\ Profiles/trailmate.mobileprovision
+
+      - name: Archive（Release，手动签名）
+        run: |
+          cd ios12
+          xcodebuild \
+            -project TrailMate.xcodeproj \
+            -scheme TrailMate \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/TrailMate.xcarchive \
+            DEVELOPMENT_TEAM="${{ secrets.APPLE_TEAM_ID }}" \
+            CODE_SIGN_STYLE=Manual \
+            PROVISIONING_PROFILE_SPECIFIER="${{ secrets.APPLE_PROVISION_PROFILE_NAME }}" \
+            archive
+
+      - name: 导出 IPA
+        run: |
+          cd ios12
+          {
+            echo '<?xml version="1.0" encoding="UTF-8"?>'
+            echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+            echo '<plist version="1.0"><dict>'
+            echo "<key>method</key><string>${{ github.event.inputs.method }}</string>"
+            echo "<key>teamID</key><string>${{ secrets.APPLE_TEAM_ID }}</string>"
+            echo '<key>signingStyle</key><string>manual</string>'
+            echo '<key>compileBitcode</key><false/>'
+            echo '<key>provisioningProfiles</key><dict>'
+            echo "<key>cc.trailmate.app</key><string>${{ secrets.APPLE_PROVISION_PROFILE_NAME }}</string>"
+            echo '</dict></dict></plist>'
+          } > exportOptions.plist
+          xcodebuild -exportArchive \
+            -archivePath build/TrailMate.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist exportOptions.plist
+
+      - name: 上传签名 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: trailmate-ios12-signed-ipa
+          path: ios12/build/export/*.ipa
+          if-no-files-found: error

@@ -1,0 +1,59 @@
+name: 部署网页版到 GitHub Pages
+
+# 把网页版(PWA)自动部署到 GitHub Pages，得到一个公网链接：
+#   https://webergithub.github.io/weber-hello-world/
+# 手机浏览器打开即可体验（可加到主屏当 App）。
+# 注意：网页版不含蓝牙 Mesh（浏览器限制）；跨设备实时同步需另行部署 server/signaling.js。
+# 首次使用请在仓库 Settings → Pages → Source 选择 "GitHub Actions"。
+
+on:
+  push:
+    branches: [master]   # 仅生产分支自动部署；特性分支用手动 workflow_dispatch，避免未开启 Pages 时反复报红
+    paths:
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'package.json'
+      - '.github/workflows/deploy-pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: 构建（GitHub Pages base）
+        run: npm run build
+        env:
+          GH_PAGES: 'true'
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true  # 自动开启仓库 Pages（无需手动去 Settings 打开）
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

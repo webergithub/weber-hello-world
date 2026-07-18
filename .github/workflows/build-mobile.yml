@@ -1,0 +1,126 @@
+name: 构建移动端 App (Android APK / iOS IPA)
+
+# 自动编译 iOS 与 Android 原生包，产物可在 Actions run 的 Artifacts 中下载。
+# - Android: app-debug.apk —— 直接可安装到安卓真机，蓝牙 Mesh 可用。
+# - iOS:     app-unsigned.ipa —— 未签名，需用你自己的 Apple 账号重签
+#            (AltStore / Sideloadly) 后安装到 iPhone 真机测试。
+# 同时充当原生代码(含蓝牙插件 Kotlin/Java 与 Swift)的编译校验。
+
+on:
+  push:
+    branches: ['**']
+    paths:   # 只在 Capacitor 网页/原生工程相关改动时构建；ios12/ 原生工程有独立工作流
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'vite.config.ts'
+      - 'package.json'
+      - 'capacitor.config.ts'
+      - 'android/**'
+      - 'ios/**'
+      - 'server/**'
+      - '.github/workflows/build-mobile.yml'
+  workflow_dispatch:
+
+jobs:
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: 准备 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装所需 SDK 组件 (compileSdk 36)
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+
+      - name: 安装依赖并构建 Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 同步到原生工程
+        run: npx cap sync android
+
+      - name: 打包 Debug APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  ios:
+    name: iOS (编译校验 + 模拟器包)
+    runs-on: macos-15  # Capacitor 8 需要 Xcode 16，macos-15 镜像自带
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 显示 Xcode / iOS 运行时（诊断）
+        run: |
+          xcodebuild -version
+          xcrun simctl list runtimes || true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖并构建 Web
+        run: |
+          npm ci
+          npm run build
+
+      - name: 同步到原生工程
+        run: npx cap sync ios
+
+      - name: 解析 Swift Package 依赖
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project ios/App/App.xcodeproj \
+            -scheme App
+
+      # 用「iOS 模拟器」编译：无需签名、无需下载设备平台，可完整校验 Swift 原生代码
+      # （含自定义蓝牙插件 BleMeshPlugin.swift）。真机安装请在本机 Xcode 中 Run（自动用你的 Apple ID 签名）。
+      - name: 编译 (iOS 模拟器，校验原生代码)
+        run: |
+          xcodebuild \
+            -project ios/App/App.xcodeproj \
+            -scheme App \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: 打包模拟器 App
+        run: |
+          APP=$(find build/Build/Products -name 'App.app' -type d | head -1)
+          echo "App bundle: $APP"
+          cd "$(dirname "$APP")"
+          zip -qr "$GITHUB_WORKSPACE/app-ios-simulator.zip" App.app
+          ls -la "$GITHUB_WORKSPACE/app-ios-simulator.zip"
+
+      - name: 上传 iOS 构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-ios-simulator-build
+          path: app-ios-simulator.zip
+          if-no-files-found: error

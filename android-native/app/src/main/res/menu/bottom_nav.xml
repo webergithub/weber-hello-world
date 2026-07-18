@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item
+        android:id="@+id/nav_ledger"
+        android:icon="@android:drawable/ic_menu_agenda"
+        android:title="记账" />
+    <item
+        android:id="@+id/nav_convoy"
+        android:icon="@android:drawable/ic_menu_mylocation"
+        android:title="跟车" />
+    <item
+        android:id="@+id/nav_camp"
+        android:icon="@android:drawable/ic_menu_share"
+        android:title="营地" />
+    <item
+        android:id="@+id/nav_voice"
+        android:icon="@android:drawable/ic_btn_speak_now"
+        android:title="变声" />
+    <item
+        android:id="@+id/nav_team"
+        android:icon="@android:drawable/ic_menu_myplaces"
+        android:title="队伍" />
+</menu>

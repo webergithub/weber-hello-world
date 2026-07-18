@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>zh_CN</string>
+	<key>CFBundleDisplayName</key>
+	<string>TrailMate</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于在地图上显示你的位置，并与同行好友共享，实现跟车不走散。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近同伴自组网互发消息。</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近同伴自组网互发消息。</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于趣味变声的实时试听与录制。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于扫描队伍二维码入队，以及拍照录入小票。</string>
+</dict>
+</plist>

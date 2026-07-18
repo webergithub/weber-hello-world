@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CAPACITOR_DEBUG</key>
+	<string>$(CAPACITOR_DEBUG)</string>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+        <string>TrailMate 出游助手</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>LSRequiresIPhoneOS</key>
+	<true/>
+	<key>UILaunchStoryboardName</key>
+	<string>LaunchScreen</string>
+	<key>UIMainStoryboardFile</key>
+	<string>Main</string>
+	<key>UIRequiredDeviceCapabilities</key>
+	<array>
+		<string>armv7</string>
+	</array>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UIViewControllerBasedStatusBarAppearance</key>
+	<true/>
+	<!-- 跟车定位 -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于在地图上显示你的位置，并把位置分享给同群好友，实现跟车不走散。</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>用于在跟车过程中（含后台）持续与好友同步彼此位置。</string>
+	<!-- 对讲机 / 语音 / 视频通话 -->
+	<key>NSMicrophoneUsageDescription</key>
+	<string>用于对讲机说话、营地语音与视频通话，以及趣味变声。</string>
+	<key>NSCameraUsageDescription</key>
+	<string>用于拍照录入消费小票，以及营地视频通话。</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>用于保存小票照片与变声录音等作品。</string>
+	<!-- 营地自组网（蓝牙 / WiFi 直连），供原生 Mesh 适配器使用 -->
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近好友自组网互通。</string>
+	<key>NSBluetoothPeripheralUsageDescription</key>
+	<string>用于在无移动网络的营地，通过蓝牙与附近好友自组网互通。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>用于在同一 WiFi 下与好友设备直连，实现无信号自组网通信。</string>
+	<!-- 跟车后台持续定位 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>location</string>
+	</array>
+</dict>
+</plist>

@@ -1,0 +1,23 @@
+node_modules
+dist
+dist-ssr
+*.local
+*.tsbuildinfo
+dev-dist
+.DS_Store
+_smoke*.mjs
+_*.png
+
+# ios12 native (XcodeGen-generated + build)
+ios12/TrailMate.xcodeproj
+ios12/build
+
+# android-native (Gradle-generated + build)
+android-native/.gradle
+android-native/build
+android-native/app/build
+android-native/local.properties
+android-native/gradlew
+android-native/gradlew.bat
+android-native/gradle/wrapper/gradle-wrapper.jar
+tests/mesh-fixture/.split.bundle.mjs
