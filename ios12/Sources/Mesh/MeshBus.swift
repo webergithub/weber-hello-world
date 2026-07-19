@@ -28,11 +28,13 @@ final class MeshBus: BleMeshDelegate {
     }
 
     func send(_ kind: UInt8, _ payload: Data) {
-        // 帧：[kind][teamLen][team...][payload...]，收端按 team 过滤实现"分队伍房间"
+        // 帧：[kind][teamLen][team...][密文...]，收端按 team 过滤实现"分队伍房间"
+        // 端到端加密（G-CM-3）：信封 team 明文分房，业务负载全密文
+        let sealed = MeshCrypto.encrypt(team: Identity.team, payload)
         let team = Array(Identity.team.utf8.prefix(32))
         var d = Data([kind, UInt8(team.count)])
         d.append(contentsOf: team)
-        d.append(payload)
+        d.append(sealed)
         mesh.send(d)
     }
 
@@ -63,7 +65,9 @@ final class MeshBus: BleMeshDelegate {
         guard payload.count >= 2 + tlen else { return }
         let team = String(bytes: bytes[2..<(2 + tlen)], encoding: .utf8) ?? ""
         if team != Identity.team { return }
-        let body = payload.subdata(in: (2 + tlen)..<payload.count)
+        let sealed = payload.subdata(in: (2 + tlen)..<payload.count)
+        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃
+        guard let body = MeshCrypto.decrypt(team: team, sealed) else { return }
         handlers[kind]?(body)
     }
 

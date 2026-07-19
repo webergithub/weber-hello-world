@@ -202,5 +202,38 @@ console.log('[7] 信令服务器（真实进程 + 真实 ws 客户端）')
   srv.kill()
 }
 
+// ---------- 8. 端到端加密（G-CM-3：往返/错队伍拒/篡改拒/固定向量锁管线） ----------
+console.log('[8] MeshCrypto 端到端加密')
+{
+  const mc = await import('./meshcrypto.mjs')
+  const plain = Buffer.from(JSON.stringify({ mid: 'm1', n: '我', t: '3号位集合', ts: 0 }), 'utf8')
+
+  const blob = mc.encrypt('K7Q9ZP', plain)
+  check('往返：同队伍解密还原', mc.decrypt('K7Q9ZP', blob)?.equals(plain) === true)
+  check('错队伍码解密失败（返回 null）', mc.decrypt('public', blob) === null)
+  const tampered = Buffer.from(blob); tampered[20] ^= 0xff
+  check('密文被篡改 1 字节即拒（MAC 不过）', mc.decrypt('K7Q9ZP', tampered) === null)
+  const badVer = Buffer.from(blob); badVer[0] = 9
+  check('版本字节不符即拒', mc.decrypt('K7Q9ZP', badVer) === null)
+  check('旧版明文 JSON 直接喂入即拒', mc.decrypt('K7Q9ZP', plain) === null)
+  const chat100 = mc.encrypt('K7Q9ZP', Buffer.alloc(100, 65))
+  check('100B 聊天加密后 ≤180B 仍单片', chat100.length === 1 + 16 + 112 + 16 && chat100.length <= 180, `len=${chat100.length}`)
+
+  // 固定向量：锁死 PBKDF2(10000,盐)+AES-256-CBC+HMAC 截断的整条管线；
+  // 同一向量写在 iOS/Android 实现注释中，真机可手工比对
+  const iv = Buffer.from(Array.from({ length: 16 }, (_, i) => i))
+  const vec = mc.encryptWithIv('K7Q9ZP', Buffer.from('hello camp', 'utf8'), iv)
+  check('跨平台固定向量一致',
+    vec.toString('hex') === '01000102030405060708090a0b0c0d0e0f93b370e0c48f2abe2f1bb1cdd2b5bf23592198c85af6ed3ae0adbe52a60157e6',
+    vec.toString('hex'))
+
+  // 常量防漂移：三端盐/轮数/版本/MAC 长度一致
+  const swiftSrc = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshCrypto.swift'), 'utf8')
+  const ktSrc = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshCrypto.kt'), 'utf8')
+  check('盐 trailmate-mesh-v1 三端一致', swiftSrc.includes('trailmate-mesh-v1') && ktSrc.includes('trailmate-mesh-v1'))
+  check('迭代 10000 三端一致', /10000/.test(swiftSrc) && /10000/.test(ktSrc) && mc.ITER === 10000)
+  check('MAC 截断 16 三端一致', /MAC_LEN = 16/.test(swiftSrc) && /MAC_LEN = 16/.test(ktSrc) && mc.MAC_LEN === 16)
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)

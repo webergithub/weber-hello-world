@@ -73,14 +73,17 @@ object MeshBus : BleMesh.Listener {
 
     fun send(kind: Byte, payload: ByteArray) {
         val ctx = appCtx ?: return
-        val team = Identity.team(ctx).toByteArray(Charsets.UTF_8).let {
+        val teamStr = Identity.team(ctx)
+        // 端到端加密（G-CM-3）：信封 team 明文分房，业务负载全密文
+        val sealed = MeshCrypto.encrypt(teamStr, payload)
+        val team = teamStr.toByteArray(Charsets.UTF_8).let {
             if (it.size > 32) it.copyOfRange(0, 32) else it
         }
-        val frame = ByteArray(2 + team.size + payload.size)
+        val frame = ByteArray(2 + team.size + sealed.size)
         frame[0] = kind
         frame[1] = team.size.toByte()
         System.arraycopy(team, 0, frame, 2, team.size)
-        System.arraycopy(payload, 0, frame, 2 + team.size, payload.size)
+        System.arraycopy(sealed, 0, frame, 2 + team.size, sealed.size)
         mesh?.send(frame)
     }
 
@@ -102,7 +105,9 @@ object MeshBus : BleMesh.Listener {
         val ctx = appCtx ?: return
         val team = String(payload, 2, tlen, Charsets.UTF_8)
         if (team != Identity.team(ctx)) return   // 队伍过滤
-        val body = payload.copyOfRange(2 + tlen, payload.size)
+        val sealed = payload.copyOfRange(2 + tlen, payload.size)
+        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃
+        val body = MeshCrypto.decrypt(team, sealed) ?: return
         handlers[kind]?.invoke(body)
     }
 
