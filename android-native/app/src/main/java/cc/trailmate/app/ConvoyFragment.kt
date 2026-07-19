@@ -32,13 +32,35 @@ class ConvoyFragment : Fragment() {
     private var myLoc: MyLocationNewOverlay? = null
     private var health: android.widget.TextView? = null
     private val peerMarkers = HashMap<String, Marker>()
+    private val peerLastSeen = HashMap<String, Long>()   // 在线态（G-DR-2）
     private val ticker = Handler(Looper.getMainLooper())
     private val broadcastLoop = object : Runnable {
         override fun run() {
             broadcastMyLocation()
             renderHealth()                   // 上报健康可见（G-DR-1）：随广播节拍刷新
+            agePeers()                       // 在线态（G-DR-2）：15s 未更新变淡，60s 移除
             ticker.postDelayed(this, 3000)   // 节流：每 3 秒广播一次
         }
+    }
+
+    // 同伴在线态（G-DR-2）：位置每 3s 一报，15s 没消息=可能掉线（半透明），60s=移除
+    private fun agePeers() {
+        val m = map ?: return
+        val now = System.currentTimeMillis()
+        val gone = ArrayList<String>()
+        peerMarkers.forEach { (id, marker) ->
+            val age = now - (peerLastSeen[id] ?: 0L)
+            when {
+                age > 60_000 -> gone.add(id)
+                age > 15_000 -> marker.alpha = 0.45f
+                else -> marker.alpha = 1f
+            }
+        }
+        gone.forEach { id ->
+            peerMarkers.remove(id)?.let { m.overlays.remove(it) }
+            peerLastSeen.remove(id)
+        }
+        if (gone.isNotEmpty()) m.invalidate()
     }
 
     // 位置共享链路健康（G-DR-1）：蓝牙关/无邻居时如实告知，不让用户以为同伴能看到自己
@@ -150,6 +172,8 @@ class ConvoyFragment : Fragment() {
             }
             marker.position = point
             marker.title = o.optString("n", "同伴")
+            marker.alpha = 1f
+            peerLastSeen[id] = System.currentTimeMillis()
             m.invalidate()
         } catch (_: Exception) {}
     }

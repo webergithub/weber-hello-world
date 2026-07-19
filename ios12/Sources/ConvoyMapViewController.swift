@@ -9,6 +9,7 @@ private final class PeerAnnotation: NSObject, MKAnnotation {
     let id: String
     @objc dynamic var coordinate: CLLocationCoordinate2D
     var title: String?
+    var lastSeen = Date()   // 在线态（G-DR-2）
     init(id: String, coordinate: CLLocationCoordinate2D, title: String) {
         self.id = id; self.coordinate = coordinate; self.title = title
     }
@@ -24,6 +25,7 @@ final class ConvoyMapViewController: UIViewController, CLLocationManagerDelegate
     private var centeredOnce = false
     private var peers: [String: PeerAnnotation] = [:]
     private var lastBroadcast: TimeInterval = 0
+    private var ageTimer: Timer?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -70,6 +72,28 @@ final class ConvoyMapViewController: UIViewController, CLLocationManagerDelegate
         }
         MeshBus.shared.onState("convoy") { [weak self] _ in self?.renderHealth() }
         MeshBus.shared.onPeers("convoy") { [weak self] _ in self?.renderHealth() }
+
+        // 在线态（G-DR-2）：15s 未更新变淡，60s 移除
+        ageTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in
+            self?.agePeers()
+        }
+    }
+
+    deinit { ageTimer?.invalidate() }
+
+    private func agePeers() {
+        var gone: [String] = []
+        for (id, ann) in peers {
+            let age = -ann.lastSeen.timeIntervalSinceNow
+            if age > 60 {
+                gone.append(id)
+            } else {
+                map.view(for: ann)?.alpha = age > 15 ? 0.45 : 1.0
+            }
+        }
+        for id in gone {
+            if let ann = peers.removeValue(forKey: id) { map.removeAnnotation(ann) }
+        }
     }
 
     private func renderHealth() {
@@ -101,6 +125,8 @@ final class ConvoyMapViewController: UIViewController, CLLocationManagerDelegate
         if let ann = peers[loc.id] {
             ann.coordinate = coord
             ann.title = loc.n
+            ann.lastSeen = Date()
+            map.view(for: ann)?.alpha = 1.0
         } else {
             let ann = PeerAnnotation(id: loc.id, coordinate: coord, title: loc.n)
             peers[loc.id] = ann
