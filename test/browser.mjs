@@ -134,6 +134,14 @@ try {
     .then(() => true).catch(() => false);
   ok(voiceArrived, 'voice message transcribed by Whisper and relayed');
 
+  // ---- History: a phone that reloads mid-conversation sees prior messages ----
+  await guest.reload();
+  await guest.waitForSelector('#menu-btn');
+  const historyShown = await guest.waitForFunction(() =>
+    document.querySelectorAll('#feed .msg').length > 0, { timeout: 8000 })
+    .then(() => true).catch(() => false);
+  ok(historyShown, 'reloaded phone catches up on the conversation history');
+
   ok(errors.length === 0, `no client-side JS errors (${errors.length})`);
   if (errors.length) console.log(errors.join('\n'));
 } catch (e) {

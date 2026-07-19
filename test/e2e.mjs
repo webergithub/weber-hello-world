@@ -72,8 +72,49 @@ async function main() {
   // --- WebSocket relay: two clients in the same room ---
   await relayTest(CODE);
 
+  // --- History: a late joiner catches up on earlier messages ---
+  await historyTest();
+
   console.log(failures ? `\n${failures} check(s) failed` : '\nAll checks passed');
   process.exit(failures ? 1 : 0);
+}
+
+// A joins a fresh room and speaks; B joins later and should receive history.
+async function historyTest() {
+  const { code } = await (await fetch(`${BASE}/api/rooms`, { method: 'POST' })).json();
+  return new Promise((resolve) => {
+    const a = new WebSocket(WS);
+    let sent = false;
+    let historyMsgs = null;
+
+    a.on('open', () =>
+      a.send(JSON.stringify({ type: 'join', room: code, name: 'A', speakLang: 'en', host: true })));
+    a.on('message', (buf) => {
+      const m = JSON.parse(buf.toString());
+      if (m.type === 'welcome' && !sent) {
+        sent = true;
+        a.send(JSON.stringify({ type: 'message', text: 'earlier line', srcLang: 'en' }));
+        // Give the server a tick to store history, then join as B.
+        setTimeout(joinB, 300);
+      }
+    });
+
+    function joinB() {
+      const b = new WebSocket(WS);
+      b.on('open', () =>
+        b.send(JSON.stringify({ type: 'join', room: code, name: 'B', speakLang: 'zh' })));
+      b.on('message', (buf) => {
+        const m = JSON.parse(buf.toString());
+        if (m.type === 'history') historyMsgs = m.messages;
+      });
+      setTimeout(() => {
+        ok(Array.isArray(historyMsgs) && historyMsgs.some((x) => x.text === 'earlier line'),
+          'late joiner receives prior message in history');
+        a.close(); b.close();
+        resolve();
+      }, 800);
+    }
+  });
 }
 
 function relayTest(code) {

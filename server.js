@@ -46,10 +46,12 @@ function makeRoomCode() {
   return code;
 }
 
+const HISTORY_LIMIT = 100; // recent messages kept per room for late joiners
+
 function ensureRoom(code) {
   let room = rooms.get(code);
   if (!room) {
-    room = { code, createdAt: Date.now(), members: new Map() };
+    room = { code, createdAt: Date.now(), members: new Map(), history: [] };
     rooms.set(code, room);
   }
   return room;
@@ -328,6 +330,10 @@ wss.on('connection', (socket) => {
       socket.send(
         JSON.stringify({ type: 'welcome', you: member.id, isHost, room: code })
       );
+      // Catch the newcomer up on what's already been said.
+      if (room.history.length) {
+        socket.send(JSON.stringify({ type: 'history', messages: room.history }));
+      }
       broadcast(room, { type: 'roster', members: roster(room) });
       broadcast(
         room,
@@ -346,21 +352,21 @@ wss.on('connection', (socket) => {
     if (msg.type === 'message') {
       const text = String(msg.text || '').slice(0, 2000);
       if (!text.trim()) return;
+      const payload = {
+        type: 'message',
+        id: `m${idSeq++}`,
+        from: member.id,
+        fromName: member.name,
+        text,
+        srcLang: msg.srcLang || member.speakLang,
+        ts: Date.now(),
+      };
+      // Keep a bounded history so anyone who joins or reloads later can catch up.
+      room.history.push(payload);
+      if (room.history.length > HISTORY_LIMIT) room.history.shift();
       // Exclude the sender: their own client renders an instant local echo, so
       // relaying it back would show the message twice.
-      broadcast(
-        room,
-        {
-          type: 'message',
-          id: `m${idSeq++}`,
-          from: member.id,
-          fromName: member.name,
-          text,
-          srcLang: msg.srcLang || member.speakLang,
-          ts: Date.now(),
-        },
-        member.id
-      );
+      broadcast(room, payload, member.id);
       return;
     }
 

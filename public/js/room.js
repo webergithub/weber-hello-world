@@ -219,6 +219,10 @@ function handle(msg) {
       state.members = msg.members;
       renderMembers();
       break;
+    case 'history':
+      // Replay what was said before we joined (no read-aloud for old lines).
+      for (const m of msg.messages) renderMessage({ ...m, history: true });
+      break;
     case 'system':
       addSystemLine(msg.text);
       break;
@@ -298,8 +302,9 @@ async function renderMessage(msg) {
 
   scrollFeed();
 
-  // Speak the primary translation aloud, if enabled and it's not my own line.
-  if (state.speakAloud && !mine) speakAloud(pri.text, state.recvPrimary);
+  // Speak the primary translation aloud, if enabled and it's a fresh incoming
+  // line (never replay the whole history through the speakers).
+  if (state.speakAloud && !mine && !msg.history) speakAloud(pri.text, state.recvPrimary);
 }
 
 function renderPartial(msg) {
