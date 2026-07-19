@@ -26,16 +26,20 @@ import kotlin.concurrent.thread
 // 说明：这是"变调+变速"的经典搞笑效果；iOS 版用 AVAudioUnitTimePitch 是保时长变调，二者听感不同但都很有趣。
 class VoiceFragment : Fragment() {
 
-    private data class Preset(val name: String, val factor: Double)
+    private data class Preset(val name: String, val factor: Double, val ringMod: Boolean = false)
     private val presets = listOf(
         Preset("🐱汤姆猫", 1.45),
+        Preset("🐷小猪佩奇", 1.7),
         Preset("🐑喜羊羊", 1.6),
-        Preset("🐿️花栗鼠", 1.9),
+        Preset("🐵孙悟空", 1.25),
         Preset("🐗猪八戒", 0.72),
+        Preset("🐿️花栗鼠", 1.9),
+        Preset("🤖机器人", 1.0, ringMod = true),   // 40Hz 环形调制 → 金属机械音
         Preset("👹大魔王", 0.6),
         Preset("🎙️原声", 1.0),
     )
     private var factor = 1.45
+    private var ringMod = false
 
     private val SR = 44100
     @Volatile private var recording = false
@@ -73,6 +77,7 @@ class VoiceFragment : Fragment() {
                 text = p.name
                 setOnClickListener {
                     factor = p.factor
+                    ringMod = p.ringMod
                     status.text = "已选：${p.name}"
                     recorded?.let { play() }   // 已录过则立即用新音色重放
                 }
@@ -141,10 +146,26 @@ class VoiceFragment : Fragment() {
         if (recording) { recording = false; status.text = "处理中…" }
     }
 
+    // 机器人音色：16-bit PCM 环形调制（逐样本乘 40Hz 正弦），经典金属声
+    private fun applyRingMod(src: ByteArray): ByteArray {
+        val out = src.copyOf()
+        val n = out.size / 2
+        for (i in 0 until n) {
+            val lo = out[i * 2].toInt() and 0xFF
+            val hi = out[i * 2 + 1].toInt()
+            val s = (hi shl 8) or lo
+            val m = (s * kotlin.math.sin(2.0 * Math.PI * 40.0 * i / SR)).toInt().coerceIn(-32768, 32767)
+            out[i * 2] = (m and 0xFF).toByte()
+            out[i * 2 + 1] = ((m shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
     @Suppress("DEPRECATION")
     private fun play() {
-        val data = recorded ?: return
+        var data = recorded ?: return
         if (data.isEmpty()) return
+        if (ringMod) data = applyRingMod(data)
         runCatching { track?.stop(); track?.release() }
         val at = AudioTrack(
             AudioManager.STREAM_MUSIC, SR, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_16BIT,

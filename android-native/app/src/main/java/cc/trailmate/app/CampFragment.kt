@@ -21,15 +21,27 @@ import androidx.fragment.app.Fragment
 import org.json.JSONObject
 import java.util.UUID
 
-// 营地：基于共享蓝牙 Mesh 的群聊。与 iOS 原生版同一 JSON 协议（{mid,n,t,ts}），同队伍码跨平台互通。
+// 营地：基于共享蓝牙 Mesh 的群聊。与 iOS 原生版同一协议：
+// 文字 {mid,n,t,ts}（KIND_CHAT）；短语音 [u16 jsonLen][{mid,n,d,ts}][m4a]（KIND_VOICE，≤10s）。
 class CampFragment : Fragment() {
-    private lateinit var log: TextView
+    private lateinit var msgBox: LinearLayout
     private lateinit var scroll: ScrollView
     private lateinit var status: TextView
     private lateinit var input: EditText
 
     private val seenMids = HashSet<String>()
-    private val lines = ArrayList<String>()
+    // (mid, 显示文本, 语音文件路径或 null)
+    private val entries = ArrayList<Triple<String, String, String?>>()
+
+    // 短语音（G-CM-1）
+    private var recorder: android.media.MediaRecorder? = null
+    private var recordFile: java.io.File? = null
+    private var recordStart = 0L
+    private var player: android.media.MediaPlayer? = null
+    private val micLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (!granted) status.text = "需要麦克风权限才能发语音"
+        }
 
     private val permLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
@@ -67,18 +79,31 @@ class CampFragment : Fragment() {
         status = TextView(ctx).apply { textSize = 13f; setTextColor(0xFF3B7C74.toInt()) }
         root.addView(status)
 
-        log = TextView(ctx).apply { textSize = 15f; setPadding(0, dp(10), 0, dp(10)); setLineSpacing(dp(4).toFloat(), 1f) }
-        scroll = ScrollView(ctx).apply { addView(log) }
+        msgBox = LinearLayout(ctx).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(10), 0, dp(10))
+        }
+        scroll = ScrollView(ctx).apply { addView(msgBox) }
         root.addView(scroll, LinearLayout.LayoutParams(MATCH_PARENT, 0, 1f))
 
         val bar = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL }
         input = EditText(ctx).apply { hint = "说点什么…（蓝牙范围内互通）" }
         bar.addView(input, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        val mic = Button(ctx).apply { text = "🎤" }
+        mic.setOnTouchListener { _, e ->
+            when (e.action) {
+                android.view.MotionEvent.ACTION_DOWN -> { startVoiceRecord(); true }
+                android.view.MotionEvent.ACTION_UP, android.view.MotionEvent.ACTION_CANCEL -> { stopVoiceAndSend(); true }
+                else -> false
+            }
+        }
+        bar.addView(mic)
         bar.addView(Button(ctx).apply { text = "发送"; setOnClickListener { sendChat() } })
         root.addView(bar)
 
         // 每次重建都注册：MeshBus 为"每类型单 handler"，新实例自动顶替旧实例
         MeshBus.subscribe(MeshBus.KIND_CHAT) { body -> onChat(body) }
+        MeshBus.subscribe(MeshBus.KIND_VOICE) { body -> onVoice(body) }
         MeshBus.onPeers("camp") { n -> renderStatus(n) }
         ctx.registerReceiver(btStateReceiver,
             android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
@@ -91,6 +116,8 @@ class CampFragment : Fragment() {
     override fun onDestroyView() {
         super.onDestroyView()
         runCatching { requireContext().unregisterReceiver(btStateReceiver) }
+        runCatching { recorder?.release() }; recorder = null
+        runCatching { player?.release() }; player = null
     }
 
     // MARK: - 权限与启动
@@ -137,16 +164,103 @@ class CampFragment : Fragment() {
         } catch (_: Exception) {}
     }
 
-    private fun appendIfNew(mid: String, line: String) {
+    // MARK: - 短语音（G-CM-1）
+    private fun startVoiceRecord() {
+        val ctx = requireContext()
+        if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            micLauncher.launch(Manifest.permission.RECORD_AUDIO); return
+        }
+        val f = java.io.File(ctx.cacheDir, "voice_out.m4a")
+        val r = android.media.MediaRecorder()
+        try {
+            r.setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+            r.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            r.setAudioEncoder(android.media.MediaRecorder.AudioEncoder.AAC)
+            r.setAudioSamplingRate(16000)
+            r.setAudioEncodingBitRate(24000)
+            r.setAudioChannels(1)
+            r.setMaxDuration(10_000)   // ≤10s：约 30KB，BLE 泛洪 2~3 秒可达
+            r.setOutputFile(f.absolutePath)
+            r.prepare(); r.start()
+            recorder = r; recordFile = f; recordStart = System.currentTimeMillis()
+            status.text = "🎤 录音中…松开发送（最长 10 秒）"
+        } catch (_: Exception) { r.release(); status.text = "录音启动失败" }
+    }
+
+    private fun stopVoiceAndSend() {
+        val r = recorder ?: return
+        recorder = null
+        val durMs = System.currentTimeMillis() - recordStart
+        runCatching { r.stop() }; r.release()
+        val f = recordFile ?: return
+        if (durMs < 400 || !f.exists()) { status.text = "太短，未发送"; return }
+        val m4a = f.readBytes()
+        if (m4a.size > 40_000) { status.text = "语音过长（>${m4a.size / 1000}KB），未发送"; return }
+        val ctx = requireContext()
+        val mid = UUID.randomUUID().toString()
+        val d = (durMs / 1000.0 * 10).toInt() / 10.0
+        val json = JSONObject().put("mid", mid).put("n", Identity.nick(ctx))
+            .put("d", d).put("ts", System.currentTimeMillis() / 1000.0)
+            .toString().toByteArray(Charsets.UTF_8)
+        val payload = ByteArray(2 + json.size + m4a.size)
+        payload[0] = (json.size shr 8).toByte(); payload[1] = json.size.toByte()
+        System.arraycopy(json, 0, payload, 2, json.size)
+        System.arraycopy(m4a, 0, payload, 2 + json.size, m4a.size)
+        val mine = java.io.File(ctx.cacheDir, "voice_$mid.m4a").also { f.copyTo(it, overwrite = true) }
+        appendIfNew(mid, "我：🎤 语音 ${d}s（点按播放）", mine.absolutePath)
+        MeshBus.send(MeshBus.KIND_VOICE, payload)
+        status.text = if (MeshBus.peerCount == 0) "⚠️ 附近无蓝牙邻居，这条语音此刻无人能收到" else "语音已发出（${m4a.size / 1000}KB）"
+    }
+
+    private fun onVoice(body: ByteArray) {
+        try {
+            if (body.size < 3) return
+            val jlen = ((body[0].toInt() and 0xFF) shl 8) or (body[1].toInt() and 0xFF)
+            if (body.size < 2 + jlen + 1) return
+            val o = JSONObject(String(body, 2, jlen, Charsets.UTF_8))
+            val mid = o.getString("mid")
+            val ctx = context ?: return
+            val f = java.io.File(ctx.cacheDir, "voice_$mid.m4a")
+            f.writeBytes(body.copyOfRange(2 + jlen, body.size))
+            appendIfNew(mid, "${o.getString("n")}：🎤 语音 ${o.optDouble("d", 0.0)}s（点按播放）", f.absolutePath)
+        } catch (_: Exception) {}
+    }
+
+    private fun play(path: String) {
+        runCatching { player?.release() }
+        player = android.media.MediaPlayer().apply {
+            setDataSource(path); prepare(); start()
+        }
+    }
+
+    private fun appendIfNew(mid: String, line: String, voicePath: String? = null) {
         if (!seenMids.add(mid)) return
-        lines.add(line)
+        entries.add(Triple(mid, line, voicePath))
         renderLog()
     }
 
     private fun renderLog() {
-        log.text = if (lines.isEmpty())
-            "还没有消息。开启蓝牙、与附近同伴（iOS/安卓均可）进入本页即可互聊，无需网络。"
-        else lines.joinToString("\n")
+        val ctx = context ?: return
+        msgBox.removeAllViews()
+        if (entries.isEmpty()) {
+            msgBox.addView(TextView(ctx).apply {
+                textSize = 15f
+                text = "还没有消息。开启蓝牙、与附近同伴（iOS/安卓均可）进入本页即可互聊互发语音，无需网络。"
+            })
+        } else {
+            entries.forEach { (_, line, voicePath) ->
+                msgBox.addView(TextView(ctx).apply {
+                    textSize = 15f
+                    setPadding(0, dp(3), 0, dp(3))
+                    text = line
+                    if (voicePath != null) {
+                        setTextColor(0xFF0F766E.toInt())
+                        setOnClickListener { play(voicePath) }
+                    }
+                })
+            }
+        }
         scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 

@@ -53,6 +53,7 @@ object Identity {
 object MeshBus : BleMesh.Listener {
     const val KIND_CHAT: Byte = 1
     const val KIND_LOC: Byte = 2
+    const val KIND_VOICE: Byte = 3   // 短语音（G-CM-1）：[u16 jsonLen][json{mid,n,d,ts}][m4a 字节]
 
     private var appCtx: Context? = null
     private var mesh: BleMesh? = null

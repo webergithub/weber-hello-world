@@ -8,6 +8,7 @@ final class MeshBus: BleMeshDelegate {
 
     static let kindChat: UInt8 = 1
     static let kindLoc: UInt8 = 2
+    static let kindVoice: UInt8 = 3   // 短语音（G-CM-1）：[u16 jsonLen][json{mid,n,d,ts}][m4a 字节]
 
     private let mesh = BleMesh()
     private var started = false

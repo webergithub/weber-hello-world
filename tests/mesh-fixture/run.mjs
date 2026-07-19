@@ -235,5 +235,32 @@ console.log('[8] MeshCrypto 端到端加密')
   check('MAC 截断 16 三端一致', /MAC_LEN = 16/.test(swiftSrc) && /MAC_LEN = 16/.test(ktSrc) && mc.MAC_LEN === 16)
 }
 
+// ---------- 9. 短语音（G-CM-1：载荷格式往返 + 9KB 大载荷过 mesh + 常量防漂移） ----------
+console.log('[9] 营地短语音')
+{
+  // 载荷格式 [u16 jsonLen][json][m4a]，与 CampFragment.kt / CampViewController.swift 一致
+  const meta = Buffer.from(JSON.stringify({ mid: 'v1', n: '我', d: 3.2, ts: 0 }), 'utf8')
+  const m4a = Buffer.alloc(9000, 0xAB)   // ≈3s AAC@24kbps
+  const payload = Buffer.concat([Buffer.from([(meta.length >> 8) & 0xff, meta.length & 0xff]), meta, m4a])
+  const jlen = (payload[0] << 8) | payload[1]
+  const parsedMeta = JSON.parse(payload.subarray(2, 2 + jlen).toString('utf8'))
+  const parsedBin = payload.subarray(2 + jlen)
+  check('语音载荷 [u16][json][m4a] 往返解析', parsedMeta.mid === 'v1' && parsedMeta.d === 3.2 && parsedBin.equals(m4a))
+
+  // 9KB 载荷经 BLE 分片泛洪仍完整送达（约 51 片）
+  const radio = new Radio()
+  const a = new SimNode('A'), b = new SimNode('B'), c = new SimNode('C')
+  ;[a, b, c].forEach(n => radio.add(n))
+  radio.link('A', 'B'); radio.link('B', 'C')   // C 只能经 B 中继
+  a.send(payload)
+  check(`9KB 语音拆 ${Math.ceil(payload.length / PAYLOAD)} 片，B 直收完整`, b.delivered.length === 1 && b.delivered[0].equals(payload))
+  check('C 经中继收到完整语音', c.delivered.length === 1 && c.delivered[0].equals(payload))
+
+  // kindVoice=3 三端一致
+  const swiftBus = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshBus.swift'), 'utf8')
+  const ktBus = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshBus.kt'), 'utf8')
+  check('kindVoice=3 双端一致', /kindVoice: UInt8 = 3/.test(swiftBus) && /KIND_VOICE: Byte = 3/.test(ktBus))
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)
