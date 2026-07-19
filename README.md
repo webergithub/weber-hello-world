@@ -10,7 +10,9 @@ picks the language they speak in and up to two languages they read in (a primary
 and an optional secondary).
 
 It's a cross‑platform **web app (PWA)**, so it runs in the browser on iOS and
-Android with nothing to install — and installs to the home screen if you want.
+Android with nothing to install — and a service worker precaches the app shell,
+so it **installs to the home screen** and the room/home screens still open even
+on a flaky connection.
 
 ![Guest view: a Chinese speaker reading the room in Chinese with an English secondary](docs/screenshot-guest.png)
 
@@ -49,7 +51,8 @@ your primary language, live roster of who's in the room, and auto‑reconnect.
   memory), mints invite codes, renders join QR codes, and exposes a translation
   proxy so the browser needs no API keys and hits no CORS walls.
 - **`public/`** — the PWA. `index.html` (create / join), `room.html` (the room),
-  `js/room.js` (the client), `js/langs.js` (language table), `css/style.css`.
+  `js/room.js` (the client), `js/langs.js` (language table), `css/style.css`,
+  `sw.js` (service worker for install + offline), `manifest.webmanifest`.
 - **`phrasebook.js`** — a small offline phrasebook fallback (see below).
 
 The server also exposes **`/api/transcribe`**, which forwards recorded audio to
@@ -81,14 +84,16 @@ the phone reached the server through.
 ### Tests
 
 ```bash
-# REST + translation chain + Whisper (mock) + WebSocket relay
-WHISPER_MOCK=1 PORT=3111 node server.js &
-node test/e2e.mjs
-
-# Full browser flow (two phones, translation + voice input) — needs Chromium
-WHISPER_MOCK=1 PORT=3111 node server.js &
-node test/browser.mjs
+npm test          # starts the server (Whisper mock) and runs every suite
 ```
+
+`npm test` orchestrates three suites (server started automatically):
+
+- `test/e2e.mjs` — REST, translation chain, Whisper transcription, WebSocket
+  relay, and message history.
+- `test/browser.mjs` — full two-phone browser flow: create/join, live
+  translation into primary+secondary, voice input, and reload-catches-up.
+- `test/pwa.mjs` — service worker registration and offline app-shell loading.
 
 ---
 

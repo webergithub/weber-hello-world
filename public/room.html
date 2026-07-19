@@ -106,6 +106,13 @@
   </div>
 
   <div class="toast" id="toast"></div>
+  <script>
+    // Register the service worker so the app installs and works offline.
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () =>
+        navigator.serviceWorker.register('/sw.js').catch(() => {}));
+    }
+  </script>
   <script type="module" src="/js/room.js"></script>
 </body>
 </html>
