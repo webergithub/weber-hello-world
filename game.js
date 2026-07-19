@@ -108,6 +108,9 @@ zh: {
   loot_credits: (n) => `🎁 拾取街头物资：+${n}💰`, loot_energy: '⚡ 能量饮料！体力全满，短暂加速', loot_radar: '📡 雷达芯片！下一次雷达免费', radar_free: '📡 消耗雷达芯片——本次测距免费！',
   airdrop_in: '🪂 空投正在降落！去地图上的橙色🪂标记处抢物资', airdrop_land: '📦 空投已落地，先到先得！', airdrop_get: (n) => `📦 你打开了空投箱：+${n}💰 + 一枚雷达芯片！`,
   flee_toast: (e, n) => `🏃 ${e} ${n} 被你惊动，夺路而逃！追上去！`,
+  ach_title: '🏅 本局成就',
+  ach: { speed: ['⚡ 闪电猎手', '时间未过半就找齐所有人'], chase: ['🏃 追捕达人', '在逃跑途中截获躲藏者'], explorer: ['🗺 城市探索家', '一局发现 3 处以上景点'], collector: ['🎁 拾荒高手', '拾取 5 件以上街头物资'], airdrop: ['📦 空投猎人', '抢到空投补给箱'], transit: ['🚇 通勤达人', '一局乘坐 3 次以上交通工具'], marathon: ['👟 暴走猎手', '移动超过 1500 米'], thrifty: ['🪙 精打细算', '花费不超过 20💰 就大获全胜'] },
+  career: (g, w, c) => `生涯战绩：${g} 局 · 胜 ${w} 局 · 累计抓捕 ${c} 人`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
@@ -209,6 +212,9 @@ en: {
   loot_credits: (n) => `🎁 Street supplies: +${n}💰`, loot_energy: '⚡ Energy drink! Stamina refilled + short speed boost', loot_radar: '📡 Radar chip! Your next radar ping is free', radar_free: '📡 Radar chip used — this ping is free!',
   airdrop_in: '🪂 Supply drop incoming! Race to the orange 🪂 marker on the map', airdrop_land: '📦 The supply crate has landed — first come, first served!', airdrop_get: (n) => `📦 Crate opened: +${n}💰 + a radar chip!`,
   flee_toast: (e, n) => `🏃 ${e} ${n} panicked and bolted! Chase them down!`,
+  ach_title: '🏅 Round Achievements',
+  ach: { speed: ['⚡ Lightning Hunter', 'Found everyone before half time'], chase: ['🏃 Chase Master', 'Caught a hider mid-escape'], explorer: ['🗺 City Explorer', 'Discovered 3+ landmarks in one round'], collector: ['🎁 Scavenger', 'Picked up 5+ street supplies'], airdrop: ['📦 Airdrop Hunter', 'Claimed the supply drop'], transit: ['🚇 Commuter Pro', 'Rode transit 3+ times in one round'], marathon: ['👟 Marathon Hunter', 'Traveled over 1500 m'], thrifty: ['🪙 Penny Pincher', 'Full sweep spending no more than 20💰'] },
+  career: (g, w, c) => `Career: ${g} rounds · ${w} wins · ${c} total captures`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
@@ -2622,6 +2628,7 @@ function updateLondon(dt, t) {
     if (G.phase !== 'seek' || G.paused) return;
     if (dist2d(player.x, player.z, L.x, L.z) < 2.4) {
       L.taken = true;
+      if (G.stats) G.stats.loot++;
       L.box.visible = L.beam.visible = false;
       AudioSys.coin();
       if (L.kind === 'credits') { G.credits += L.amt; G.earned += L.amt; showToast(tr('loot_credits', L.amt), 'gold'); }
@@ -2673,6 +2680,7 @@ function updateLondon(dt, t) {
         A.mesh.visible = false;
         AudioSys.coin();
         G.credits += 40; G.earned += 40; G.freeRadar = true;
+        if (G.stats) G.stats.airdrop = true;
         showToast(tr('airdrop_get', 40), 'gold');
         updateHUD();
       }
@@ -2753,6 +2761,7 @@ function boardTransit(v) {
   player.riding = 'transit';
   player.tv = v;
   v.riding = true;
+  if (G.stats) G.stats.rides++;
   AudioSys.busDing();
   showToast(t('transit_on', vIcon(v), v.cost, v.line));
 }
@@ -3456,6 +3465,7 @@ function tryBike() {
   if (!spendCredits(COST.bike, t('w_bike'))) return;
   player.riding = 'bike';
   player.bikeMesh.visible = true;
+  if (G.stats) G.stats.rides++;
   AudioSys.coin();
   showToast(t('bike_on', COST.bike));
 }
@@ -3475,6 +3485,7 @@ function captureHider(h) {
   h.capAnim = 1.2;
   h.capAngle = player.yaw + Math.PI;
   h.capPos = { x: h.mesh.position.x, z: h.mesh.position.z };
+  if (G.stats && h.flee) G.stats.chaseCaps++;
   h.flee = null;
   G.capFocus = h;
   h.foundBy = G.seekers[G.curSeeker].name;
@@ -3530,6 +3541,7 @@ function callTaxi(x, z) {
   if (player.riding === 'bus' || player.riding === 'transit') { showToast(t('taxi_busy'), 'red'); return; }
   const cost = taxiCost(x, z);
   if (!spendCredits(cost, t('w_taxi'))) return;
+  if (G.stats) G.stats.rides++;
   // 落点吸附到最近道路
   let tx = x, tz = z;
   if (G.city.kind === 'real') {
@@ -3600,6 +3612,7 @@ function updatePlayer(dt) {
       player.stepT = (running ? 0.30 : 0.46) / simK();
     }
   } else player.stepT = 0;
+  if (moving && G.stats) G.stats.dist += sp * dt;
 
   // 跳跃（PUBG 手感：短促有力）
   if (keys['Space'] && player.y <= 0.001 && player.riding === null) {
@@ -4191,6 +4204,7 @@ function startGame() {
   resetWorld();
   G.captures = 0; G.spent = 0; G.earned = 0;
   G.freeRadar = false;
+  G.stats = { dist: 0, rides: 0, loot: 0, airdrop: false, chaseCaps: 0 };
   G.credits = G.startCredits;
   G.timeLeft = G.totalTime;
   G.weather = rng() < 0.4 ? 'rain' : 'clear';
@@ -4403,7 +4417,33 @@ function endGame(allFound) {
     });
     html += `</table>`;
   }
-  html += `<div style="font-size:15px;line-height:2">${t('end_total', G.earned, G.spent, finalScore)}</div>`;
+  const S = G.stats || {};
+  const ach = [];
+  if (allFound && G.timeLeft > G.totalTime * 0.5) ach.push('speed');
+  if (S.chaseCaps > 0) ach.push('chase');
+  if (G.city.poiVisited && G.city.poiVisited.size >= 3) ach.push('explorer');
+  if (S.loot >= 5) ach.push('collector');
+  if (S.airdrop) ach.push('airdrop');
+  if (S.rides >= 3) ach.push('transit');
+  if (S.dist >= 1500) ach.push('marathon');
+  if (allFound && G.spent <= 20) ach.push('thrifty');
+  if (ach.length) {
+    html += `<div style="margin:12px 0 6px;font-weight:700">${t('ach_title')}</div><div style="display:flex;flex-wrap:wrap;gap:8px;justify-content:center">`;
+    ach.forEach((k) => {
+      const [nm, ds] = t('ach')[k];
+      html += `<span title="${ds}" style="background:rgba(255,209,102,.15);border:1px solid rgba(255,209,102,.5);border-radius:9px;padding:5px 10px;font-size:13px">${nm}</span>`;
+    });
+    html += `</div>`;
+  }
+  html += `<div style="font-size:15px;line-height:2;margin-top:8px">${t('end_total', G.earned, G.spent, finalScore)}</div>`;
+  try {
+    const st = JSON.parse(localStorage.getItem('ct_stats') || '{}');
+    st.games = (st.games || 0) + 1;
+    st.wins = (st.wins || 0) + (allFound ? 1 : 0);
+    st.caps = (st.caps || 0) + G.captures;
+    localStorage.setItem('ct_stats', JSON.stringify(st));
+    html += `<div style="font-size:12.5px;color:#9fb0c8;margin-top:6px">${t('career', st.games, st.wins, st.caps)}</div>`;
+  } catch (e) { /* 本地存储不可用则跳过 */ }
   $('endStats').innerHTML = html;
   $('endScreen').classList.remove('hidden');
   if (allFound) AudioSys.capture();
