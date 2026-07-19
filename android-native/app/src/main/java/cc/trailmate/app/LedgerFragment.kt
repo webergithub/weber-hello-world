@@ -33,6 +33,7 @@ class LedgerFragment : Fragment() {
         val btnRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
         btnRow.addView(Button(ctx).apply { text = "＋ 成员"; setOnClickListener { promptAddMember() } }, rowLp())
         btnRow.addView(Button(ctx).apply { text = "记一笔"; setOnClickListener { promptAddExpense() } }, rowLp())
+        btnRow.addView(Button(ctx).apply { text = "备份"; setOnClickListener { promptBackup() } }, rowLp())
         root.addView(btnRow)
 
         content = TextView(ctx).apply { textSize = 15f; setPadding(0, dp(16), 0, 0); setLineSpacing(dp(4).toFloat(), 1f) }
@@ -40,6 +41,45 @@ class LedgerFragment : Fragment() {
 
         render()
         return root
+    }
+
+    // 备份：导出（系统分享，存文件/发微信均可）/ 导入（粘贴 JSON 整体还原）
+    private fun promptBackup() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("账本备份")
+            .setItems(arrayOf("导出（分享 JSON）", "导入（粘贴 JSON 还原）")) { _, which ->
+                if (which == 0) exportLedger() else promptImport()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun exportLedger() {
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "TrailMate 账本备份")
+            putExtra(android.content.Intent.EXTRA_TEXT, store.exportJson())
+        }
+        startActivity(android.content.Intent.createChooser(send, "导出账本"))
+    }
+
+    private fun promptImport() {
+        val input = EditText(requireContext()).apply {
+            hint = "粘贴之前导出的 JSON"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 4
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("导入账本（将整体替换当前账本）").setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("导入") { _, _ ->
+                val ok = store.importJson(input.text.toString())
+                if (ok) render()
+                else AlertDialog.Builder(requireContext()).setTitle("导入失败")
+                    .setMessage("JSON 格式不对或内容缺字段，当前账本未改动。")
+                    .setPositiveButton("好", null).show()
+            }.show()
     }
 
     private fun promptAddMember() {

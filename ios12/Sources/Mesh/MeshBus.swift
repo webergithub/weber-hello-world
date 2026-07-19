@@ -15,7 +15,9 @@ final class MeshBus: BleMeshDelegate {
     // 避免向单例累积闭包造成旧 VC 泄漏与消息重复处理（与 Android MeshBus.kt 行为一致）。
     private var handlers: [UInt8: (Data) -> Void] = [:]
     private var peerHandlers: [String: (Int) -> Void] = [:]
+    private var stateHandlers: [String: (Bool) -> Void] = [:]
     private(set) var peerCount = 0
+    private(set) var btAvailable = true
 
     private init() { mesh.delegate = self }
 
@@ -45,6 +47,12 @@ final class MeshBus: BleMeshDelegate {
         handler(peerCount)
     }
 
+    // 蓝牙可用性观察（PR-P1-1，立即回调一次当前值）；同 tag 顶替
+    func onState(_ tag: String = "default", _ handler: @escaping (Bool) -> Void) {
+        stateHandlers[tag] = handler
+        handler(btAvailable)
+    }
+
     // MARK: - BleMeshDelegate（主线程）
     func bleMesh(_ mesh: BleMesh, didReceive payload: Data) {
         // 解析 [kind][teamLen][team][body] 并按当前队伍码过滤
@@ -62,5 +70,10 @@ final class MeshBus: BleMeshDelegate {
     func bleMeshDidUpdatePeers(_ count: Int) {
         peerCount = count
         peerHandlers.values.forEach { $0(count) }
+    }
+
+    func bleMeshDidUpdateState(_ available: Bool) {
+        btAvailable = available
+        stateHandlers.values.forEach { $0(available) }
     }
 }

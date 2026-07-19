@@ -37,6 +37,19 @@ class CampFragment : Fragment() {
             else status.text = "需要蓝牙权限才能自组网（设置里授权后重进本页）"
         }
 
+    // 链路健康自检（PR-P1-1）：蓝牙开关变化实时反映到界面，杜绝"蓝牙关了界面照常"的静默失效
+    private val btStateReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(c: android.content.Context?, intent: android.content.Intent?) {
+            when (intent?.getIntExtra(android.bluetooth.BluetoothAdapter.EXTRA_STATE, -1)) {
+                android.bluetooth.BluetoothAdapter.STATE_OFF ->
+                    status.text = "⚠️ 蓝牙已关闭，无法自组网（打开蓝牙后自动恢复）"
+                android.bluetooth.BluetoothAdapter.STATE_ON -> {
+                    startMesh(); renderStatus(MeshBus.peerCount)
+                }
+            }
+        }
+    }
+
     override fun onCreateView(inflater: LayoutInflater, parent: ViewGroup?, s: Bundle?): View {
         val ctx = requireContext()
         val root = LinearLayout(ctx).apply {
@@ -67,10 +80,17 @@ class CampFragment : Fragment() {
         // 每次重建都注册：MeshBus 为"每类型单 handler"，新实例自动顶替旧实例
         MeshBus.subscribe(MeshBus.KIND_CHAT) { body -> onChat(body) }
         MeshBus.onPeers("camp") { n -> renderStatus(n) }
+        ctx.registerReceiver(btStateReceiver,
+            android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
         ensurePermissionsThenStart()
         renderStatus(MeshBus.peerCount)
         renderLog()
         return root
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        runCatching { requireContext().unregisterReceiver(btStateReceiver) }
     }
 
     // MARK: - 权限与启动
@@ -104,6 +124,10 @@ class CampFragment : Fragment() {
         appendIfNew(mid, "我：$text")
         MeshBus.send(MeshBus.KIND_CHAT, json.toString().toByteArray(Charsets.UTF_8))
         input.setText("")
+        // 送达可见性（PR-P1-2 部分）：无邻居时如实告知，不让用户以为"发出去了"
+        if (MeshBus.peerCount == 0) {
+            status.text = "⚠️ 附近无蓝牙邻居，这条消息此刻无人能收到"
+        }
     }
 
     private fun onChat(body: ByteArray) {

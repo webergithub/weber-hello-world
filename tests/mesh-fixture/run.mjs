@@ -103,6 +103,30 @@ console.log('[5] 记账结算：web 真实 split.ts 与原生算法逐人一致 
   check('最优转账恰 3 笔且全部汇向阿强、合计 26500', ts.length === 3 && toQiang === 26500, JSON.stringify(ts))
 }
 
+// ---------- 5b. 备份往返（G-LG-1：导出→导入完整还原；坏文件拒绝） ----------
+console.log('[5b] 备份导出/导入（web 真实 backup.ts）')
+{
+  const { execSync } = await import('node:child_process')
+  const bundle = join(ROOT, 'tests/mesh-fixture/.backup.bundle.mjs')
+  execSync(`${join(ROOT, 'node_modules/.bin/esbuild')} ${join(ROOT, 'src/lib/backup.ts')} --bundle --format=esm --outfile=${bundle}`, { stdio: 'pipe' })
+  const { exportState, importState } = await import(bundle)
+
+  const state = {
+    groups: [{
+      id: 'g1', name: '五一露营', code: 'K7Q9ZP', createdAt: 1, myMemberId: 'm1',
+      members: [{ id: 'm1', nickname: '我', isMe: true }, { id: 'm2', nickname: '小明' }],
+      expenses: [{ id: 'e1', title: '过路费', payerId: 'm1', amountCents: 24000, participantIds: ['m1', 'm2'], mode: 'equal', ts: 2 }],
+    }],
+    activeGroupId: 'g1',
+  }
+  const roundtrip = importState(exportState(state, 123))
+  check('导出→导入 深度相等（群组/成员/账目完整还原）', JSON.stringify(roundtrip) === JSON.stringify(state))
+  check('非 JSON 拒绝', importState('not json{{{') === null)
+  check('缺 magic 拒绝', importState(JSON.stringify({ version: 1, state })) === null)
+  check('activeGroupId 失效时回退到首个群组',
+    importState(exportState({ ...state, activeGroupId: 'gone' }, 1))?.activeGroupId === 'g1')
+}
+
 // ---------- 6. 协议常量防漂移（对 Swift/Kotlin 源码 grep 比对） ----------
 console.log('[6] 协议常量防漂移（夹具 vs BleMesh.swift vs BleMesh.kt）')
 {

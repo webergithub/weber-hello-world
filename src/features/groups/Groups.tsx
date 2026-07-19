@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { QRCodeSVG } from 'qrcode.react'
 import { useStore } from '../../store'
 import { colorFor } from '../../lib/id'
 import { encodeJoin, decodeJoin } from '../../lib/joinlink'
+import { exportState, importState } from '../../lib/backup'
 import { QrScanner } from '../../components/QrScanner'
 import type { Group } from '../../types'
 
@@ -11,6 +12,24 @@ export function Groups() {
   const [mode, setMode] = useState<null | 'create' | 'join'>(null)
   const [scan, setScan] = useState(false)
   const [detail, setDetail] = useState<Group | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  // 备份（G-LG-1）：导出下载 .json；导入选文件校验后整体还原
+  const doExport = () => {
+    const blob = new Blob([exportState(state)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `trailmate-backup-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+  const doImport = async (file: File) => {
+    const text = await file.text()
+    const next = importState(text)
+    if (next) dispatch({ type: 'importState', state: next })
+    else alert('导入失败：不是有效的 TrailMate 备份文件，当前数据未改动。')
+  }
 
   return (
     <div>
@@ -26,6 +45,26 @@ export function Groups() {
         <button className="btn grow" onClick={() => setMode('join')}>
           加入群组
         </button>
+      </div>
+
+      <div className="row" style={{ marginBottom: 14 }}>
+        <button className="btn sm grow" onClick={doExport}>
+          ⬇️ 导出备份
+        </button>
+        <button className="btn sm grow" onClick={() => fileRef.current?.click()}>
+          ⬆️ 导入备份
+        </button>
+        <input
+          ref={fileRef}
+          type="file"
+          accept="application/json,.json"
+          style={{ display: 'none' }}
+          onChange={(e) => {
+            const f = e.target.files?.[0]
+            if (f) void doImport(f)
+            e.target.value = ''
+          }}
+        />
       </div>
 
       {state.groups.length === 0 ? (

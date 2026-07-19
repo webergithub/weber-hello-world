@@ -78,6 +78,18 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITextF
             self.appendIfNew(msg)
         }
         MeshBus.shared.onPeers { [weak self] count in self?.updatePeersTitle(count) }
+        // 链路健康（PR-P1-1）：蓝牙关闭时立刻在标题栏亮红字，绝不"界面照常"
+        MeshBus.shared.onState { [weak self] available in
+            guard let self = self else { return }
+            if available {
+                self.updatePeersTitle(MeshBus.shared.peerCount)
+            } else {
+                self.navigationItem.rightBarButtonItem =
+                    UIBarButtonItem(title: "⚠️ 蓝牙已关闭", style: .plain, target: nil, action: nil)
+                self.navigationItem.rightBarButtonItem?.tintColor = .red
+                self.navigationItem.rightBarButtonItem?.isEnabled = false
+            }
+        }
     }
 
     // MARK: - 昵称
@@ -105,6 +117,14 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITextF
         appendIfNew(msg)
         if let data = try? JSONEncoder().encode(msg) { MeshBus.shared.send(MeshBus.kindChat, data) }
         field.text = ""
+        // 送达可见性（PR-P1-2 部分）：无邻居/蓝牙关闭时如实告知
+        if !MeshBus.shared.btAvailable {
+            appendIfNew(ChatMsg(mid: UUID().uuidString, n: "系统",
+                                t: "⚠️ 蓝牙已关闭，这条消息发不出去", ts: Date().timeIntervalSince1970))
+        } else if MeshBus.shared.peerCount == 0 {
+            appendIfNew(ChatMsg(mid: UUID().uuidString, n: "系统",
+                                t: "⚠️ 附近无蓝牙邻居，这条消息此刻无人能收到", ts: Date().timeIntervalSince1970))
+        }
     }
 
     func textFieldShouldReturn(_ textField: UITextField) -> Bool { sendTapped(); return true }
