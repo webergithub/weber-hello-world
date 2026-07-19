@@ -107,6 +107,7 @@ zh: {
   p_drive: '🚗 按 <kbd>F</kbd> 驾驶汽车', p_driving: '🚗 W/S 油门刹车 · A/D 转向 · <kbd>F</kbd> 下车', drive_on: '🚗 上车！WASD 驾驶，F 下车', drive_off: '🚗 你下车了', p_door: '🚪 按 <kbd>E</kbd> 开/关门', poi_found: (n) => `📍 你发现了景点：<b>${n}</b>！探索奖励 +5💰`,
   loot_credits: (n) => `🎁 拾取街头物资：+${n}💰`, loot_energy: '⚡ 能量饮料！体力全满，短暂加速', loot_radar: '📡 雷达芯片！下一次雷达免费', radar_free: '📡 消耗雷达芯片——本次测距免费！',
   airdrop_in: '🪂 空投正在降落！去地图上的橙色🪂标记处抢物资', airdrop_land: '📦 空投已落地，先到先得！', airdrop_get: (n) => `📦 你打开了空投箱：+${n}💰 + 一枚雷达芯片！`,
+  flee_toast: (e, n) => `🏃 ${e} ${n} 被你惊动，夺路而逃！追上去！`,
   names: [['神秘的狐狸', '🦊'], ['机灵的猫咪', '🐱'], ['害羞的刺猬', '🦔'], ['淘气的浣熊', '🦝'], ['悄悄的兔子', '🐰'], ['沉默的松鼠', '🐿️'], ['狡猾的狸猫', '🐈'], ['飘忽的雪貂', '🦡']],
   area: { plaza: '广场一带', park: '绿地一带', pond: '水边一带', down: '高楼区', market: '热闹的老街', constr: '尘土飞扬处', res: '安静的住宅', london: '伦敦街头', shanghai: '上海街头', istanbul: '伊斯坦布尔街头', newyork: '纽约街头', dubai: '迪拜街头' },
   colors: { 红: '红', 橙: '橙', 黄: '黄', 绿: '绿', 青: '青', 蓝: '蓝', 紫: '紫', 粉: '粉', 白: '白', 灰: '灰', 米白: '米白', 砖红: '砖红', 玻璃蓝: '玻璃蓝', 彩色: '彩色' },
@@ -207,6 +208,7 @@ en: {
   p_drive: '🚗 Press <kbd>F</kbd> to drive', p_driving: '🚗 W/S throttle · A/D steer · <kbd>F</kbd> exit', drive_on: '🚗 In the car! WASD to drive, F to exit', drive_off: '🚗 You got out', p_door: '🚪 Press <kbd>E</kbd> to open/close the door', poi_found: (n) => `📍 Landmark discovered: <b>${n}</b>! +5💰 explorer bonus`,
   loot_credits: (n) => `🎁 Street supplies: +${n}💰`, loot_energy: '⚡ Energy drink! Stamina refilled + short speed boost', loot_radar: '📡 Radar chip! Your next radar ping is free', radar_free: '📡 Radar chip used — this ping is free!',
   airdrop_in: '🪂 Supply drop incoming! Race to the orange 🪂 marker on the map', airdrop_land: '📦 The supply crate has landed — first come, first served!', airdrop_get: (n) => `📦 Crate opened: +${n}💰 + a radar chip!`,
+  flee_toast: (e, n) => `🏃 ${e} ${n} panicked and bolted! Chase them down!`,
   names: [['Sly Fox', '🦊'], ['Clever Cat', '🐱'], ['Shy Hedgehog', '🦔'], ['Naughty Raccoon', '🦝'], ['Quiet Rabbit', '🐰'], ['Silent Squirrel', '🐿️'], ['Cunning Tanuki', '🐈'], ['Elusive Ferret', '🦡']],
   area: { plaza: 'near the plaza', park: 'among greenery', pond: 'by the water', down: 'downtown', market: 'the busy old street', constr: 'a dusty corner', res: 'a quiet neighbourhood', london: 'the streets of London', shanghai: 'the streets of Shanghai', istanbul: 'the streets of Istanbul', newyork: 'the streets of New York', dubai: 'the streets of Dubai' },
   colors: { 红: 'red', 橙: 'orange', 黄: 'yellow', 绿: 'green', 青: 'teal', 蓝: 'blue', 紫: 'purple', 粉: 'pink', 白: 'white', 灰: 'grey', 米白: 'cream', 砖红: 'brick-red', 玻璃蓝: 'glass-blue', 彩色: 'colourful' },
@@ -294,6 +296,7 @@ const AudioSys = {
   deny()    { this.beep(150, 0.2, 'square', 0.15); this.beep(110, 0.25, 'square', 0.12, 0.1); },
   coin()    { this.beep(988, 0.09, 'square', 0.12); this.beep(1319, 0.18, 'square', 0.12, 0.08); },
   step(run, alt) { this.beep(alt ? 96 : 112, 0.045, 'triangle', run ? 0.065 : 0.045); },
+  yelp() { this.beep(720, 0.08, 'square', 0.14); this.beep(980, 0.12, 'square', 0.12, 0.09); this.beep(600, 0.14, 'sawtooth', 0.08, 0.22); },
   capture() { [523, 659, 784, 1047, 1319].forEach((f, i) => this.beep(f, 0.22, 'triangle', 0.2, i * 0.09)); },
   radar()   { this.beep(880, 0.5, 'sine', 0.18, 0, -500); },
   busDing(v = 0.18) { this.beep(660, 0.12, 'sine', v); this.beep(880, 0.2, 'sine', v, 0.13); },
@@ -3124,20 +3127,68 @@ function updateHiders(dt, t) {
       return;
     }
     if (G.phase !== 'seek') return;
-    h.mesh.position.y = 0.03;
-    animateHuman(h.mesh.userData.human, t, 0);
+    const d = dist2d(player.x, player.z, h.mesh.position.x, h.mesh.position.z);
+    // 惊慌逃窜（仅 AI 躲藏者，一次机会）：被逼近 0.7 秒即夺路而逃
+    if (!h.isHuman && !h.escaped && !h.flee && !G.capFocus) {
+      h.nearT = d < 5.2 ? (h.nearT || 0) + dt : 0;
+      if (h.nearT > 0.7) {
+        const from = h.mesh.position;
+        let target = null, bestScore = -1;
+        G.city.spots.forEach((s) => {
+          if (s.taken) return;
+          const ds = dist2d(from.x, from.z, s.x, s.z);
+          if (ds > 12 && ds < 70) {
+            const score = ds + R(0, 18);
+            if (score > bestScore) { bestScore = score; target = s; }
+          }
+        });
+        h.escaped = true;
+        if (target) {
+          target.taken = true;
+          if (h.spot) h.spot.taken = false;
+          h.flee = { tx: target.x, tz: target.z, spot: target, timer: 0 };
+          h.tracksDead = true;
+          AudioSys.yelp();
+          showToast(tr('flee_toast', h.emoji, h.name), 'red');
+        }
+      }
+    }
+    if (h.flee) {
+      // 逃跑移动：直奔新藏点，撞墙沿建筑滑行，超时直接抵达兜底
+      h.flee.timer += dt;
+      const m = h.mesh.position;
+      const dx = h.flee.tx - m.x, dz = h.flee.tz - m.z;
+      const dd = Math.hypot(dx, dz);
+      const step = 5.2 * simK() * dt;
+      if (dd <= Math.max(step, 0.5) || h.flee.timer > 8) {
+        m.set(h.flee.tx, 0.03, h.flee.tz);
+        h.spot = h.flee.spot;
+        h.flee = null;
+      } else {
+        const [nx, nz] = collide(m.x + (dx / dd) * step, m.z + (dz / dd) * step, 0.5);
+        m.set(nx, 0.03, nz);
+        h.mesh.rotation.y = Math.atan2(dx, dz);
+        animateHuman(h.mesh.userData.human, t, 1);
+      }
+    } else {
+      h.mesh.position.y = 0.03;
+      animateHuman(h.mesh.userData.human, t, 0);
+    }
     // 靠近时窸窣声提示
-    const d = dist2d(player.x, player.z, h.spot.x, h.spot.z);
     h.giggleCd -= dt;
-    if (d < 12 && h.giggleCd <= 0) {
+    if (d < 12 && h.giggleCd <= 0 && !h.flee) {
       AudioSys.giggle(clamp(0.16 * (1 - d / 14), 0.02, 0.16));
       h.giggleCd = R(2.5, 5);
     }
-    // 脚印痕迹：26m 内随距离显形（越近越清晰），远处完全不可见——避免破坏寻找难度
+    // 脚印痕迹：26m 内随距离显形；躲藏者逃跑后旧脚印失效淡出
     if (h.tracks) {
-      const reveal = d < 26 ? clamp((26 - d) / 20, 0, 1) : 0;
-      for (let i = 0; i < h.tracks.length; i++) {
-        h.tracks[i].material.opacity = reveal * 0.55 * h.tracks[i].userData.fade;
+      if (h.tracksDead) {
+        h.tracks.forEach((mk) => { if (mk.material.opacity > 0) mk.material.opacity = Math.max(0, mk.material.opacity - dt * 0.6); });
+      } else {
+        const reveal = d < 26 ? clamp((26 - d) / 20, 0, 1) : 0;
+        for (let i = 0; i < h.tracks.length; i++) {
+          h.tracks[i].material.opacity = reveal * 0.55 * h.tracks[i].userData.fade;
+        }
       }
     }
   });
@@ -3362,7 +3413,7 @@ function nearestActiveHider() {
   let best = null, bd = 1e9;
   G.hiders.forEach((h) => {
     if (h.found) return;
-    const d = dist2d(player.x, player.z, h.spot.x, h.spot.z);
+    const d = dist2d(player.x, player.z, h.mesh.position.x, h.mesh.position.z);
     if (d < bd) { bd = d; best = h; }
   });
   return best ? { hider: best, d: bd } : null;
@@ -3372,6 +3423,8 @@ function captureHider(h) {
   h.found = true;
   h.capAnim = 1.2;
   h.capAngle = player.yaw + Math.PI;
+  h.capPos = { x: h.mesh.position.x, z: h.mesh.position.z };
+  h.flee = null;
   G.capFocus = h;
   h.foundBy = G.seekers[G.curSeeker].name;
   const reward = COST.captureBase + h.bounty;
@@ -3381,7 +3434,7 @@ function captureHider(h) {
   G.seekers[G.curSeeker].captures++;
   G.seekers[G.curSeeker].earned += reward;
   AudioSys.capture();
-  burstConfetti(h.spot.x, 1, h.spot.z);
+  burstConfetti(h.capPos.x, 1, h.capPos.z);
   showToast(t('cap_toast', G.seekers[G.curSeeker].name, h.emoji, h.name, COST.captureBase, h.bounty), 'gold');
   updateHUD();
   renderCluePanel();
@@ -3537,8 +3590,9 @@ function updateCamera() {
     const k = 1.2 - cap.capAnim;
     const ang = cap.capAngle + k * 2.0;
     const rad = 5.0 - k * 1.6;
-    camera.position.set(cap.spot.x + Math.sin(ang) * rad, 2.6 - k * 0.8, cap.spot.z + Math.cos(ang) * rad);
-    camera.lookAt(cap.spot.x, 1.1, cap.spot.z);
+    const cpx = cap.capPos.x, cpz = cap.capPos.z;
+    camera.position.set(cpx + Math.sin(ang) * rad, 2.6 - k * 0.8, cpz + Math.cos(ang) * rad);
+    camera.lookAt(cpx, 1.1, cpz);
     sunLight.position.set(player.x + 150, 210, player.z + 90);
     sunLight.target.position.set(player.x, 0, player.z);
     return;
@@ -3732,7 +3786,7 @@ function drawMap(ctx, size, big) {
   if (G.phase === 'seek' || G.phase === 'end') {
     ctx.font = `${big ? 14 : 10}px sans-serif`;
     G.hiders.forEach((h) => {
-      if (h.found) ctx.fillText('✅', TX(h.spot.x) - 5, TZ(h.spot.z) + 4);
+      if (h.found) { const cp = h.capPos || h.spot; ctx.fillText('✅', TX(cp.x) - 5, TZ(cp.z) + 4); }
     });
   }
   // 玩家箭头
