@@ -320,6 +320,31 @@ const AudioSys = {
     this.rainSrc = src;
   },
   rainOff() { if (this.rainSrc) { try { this.rainSrc.stop(); } catch (e) {} this.rainSrc = null; } },
+  // 环境音分层：持续噪声循环 + 目标音量平滑渐变（hum=城市底噪 / water=水声）
+  ambient(kind, target) {
+    if (!this.ctx) return;
+    this._amb = this._amb || {};
+    let a = this._amb[kind];
+    if (!a) {
+      const len = this.ctx.sampleRate * 2;
+      const buf = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf; src.loop = true;
+      const filt = this.ctx.createBiquadFilter();
+      if (kind === 'water') { filt.type = 'bandpass'; filt.frequency.value = 520; filt.Q.value = 0.9; }
+      else { filt.type = 'lowpass'; filt.frequency.value = 220; }
+      const g = this.ctx.createGain(); g.gain.value = 0;
+      src.connect(filt); filt.connect(g); g.connect(this.ctx.destination);
+      src.start();
+      a = this._amb[kind] = { g };
+    }
+    const t0 = this.ctx.currentTime;
+    a.g.gain.cancelScheduledValues(t0);
+    a.g.gain.setValueAtTime(a.g.gain.value, t0);
+    a.g.gain.linearRampToValueAtTime(target, t0 + 0.6);
+  },
   thunder() { this.beep(55, 1.6, 'sawtooth', 0.16, 0, -25); this.beep(40, 2.2, 'sine', 0.14, 0.15, -15); },
 };
 
@@ -4428,7 +4453,7 @@ let lastT = performance.now();
 let menuOrbit = 0;
 let chimeTimer = 20;
 let birdTimer = 8;
-let miniTimer = 0;
+let miniTimer = 0, ambTimer = 0, ambBirdT = 3;
 
 function tick() {
   requestAnimationFrame(tick);
@@ -4545,6 +4570,30 @@ function tick() {
         camera.updateProjectionMatrix();
       }
     }
+    // 环境音分层（0.5s 节流）：城市底噪 / 近水声 / 公园鸟鸣
+    ambTimer -= dt;
+    if (ambTimer <= 0) {
+      ambTimer = 0.5;
+      const c = G.city;
+      let water = 0, hum = 0;
+      if (!G.paused && c) {
+        hum = 0.013;
+        let dw = 1e9;
+        if (c.kind === 'real' && c.river) dw = distToPolyline(player.x, player.z, c.river.pts).d - c.river.halfW;
+        else if (c.pond) dw = Math.hypot(player.x - c.pond.x, player.z - c.pond.z) - (c.pond.rx + c.pond.rz) / 2;
+        if (dw < 40) water = 0.05 * clamp(1 - dw / 40, 0, 1);
+        const inPark = c.kind === 'real' && c.parks && c.parks.some((pk) => {
+          const nx = (player.x - pk.p[0]) / pk.rx, nz = (player.z - pk.p[1]) / pk.rz;
+          return nx * nx + nz * nz < 1;
+        });
+        if (inPark) {
+          ambBirdT -= 0.5;
+          if (ambBirdT <= 0) { AudioSys.chirp(0.07); ambBirdT = R(2.5, 7); }
+        }
+      }
+      AudioSys.ambient('hum', hum);
+      AudioSys.ambient('water', water);
+    }
     // 罗盘（每帧绘制，跟随转视角平滑滚动）
     drawCompass();
     // 小地图节流（窗口关闭/最小化时不绘制）
@@ -4555,6 +4604,7 @@ function tick() {
       if (bigMapOpen) drawMap($('bigMap').getContext('2d'), $('bigMap').width, true);
     }
   } else if (G.phase === 'end') {
+    AudioSys.ambient('hum', 0); AudioSys.ambient('water', 0);
     menuOrbit += dt * 0.05;
     const oR = (G.city.orbitR || 190) * 0.8, oH = (G.city.orbitH || 110) * 0.8;
     camera.position.set(Math.cos(menuOrbit) * oR, oH, Math.sin(menuOrbit) * oR);
@@ -4759,6 +4809,8 @@ updateHUD();
 tick();
 
 // 调试钩子（仅用于自动化测试/研究地图）
-window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain, rippleInfo: () => ({ n: ripples.length, active: ripples.filter((r) => r.mesh.material.opacity > 0.01).length }) };
+window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain,
+  rippleInfo: () => ({ n: ripples.length, active: ripples.filter((r) => r.mesh.material.opacity > 0.01).length }),
+  ambInfo: () => { const a = AudioSys._amb || {}; const o = {}; for (const k in a) o[k] = +a[k].g.gain.value.toFixed(4); return o; } };
 
 })();
