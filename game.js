@@ -473,6 +473,31 @@ renderer.toneMappingExposure = 1.0;
 glWrap.appendChild(renderer.domElement);
 
 camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, 0.1, 900);
+/* ---- 第一人称手持道具（手电筒 / 望远镜），挂在相机下随视角移动 ---- */
+let heldTorch = null;
+{
+  const held = new THREE.Group();
+  const torch = new THREE.Group();
+  const tBody = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 0.22, 10),
+    new THREE.MeshLambertMaterial({ color: 0x2f3338 }));
+  tBody.rotation.x = Math.PI / 2;
+  torch.add(tBody);
+  const tHead = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.05, 0.06, 10),
+    new THREE.MeshLambertMaterial({ color: 0x43484e }));
+  tHead.rotation.x = Math.PI / 2; tHead.position.z = -0.13;
+  torch.add(tHead);
+  const lens = new THREE.Mesh(new THREE.CircleGeometry(0.045, 12),
+    new THREE.MeshBasicMaterial({ color: 0xfff2c0 }));
+  lens.rotation.y = Math.PI; lens.position.z = -0.162;
+  torch.add(lens);
+  torch.visible = false;
+  held.add(torch);
+  held.scale.setScalar(0.62);
+  held.position.set(0.3, -0.24, -0.68);
+  held.rotation.set(0.08, -0.12, 0);
+  camera.add(held);
+  heldTorch = torch;
+}
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -502,6 +527,7 @@ function makeScene() {
   sunLight.shadow.bias = -0.0006;
   scene.add(sunLight);
   scene.add(sunLight.target);
+  scene.add(camera);   // 相机入场景图，第一人称手持道具（相机子节点）才会渲染
 }
 
 /* 材质缓存 */
@@ -4562,6 +4588,15 @@ function tick() {
         showToast(tr('p_night'), 'gold');
       }
     }
+    // 第一人称手持手电 + 望远镜观测暗角
+    {
+      const fp = !G.view3rd && player.riding === null && !G.droneT;
+      heldTorch.visible = fp && flashlight.visible && !keys['KeyT'];
+      if (heldTorch.visible) {
+        heldTorch.parent.position.y = -0.24 + Math.sin(performance.now() / 280) * 0.006;
+      }
+      $('scopeMask').classList.toggle('hidden', !(camera.fov < 40));
+    }
     // 望远镜（按住 T 变焦）
     {
       const targetFov = keys['KeyT'] && player.riding === null ? 20 : 62;
@@ -4811,6 +4846,7 @@ tick();
 // 调试钩子（仅用于自动化测试/研究地图）
 window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain,
   rippleInfo: () => ({ n: ripples.length, active: ripples.filter((r) => r.mesh.material.opacity > 0.01).length }),
-  ambInfo: () => { const a = AudioSys._amb || {}; const o = {}; for (const k in a) o[k] = +a[k].g.gain.value.toFixed(4); return o; } };
+  ambInfo: () => { const a = AudioSys._amb || {}; const o = {}; for (const k in a) o[k] = +a[k].g.gain.value.toFixed(4); return o; },
+  heldInfo: () => ({ torch: heldTorch.visible, scope: !$('scopeMask').classList.contains('hidden') }) };
 
 })();

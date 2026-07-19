@@ -61,6 +61,8 @@
     background:rgba(13,20,35,.72); border:1px solid rgba(255,255,255,.14); border-radius:9px;
     padding:3px; backdrop-filter:blur(6px); box-shadow:0 2px 10px rgba(0,0,0,.3); }
   #compass { display:block; }
+  #scopeMask { position:absolute; inset:0; pointer-events:none; z-index:6;
+    background: radial-gradient(ellipse 46vh 34vh at 50% 50%, transparent 58%, rgba(4,8,14,.88) 80%, rgba(4,8,14,.97) 100%); }
   .stat { background:rgba(13,20,35,.78); border:1px solid rgba(255,255,255,.12); border-radius:10px;
     padding:8px 14px; font-size:16px; font-weight:700; backdrop-filter:blur(6px); }
   .stat small { display:block; font-size:11px; font-weight:400; color:#9fb0c8; }
@@ -196,6 +198,7 @@
       <canvas id="minimap" width="220" height="220"></canvas>
     </div>
     <div id="compassWrap"><canvas id="compass" width="440" height="34"></canvas></div>
+    <div id="scopeMask" class="hidden"></div>
     <div id="dockTray"></div>
     <div id="cluePanel">
       <header id="panelToggle" class="winBar" style="border-radius:12px 12px 0 0;"><span id="panelTitle">🕵️ 躲藏者线索</span><span><button class="mmBtn" id="cpMin" title="最小化">–</button><button class="mmBtn" id="cpClose" title="关闭">×</button></span></header>
