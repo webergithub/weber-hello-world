@@ -145,7 +145,9 @@ export class WebRTCTransport implements Transport {
     this.ws = ws
     ws.onopen = () => {
       this.retry = 0
-      ws.send(JSON.stringify({ type: 'join', room: this.desired, peerId: this.selfId }))
+      // token 鉴权（G-SEC-1）：服务器设了 SIGNAL_TOKEN 时必须携带一致的 token
+      const token = (import.meta.env.VITE_SIGNAL_TOKEN as string | undefined) ?? ''
+      ws.send(JSON.stringify({ type: 'join', room: this.desired, peerId: this.selfId, token }))
     }
     ws.onmessage = (e) => this.onSignal(JSON.parse(e.data))
     ws.onclose = () => {

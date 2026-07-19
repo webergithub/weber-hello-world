@@ -30,12 +30,33 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 class ConvoyFragment : Fragment() {
     private var map: MapView? = null
     private var myLoc: MyLocationNewOverlay? = null
+    private var health: android.widget.TextView? = null
     private val peerMarkers = HashMap<String, Marker>()
     private val ticker = Handler(Looper.getMainLooper())
     private val broadcastLoop = object : Runnable {
         override fun run() {
             broadcastMyLocation()
+            renderHealth()                   // 上报健康可见（G-DR-1）：随广播节拍刷新
             ticker.postDelayed(this, 3000)   // 节流：每 3 秒广播一次
+        }
+    }
+
+    // 位置共享链路健康（G-DR-1）：蓝牙关/无邻居时如实告知，不让用户以为同伴能看到自己
+    private fun renderHealth() {
+        val ctx = context ?: return
+        val tv = health ?: return
+        val adapter = (ctx.getSystemService(android.content.Context.BLUETOOTH_SERVICE)
+            as? android.bluetooth.BluetoothManager)?.adapter
+        when {
+            adapter == null || !adapter.isEnabled -> {
+                tv.visibility = View.VISIBLE
+                tv.text = "⚠️ 蓝牙已关闭，位置无法共享给同伴"
+            }
+            MeshBus.peerCount == 0 -> {
+                tv.visibility = View.VISIBLE
+                tv.text = "附近无蓝牙邻居，同伴暂看不到你的位置"
+            }
+            else -> tv.visibility = View.GONE
         }
     }
 
@@ -65,6 +86,14 @@ class ConvoyFragment : Fragment() {
         val here = Button(ctx).apply { text = "定位"; setOnClickListener { recenter() } }
         bar.addView(road, rowLp()); bar.addView(sat, rowLp()); bar.addView(here, rowLp())
         root.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        health = android.widget.TextView(ctx).apply {
+            textSize = 13f
+            setTextColor(0xFFB45309.toInt())
+            setPadding(dp(8), 0, dp(8), dp(4))
+            visibility = View.GONE
+        }
+        root.addView(health, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         val m = MapView(ctx)
         m.setTileSource(TileSourceFactory.MAPNIK)

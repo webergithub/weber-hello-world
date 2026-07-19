@@ -145,5 +145,62 @@ console.log('[6] 协议常量防漂移（夹具 vs BleMesh.swift vs BleMesh.kt�
     grab(swift, /MAX_TTL = (\d+)/) === MAX_TTL && grab(kotlin, /MAX_TTL = (\d+)/) === MAX_TTL)
 }
 
+// ---------- 7. 信令服务器鉴权与限流（G-SEC-1，破坏性：错 token 必须被拒） ----------
+console.log('[7] 信令服务器（真实进程 + 真实 ws 客户端）')
+{
+  const { spawn } = await import('node:child_process')
+  const { WebSocket } = await import('ws')
+  const PORT = 18787
+  const TOKEN = 'test-secret'
+  const srv = spawn('node', [join(ROOT, 'server/signaling.js')], {
+    env: { ...process.env, PORT: String(PORT), SIGNAL_TOKEN: TOKEN },
+    stdio: 'pipe',
+  })
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('server start timeout')), 5000)
+    srv.stdout.on('data', (d) => { if (String(d).includes('已启动')) { clearTimeout(t); res() } })
+  })
+
+  const connect = () => new Promise((res, rej) => {
+    const c = new WebSocket(`ws://127.0.0.1:${PORT}`)
+    c.on('open', () => res(c)); c.on('error', rej)
+  })
+  const nextEvent = (c, ms = 2000) => new Promise((res) => {
+    const t = setTimeout(() => res({ kind: 'timeout' }), ms)
+    c.once('message', (d) => { clearTimeout(t); res({ kind: 'message', data: JSON.parse(String(d)) }) })
+    c.once('close', (code) => { clearTimeout(t); res({ kind: 'close', code }) })
+  })
+
+  // 错 token → 4003 拒绝
+  const bad = await connect()
+  bad.send(JSON.stringify({ type: 'join', room: 'r1', peerId: 'p-bad', token: 'wrong' }))
+  const badRes = await nextEvent(bad)
+  check('错 token 被断开（4003），拿不到房间名单', badRes.kind === 'close' && badRes.code === 4003, JSON.stringify(badRes))
+
+  // 对 token → 收到 peers 名单
+  const good = await connect()
+  good.send(JSON.stringify({ type: 'join', room: 'r1', peerId: 'p-good', token: TOKEN }))
+  const goodRes = await nextEvent(good)
+  check('正确 token 入房，收到 peers 名单', goodRes.kind === 'message' && goodRes.data.type === 'peers')
+
+  // 未 join 的连接不允许转发（不携带 token 直接发 signal）
+  const sneak = await connect()
+  sneak.send(JSON.stringify({ type: 'signal', to: 'p-good', from: 'x', data: 'evil' }))
+  const sneakRes = await nextEvent(good, 1200)
+  check('未鉴权连接的 signal 不被转发', sneakRes.kind === 'timeout', JSON.stringify(sneakRes))
+
+  // 限流：狂发 100 条 → 4008 断开
+  const flood = await connect()
+  flood.send(JSON.stringify({ type: 'join', room: 'r2', peerId: 'p-flood', token: TOKEN }))
+  await nextEvent(flood)
+  const floodClosed = new Promise((res) => flood.once('close', (code) => res(code)))
+  for (let i = 0; i < 100; i++) flood.send(JSON.stringify({ type: 'signal', to: 'nobody', from: 'p-flood', data: i }))
+  const floodCode = await Promise.race([floodClosed, new Promise((r) => setTimeout(() => r(0), 3000))])
+  check('100 条/瞬时 触发限流断开（4008）', floodCode === 4008, `code=${floodCode}`)
+
+  for (const c of [bad, good, sneak, flood]) { try { c.close() } catch {} }
+  srv.kill()
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)
