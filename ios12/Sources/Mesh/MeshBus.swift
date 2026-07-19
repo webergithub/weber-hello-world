@@ -8,6 +8,7 @@ final class MeshBus: BleMeshDelegate {
 
     static let kindChat: UInt8 = 1
     static let kindLoc: UInt8 = 2
+    static let kindVoice: UInt8 = 3   // 短语音（G-CM-1）：[u16 jsonLen][json{mid,n,d,ts}][m4a 字节]
 
     private let mesh = BleMesh()
     private var started = false
@@ -15,7 +16,9 @@ final class MeshBus: BleMeshDelegate {
     // 避免向单例累积闭包造成旧 VC 泄漏与消息重复处理（与 Android MeshBus.kt 行为一致）。
     private var handlers: [UInt8: (Data) -> Void] = [:]
     private var peerHandlers: [String: (Int) -> Void] = [:]
+    private var stateHandlers: [String: (Bool) -> Void] = [:]
     private(set) var peerCount = 0
+    private(set) var btAvailable = true
 
     private init() { mesh.delegate = self }
 
@@ -26,11 +29,13 @@ final class MeshBus: BleMeshDelegate {
     }
 
     func send(_ kind: UInt8, _ payload: Data) {
-        // 帧：[kind][teamLen][team...][payload...]，收端按 team 过滤实现"分队伍房间"
+        // 帧：[kind][teamLen][team...][密文...]，收端按 team 过滤实现"分队伍房间"
+        // 端到端加密（G-CM-3）：信封 team 明文分房，业务负载全密文
+        let sealed = MeshCrypto.encrypt(team: Identity.team, payload)
         let team = Array(Identity.team.utf8.prefix(32))
         var d = Data([kind, UInt8(team.count)])
         d.append(contentsOf: team)
-        d.append(payload)
+        d.append(sealed)
         mesh.send(d)
     }
 
@@ -45,6 +50,12 @@ final class MeshBus: BleMeshDelegate {
         handler(peerCount)
     }
 
+    // 蓝牙可用性观察（PR-P1-1，立即回调一次当前值）；同 tag 顶替
+    func onState(_ tag: String = "default", _ handler: @escaping (Bool) -> Void) {
+        stateHandlers[tag] = handler
+        handler(btAvailable)
+    }
+
     // MARK: - BleMeshDelegate（主线程）
     func bleMesh(_ mesh: BleMesh, didReceive payload: Data) {
         // 解析 [kind][teamLen][team][body] 并按当前队伍码过滤
@@ -55,12 +66,19 @@ final class MeshBus: BleMeshDelegate {
         guard payload.count >= 2 + tlen else { return }
         let team = String(bytes: bytes[2..<(2 + tlen)], encoding: .utf8) ?? ""
         if team != Identity.team { return }
-        let body = payload.subdata(in: (2 + tlen)..<payload.count)
+        let sealed = payload.subdata(in: (2 + tlen)..<payload.count)
+        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃
+        guard let body = MeshCrypto.decrypt(team: team, sealed) else { return }
         handlers[kind]?(body)
     }
 
     func bleMeshDidUpdatePeers(_ count: Int) {
         peerCount = count
         peerHandlers.values.forEach { $0(count) }
+    }
+
+    func bleMeshDidUpdateState(_ available: Bool) {
+        btAvailable = available
+        stateHandlers.values.forEach { $0(available) }
     }
 }

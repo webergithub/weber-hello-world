@@ -20,6 +20,37 @@ class LedgerFragment : Fragment() {
     private lateinit var store: LedgerStore
     private lateinit var content: TextView
 
+    // 小票 OCR（G-LG-3）：选一张小票照片 → ML Kit 离线识别 → 取最大金额填入
+    private var ocrTarget: EditText? = null
+    private val pickReceipt =
+        registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+            val target = ocrTarget ?: return@registerForActivityResult
+            if (uri == null) return@registerForActivityResult
+            try {
+                val ctx = requireContext()
+                val image = com.google.mlkit.vision.common.InputImage.fromFilePath(ctx, uri)
+                com.google.mlkit.vision.text.TextRecognition.getClient(
+                    com.google.mlkit.vision.text.latin.TextRecognizerOptions.DEFAULT_OPTIONS
+                ).process(image)
+                    .addOnSuccessListener { result ->
+                        val amt = parseAmount(result.text)
+                        if (amt != null) { target.setText(amt); target.setSelection(target.text.length) }
+                        else android.widget.Toast.makeText(ctx, "没识别到金额，请手输", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+                    .addOnFailureListener {
+                        android.widget.Toast.makeText(ctx, "识别失败，请手输", android.widget.Toast.LENGTH_SHORT).show()
+                    }
+            } catch (_: Exception) {}
+        }
+
+    // 从识别文本中取最大的金额样式数字（与 iOS ReceiptOCR 同思路：合计通常是最大值）
+    private fun parseAmount(text: String): String? {
+        val re = Regex("""\d{1,6}(?:\.\d{1,2})?""")
+        val v = re.findAll(text).map { it.value.toDoubleOrNull() ?: 0.0 }
+            .filter { it in 0.01..999999.0 }.maxOrNull() ?: return null
+        return if (v % 1.0 == 0.0) v.toInt().toString() else String.format("%.2f", v)
+    }
+
     override fun onCreateView(inflater: LayoutInflater, parent: ViewGroup?, s: Bundle?): View {
         val ctx = requireContext()
         store = LedgerStore(ctx)
@@ -33,6 +64,7 @@ class LedgerFragment : Fragment() {
         val btnRow = LinearLayout(ctx).apply { orientation = LinearLayout.HORIZONTAL; setPadding(0, dp(12), 0, 0) }
         btnRow.addView(Button(ctx).apply { text = "＋ 成员"; setOnClickListener { promptAddMember() } }, rowLp())
         btnRow.addView(Button(ctx).apply { text = "记一笔"; setOnClickListener { promptAddExpense() } }, rowLp())
+        btnRow.addView(Button(ctx).apply { text = "备份"; setOnClickListener { promptBackup() } }, rowLp())
         root.addView(btnRow)
 
         content = TextView(ctx).apply { textSize = 15f; setPadding(0, dp(16), 0, 0); setLineSpacing(dp(4).toFloat(), 1f) }
@@ -40,6 +72,45 @@ class LedgerFragment : Fragment() {
 
         render()
         return root
+    }
+
+    // 备份：导出（系统分享，存文件/发微信均可）/ 导入（粘贴 JSON 整体还原）
+    private fun promptBackup() {
+        AlertDialog.Builder(requireContext())
+            .setTitle("账本备份")
+            .setItems(arrayOf("导出（分享 JSON）", "导入（粘贴 JSON 还原）")) { _, which ->
+                if (which == 0) exportLedger() else promptImport()
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun exportLedger() {
+        val send = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+            type = "application/json"
+            putExtra(android.content.Intent.EXTRA_SUBJECT, "TrailMate 账本备份")
+            putExtra(android.content.Intent.EXTRA_TEXT, store.exportJson())
+        }
+        startActivity(android.content.Intent.createChooser(send, "导出账本"))
+    }
+
+    private fun promptImport() {
+        val input = EditText(requireContext()).apply {
+            hint = "粘贴之前导出的 JSON"
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            minLines = 4
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle("导入账本（将整体替换当前账本）").setView(input)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("导入") { _, _ ->
+                val ok = store.importJson(input.text.toString())
+                if (ok) render()
+                else AlertDialog.Builder(requireContext()).setTitle("导入失败")
+                    .setMessage("JSON 格式不对或内容缺字段，当前账本未改动。")
+                    .setPositiveButton("好", null).show()
+            }.show()
     }
 
     private fun promptAddMember() {
@@ -65,6 +136,10 @@ class LedgerFragment : Fragment() {
         val titleInput = EditText(ctx).apply { hint = "项目（如 午餐 / 油费）" }
         val amtInput = EditText(ctx).apply { hint = "金额（元）"; inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_FLAG_DECIMAL }
         box.addView(titleInput); box.addView(amtInput)
+        box.addView(Button(ctx).apply {
+            text = "📷 选小票照片识别金额"
+            setOnClickListener { ocrTarget = amtInput; pickReceipt.launch("image/*") }
+        })
         AlertDialog.Builder(ctx).setTitle("记一笔（全体平均分摊）").setView(box)
             .setNegativeButton("取消", null)
             .setPositiveButton("下一步：选付款人") { _, _ ->

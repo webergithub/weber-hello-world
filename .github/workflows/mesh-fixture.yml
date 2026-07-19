@@ -7,6 +7,7 @@ on:
     paths:
       - 'tests/**'
       - 'src/**'
+      - 'server/**'
       - 'ios12/Sources/Camp/BleMesh.swift'
       - 'ios12/Sources/Mesh/**'
       - 'android-native/app/src/main/java/cc/trailmate/app/BleMesh.kt'

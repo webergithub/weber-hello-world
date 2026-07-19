@@ -144,6 +144,22 @@ final class LedgerStore {
         members.first { $0.id == id }?.name ?? "?"
     }
 
+    // 备份（G-LG-1）：导出完整账本 JSON；导入整体替换（格式不合法不改动现数据）
+    func exportJson() -> String? {
+        let payload = Persisted(members: members, expenses: expenses)
+        guard let data = try? JSONEncoder().encode(payload) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    func importJson(_ s: String) -> Bool {
+        guard let data = s.trimmingCharacters(in: .whitespacesAndNewlines).data(using: .utf8),
+              let payload = try? JSONDecoder().decode(Persisted.self, from: data) else { return false }
+        members = payload.members
+        expenses = payload.expenses
+        save()
+        return true
+    }
+
     private func save() {
         let payload = Persisted(members: members, expenses: expenses)
         if let data = try? JSONEncoder().encode(payload) {

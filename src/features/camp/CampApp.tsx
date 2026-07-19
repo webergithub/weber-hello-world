@@ -72,7 +72,7 @@ export function CampApp() {
           <h3>开启离线互联</h3>
           <p className="small muted">
             营地常常没有移动网络。授权后，App 将按 <strong>蓝牙 → WiFi直连 → 移动网络</strong> 的优先级
-            尝试与附近的同伴自动组网，实现无信号下的文字、语音、视频互通。
+            尝试与附近的同伴自动组网：无信号下互通文字与短语音（≤10 秒）；视频仅在有网络（WebRTC）时可用。
           </p>
           <ul className="small muted" style={{ paddingLeft: 18 }}>
             <li>需要授权蓝牙与本地网络权限</li>
@@ -91,7 +91,7 @@ export function CampApp() {
     <div className="camp-screen" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <h1>营地群聊 · {activeGroup.name}</h1>
-        <p>已开启自组网 · 文字 / 语音 / 视频 · 变声可选</p>
+        <p>已开启自组网 · 文字 / 短语音（无网可用）· 视频（需在线）· 变声可选</p>
         <MeshStatus />
       </div>
 

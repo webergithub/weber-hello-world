@@ -9,6 +9,8 @@ import CoreBluetooth
 protocol BleMeshDelegate: AnyObject {
     func bleMesh(_ mesh: BleMesh, didReceive payload: Data)
     func bleMeshDidUpdatePeers(_ count: Int)
+    // 链路健康（PR-P1-1）：蓝牙可用性变化（关闭/未授权 → false）
+    func bleMeshDidUpdateState(_ available: Bool)
 }
 
 final class BleMesh: NSObject {
@@ -176,6 +178,11 @@ final class BleMesh: NSObject {
 // MARK: - CBCentralManagerDelegate
 extension BleMesh: CBCentralManagerDelegate {
     func centralManagerDidUpdateState(_ cm: CBCentralManager) {
+        let available = cm.state == .poweredOn
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.delegate?.bleMeshDidUpdateState(available)
+        }
         if running { startCentralIfReady() }
     }
     func centralManager(_ cm: CBCentralManager, didDiscover peripheral: CBPeripheral,

@@ -38,4 +38,6 @@ dependencies {
     // 队伍二维码：生成用 zxing core（QRCodeWriter），扫码用 journeyapps 内嵌扫描器
     implementation 'com.google.zxing:core:3.5.3'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    // 小票 OCR：ML Kit 文字识别（模型内置离线可用，无需 Google 服务；数字金额用拉丁模型足够）
+    implementation 'com.google.mlkit:text-recognition:16.0.1'
 }

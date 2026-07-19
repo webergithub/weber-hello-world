@@ -21,7 +21,10 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
         table.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
         view.addSubview(table)
 
-        navigationItem.leftBarButtonItem = UIBarButtonItem(title: "＋成员", style: .plain, target: self, action: #selector(addMember))
+        navigationItem.leftBarButtonItems = [
+            UIBarButtonItem(title: "＋成员", style: .plain, target: self, action: #selector(addMember)),
+            UIBarButtonItem(title: "备份", style: .plain, target: self, action: #selector(backupMenu)),
+        ]
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(title: "记一笔", style: .done, target: self, action: #selector(addExpense)),
             UIBarButtonItem(title: "📷小票", style: .plain, target: self, action: #selector(scanReceipt)),
@@ -64,6 +67,47 @@ final class LedgerViewController: UIViewController, UITableViewDataSource, UITab
     private func reload() { table.reloadData() }
 
     // MARK: - 操作
+    // 备份（G-LG-1）：导出（系统分享）/ 导入（粘贴 JSON 整体还原）
+    @objc private func backupMenu() {
+        let sheet = UIAlertController(title: "账本备份", message: nil, preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "导出（分享 JSON）", style: .default) { [weak self] _ in
+            guard let self = self, let json = self.store.exportJson() else { return }
+            let share = UIActivityViewController(activityItems: [json], applicationActivities: nil)
+            if let pop = share.popoverPresentationController {
+                pop.barButtonItem = self.navigationItem.leftBarButtonItems?.last
+            }
+            self.present(share, animated: true)
+        })
+        sheet.addAction(UIAlertAction(title: "导入（粘贴 JSON 还原）", style: .default) { [weak self] _ in
+            self?.promptImport()
+        })
+        sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+        if let pop = sheet.popoverPresentationController {
+            pop.barButtonItem = navigationItem.leftBarButtonItems?.last
+        }
+        present(sheet, animated: true)
+    }
+
+    private func promptImport() {
+        let a = UIAlertController(title: "导入账本",
+                                  message: "粘贴之前导出的 JSON，将整体替换当前账本",
+                                  preferredStyle: .alert)
+        a.addTextField { $0.placeholder = "在此粘贴 JSON" }
+        a.addAction(UIAlertAction(title: "取消", style: .cancel))
+        a.addAction(UIAlertAction(title: "导入", style: .default) { [weak self] _ in
+            guard let self = self else { return }
+            let ok = self.store.importJson(a.textFields?.first?.text ?? "")
+            if ok { self.reload() } else {
+                let err = UIAlertController(title: "导入失败",
+                                            message: "JSON 格式不对或内容缺字段，当前账本未改动。",
+                                            preferredStyle: .alert)
+                err.addAction(UIAlertAction(title: "好", style: .default))
+                self.present(err, animated: true)
+            }
+        })
+        present(a, animated: true)
+    }
+
     @objc private func addMember() {
         let a = UIAlertController(title: "添加成员", message: "同行的家庭/个人", preferredStyle: .alert)
         a.addTextField { $0.placeholder = "昵称"; $0.autocapitalizationType = .none }

@@ -103,6 +103,30 @@ console.log('[5] 记账结算：web 真实 split.ts 与原生算法逐人一致 
   check('最优转账恰 3 笔且全部汇向阿强、合计 26500', ts.length === 3 && toQiang === 26500, JSON.stringify(ts))
 }
 
+// ---------- 5b. 备份往返（G-LG-1：导出→导入完整还原；坏文件拒绝） ----------
+console.log('[5b] 备份导出/导入（web 真实 backup.ts）')
+{
+  const { execSync } = await import('node:child_process')
+  const bundle = join(ROOT, 'tests/mesh-fixture/.backup.bundle.mjs')
+  execSync(`${join(ROOT, 'node_modules/.bin/esbuild')} ${join(ROOT, 'src/lib/backup.ts')} --bundle --format=esm --outfile=${bundle}`, { stdio: 'pipe' })
+  const { exportState, importState } = await import(bundle)
+
+  const state = {
+    groups: [{
+      id: 'g1', name: '五一露营', code: 'K7Q9ZP', createdAt: 1, myMemberId: 'm1',
+      members: [{ id: 'm1', nickname: '我', isMe: true }, { id: 'm2', nickname: '小明' }],
+      expenses: [{ id: 'e1', title: '过路费', payerId: 'm1', amountCents: 24000, participantIds: ['m1', 'm2'], mode: 'equal', ts: 2 }],
+    }],
+    activeGroupId: 'g1',
+  }
+  const roundtrip = importState(exportState(state, 123))
+  check('导出→导入 深度相等（群组/成员/账目完整还原）', JSON.stringify(roundtrip) === JSON.stringify(state))
+  check('非 JSON 拒绝', importState('not json{{{') === null)
+  check('缺 magic 拒绝', importState(JSON.stringify({ version: 1, state })) === null)
+  check('activeGroupId 失效时回退到首个群组',
+    importState(exportState({ ...state, activeGroupId: 'gone' }, 1))?.activeGroupId === 'g1')
+}
+
 // ---------- 6. 协议常量防漂移（对 Swift/Kotlin 源码 grep 比对） ----------
 console.log('[6] 协议常量防漂移（夹具 vs BleMesh.swift vs BleMesh.kt）')
 {
@@ -119,6 +143,123 @@ console.log('[6] 协议常量防漂移（夹具 vs BleMesh.swift vs BleMesh.kt�
     grab(swift, /PAYLOAD = (\d+)/) === PAYLOAD && grab(kotlin, /PAYLOAD = (\d+)/) === PAYLOAD)
   check(`MAX_TTL=${MAX_TTL} 与两端一致`,
     grab(swift, /MAX_TTL = (\d+)/) === MAX_TTL && grab(kotlin, /MAX_TTL = (\d+)/) === MAX_TTL)
+}
+
+// ---------- 7. 信令服务器鉴权与限流（G-SEC-1，破坏性：错 token 必须被拒） ----------
+console.log('[7] 信令服务器（真实进程 + 真实 ws 客户端）')
+{
+  const { spawn } = await import('node:child_process')
+  const { WebSocket } = await import('ws')
+  const PORT = 18787
+  const TOKEN = 'test-secret'
+  const srv = spawn('node', [join(ROOT, 'server/signaling.js')], {
+    env: { ...process.env, PORT: String(PORT), SIGNAL_TOKEN: TOKEN },
+    stdio: 'pipe',
+  })
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('server start timeout')), 5000)
+    srv.stdout.on('data', (d) => { if (String(d).includes('已启动')) { clearTimeout(t); res() } })
+  })
+
+  const connect = () => new Promise((res, rej) => {
+    const c = new WebSocket(`ws://127.0.0.1:${PORT}`)
+    c.on('open', () => res(c)); c.on('error', rej)
+  })
+  const nextEvent = (c, ms = 2000) => new Promise((res) => {
+    const t = setTimeout(() => res({ kind: 'timeout' }), ms)
+    c.once('message', (d) => { clearTimeout(t); res({ kind: 'message', data: JSON.parse(String(d)) }) })
+    c.once('close', (code) => { clearTimeout(t); res({ kind: 'close', code }) })
+  })
+
+  // 错 token → 4003 拒绝
+  const bad = await connect()
+  bad.send(JSON.stringify({ type: 'join', room: 'r1', peerId: 'p-bad', token: 'wrong' }))
+  const badRes = await nextEvent(bad)
+  check('错 token 被断开（4003），拿不到房间名单', badRes.kind === 'close' && badRes.code === 4003, JSON.stringify(badRes))
+
+  // 对 token → 收到 peers 名单
+  const good = await connect()
+  good.send(JSON.stringify({ type: 'join', room: 'r1', peerId: 'p-good', token: TOKEN }))
+  const goodRes = await nextEvent(good)
+  check('正确 token 入房，收到 peers 名单', goodRes.kind === 'message' && goodRes.data.type === 'peers')
+
+  // 未 join 的连接不允许转发（不携带 token 直接发 signal）
+  const sneak = await connect()
+  sneak.send(JSON.stringify({ type: 'signal', to: 'p-good', from: 'x', data: 'evil' }))
+  const sneakRes = await nextEvent(good, 1200)
+  check('未鉴权连接的 signal 不被转发', sneakRes.kind === 'timeout', JSON.stringify(sneakRes))
+
+  // 限流：狂发 100 条 → 4008 断开
+  const flood = await connect()
+  flood.send(JSON.stringify({ type: 'join', room: 'r2', peerId: 'p-flood', token: TOKEN }))
+  await nextEvent(flood)
+  const floodClosed = new Promise((res) => flood.once('close', (code) => res(code)))
+  for (let i = 0; i < 100; i++) flood.send(JSON.stringify({ type: 'signal', to: 'nobody', from: 'p-flood', data: i }))
+  const floodCode = await Promise.race([floodClosed, new Promise((r) => setTimeout(() => r(0), 3000))])
+  check('100 条/瞬时 触发限流断开（4008）', floodCode === 4008, `code=${floodCode}`)
+
+  for (const c of [bad, good, sneak, flood]) { try { c.close() } catch {} }
+  srv.kill()
+}
+
+// ---------- 8. 端到端加密（G-CM-3：往返/错队伍拒/篡改拒/固定向量锁管线） ----------
+console.log('[8] MeshCrypto 端到端加密')
+{
+  const mc = await import('./meshcrypto.mjs')
+  const plain = Buffer.from(JSON.stringify({ mid: 'm1', n: '我', t: '3号位集合', ts: 0 }), 'utf8')
+
+  const blob = mc.encrypt('K7Q9ZP', plain)
+  check('往返：同队伍解密还原', mc.decrypt('K7Q9ZP', blob)?.equals(plain) === true)
+  check('错队伍码解密失败（返回 null）', mc.decrypt('public', blob) === null)
+  const tampered = Buffer.from(blob); tampered[20] ^= 0xff
+  check('密文被篡改 1 字节即拒（MAC 不过）', mc.decrypt('K7Q9ZP', tampered) === null)
+  const badVer = Buffer.from(blob); badVer[0] = 9
+  check('版本字节不符即拒', mc.decrypt('K7Q9ZP', badVer) === null)
+  check('旧版明文 JSON 直接喂入即拒', mc.decrypt('K7Q9ZP', plain) === null)
+  const chat100 = mc.encrypt('K7Q9ZP', Buffer.alloc(100, 65))
+  check('100B 聊天加密后 ≤180B 仍单片', chat100.length === 1 + 16 + 112 + 16 && chat100.length <= 180, `len=${chat100.length}`)
+
+  // 固定向量：锁死 PBKDF2(10000,盐)+AES-256-CBC+HMAC 截断的整条管线；
+  // 同一向量写在 iOS/Android 实现注释中，真机可手工比对
+  const iv = Buffer.from(Array.from({ length: 16 }, (_, i) => i))
+  const vec = mc.encryptWithIv('K7Q9ZP', Buffer.from('hello camp', 'utf8'), iv)
+  check('跨平台固定向量一致',
+    vec.toString('hex') === '01000102030405060708090a0b0c0d0e0f93b370e0c48f2abe2f1bb1cdd2b5bf23592198c85af6ed3ae0adbe52a60157e6',
+    vec.toString('hex'))
+
+  // 常量防漂移：三端盐/轮数/版本/MAC 长度一致
+  const swiftSrc = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshCrypto.swift'), 'utf8')
+  const ktSrc = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshCrypto.kt'), 'utf8')
+  check('盐 trailmate-mesh-v1 三端一致', swiftSrc.includes('trailmate-mesh-v1') && ktSrc.includes('trailmate-mesh-v1'))
+  check('迭代 10000 三端一致', /10000/.test(swiftSrc) && /10000/.test(ktSrc) && mc.ITER === 10000)
+  check('MAC 截断 16 三端一致', /MAC_LEN = 16/.test(swiftSrc) && /MAC_LEN = 16/.test(ktSrc) && mc.MAC_LEN === 16)
+}
+
+// ---------- 9. 短语音（G-CM-1：载荷格式往返 + 9KB 大载荷过 mesh + 常量防漂移） ----------
+console.log('[9] 营地短语音')
+{
+  // 载荷格式 [u16 jsonLen][json][m4a]，与 CampFragment.kt / CampViewController.swift 一致
+  const meta = Buffer.from(JSON.stringify({ mid: 'v1', n: '我', d: 3.2, ts: 0 }), 'utf8')
+  const m4a = Buffer.alloc(9000, 0xAB)   // ≈3s AAC@24kbps
+  const payload = Buffer.concat([Buffer.from([(meta.length >> 8) & 0xff, meta.length & 0xff]), meta, m4a])
+  const jlen = (payload[0] << 8) | payload[1]
+  const parsedMeta = JSON.parse(payload.subarray(2, 2 + jlen).toString('utf8'))
+  const parsedBin = payload.subarray(2 + jlen)
+  check('语音载荷 [u16][json][m4a] 往返解析', parsedMeta.mid === 'v1' && parsedMeta.d === 3.2 && parsedBin.equals(m4a))
+
+  // 9KB 载荷经 BLE 分片泛洪仍完整送达（约 51 片）
+  const radio = new Radio()
+  const a = new SimNode('A'), b = new SimNode('B'), c = new SimNode('C')
+  ;[a, b, c].forEach(n => radio.add(n))
+  radio.link('A', 'B'); radio.link('B', 'C')   // C 只能经 B 中继
+  a.send(payload)
+  check(`9KB 语音拆 ${Math.ceil(payload.length / PAYLOAD)} 片，B 直收完整`, b.delivered.length === 1 && b.delivered[0].equals(payload))
+  check('C 经中继收到完整语音', c.delivered.length === 1 && c.delivered[0].equals(payload))
+
+  // kindVoice=3 三端一致
+  const swiftBus = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshBus.swift'), 'utf8')
+  const ktBus = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshBus.kt'), 'utf8')
+  check('kindVoice=3 双端一致', /kindVoice: UInt8 = 3/.test(swiftBus) && /KIND_VOICE: Byte = 3/.test(ktBus))
 }
 
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)

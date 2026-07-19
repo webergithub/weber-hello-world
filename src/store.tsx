@@ -25,6 +25,7 @@ type Action =
   | { type: 'deleteGroup'; groupId: string }
   | { type: 'addMember'; groupId: string; nickname: string }
   | { type: 'renameMe'; groupId: string; nickname: string }
+  | { type: 'importState'; state: AppState }
   | { type: 'addExpense'; groupId: string; expense: Expense }
   | { type: 'updateExpense'; groupId: string; expense: Expense }
   | { type: 'deleteExpense'; groupId: string; expenseId: string }
@@ -60,6 +61,9 @@ function reducer(state: AppState, action: Action): AppState {
     }
     case 'setActive':
       return { ...state, activeGroupId: action.groupId }
+    case 'importState':
+      // 备份导入：整体替换（backup.ts 已校验合法性）
+      return action.state
     case 'renameGroup':
       return mapGroup(state, action.groupId, (g) => ({ ...g, name: action.name }))
     case 'deleteGroup': {

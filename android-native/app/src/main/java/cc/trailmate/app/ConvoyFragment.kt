@@ -30,12 +30,55 @@ import org.osmdroid.views.overlay.mylocation.MyLocationNewOverlay
 class ConvoyFragment : Fragment() {
     private var map: MapView? = null
     private var myLoc: MyLocationNewOverlay? = null
+    private var health: android.widget.TextView? = null
     private val peerMarkers = HashMap<String, Marker>()
+    private val peerLastSeen = HashMap<String, Long>()   // 在线态（G-DR-2）
     private val ticker = Handler(Looper.getMainLooper())
     private val broadcastLoop = object : Runnable {
         override fun run() {
             broadcastMyLocation()
+            renderHealth()                   // 上报健康可见（G-DR-1）：随广播节拍刷新
+            agePeers()                       // 在线态（G-DR-2）：15s 未更新变淡，60s 移除
             ticker.postDelayed(this, 3000)   // 节流：每 3 秒广播一次
+        }
+    }
+
+    // 同伴在线态（G-DR-2）：位置每 3s 一报，15s 没消息=可能掉线（半透明），60s=移除
+    private fun agePeers() {
+        val m = map ?: return
+        val now = System.currentTimeMillis()
+        val gone = ArrayList<String>()
+        peerMarkers.forEach { (id, marker) ->
+            val age = now - (peerLastSeen[id] ?: 0L)
+            when {
+                age > 60_000 -> gone.add(id)
+                age > 15_000 -> marker.alpha = 0.45f
+                else -> marker.alpha = 1f
+            }
+        }
+        gone.forEach { id ->
+            peerMarkers.remove(id)?.let { m.overlays.remove(it) }
+            peerLastSeen.remove(id)
+        }
+        if (gone.isNotEmpty()) m.invalidate()
+    }
+
+    // 位置共享链路健康（G-DR-1）：蓝牙关/无邻居时如实告知，不让用户以为同伴能看到自己
+    private fun renderHealth() {
+        val ctx = context ?: return
+        val tv = health ?: return
+        val adapter = (ctx.getSystemService(android.content.Context.BLUETOOTH_SERVICE)
+            as? android.bluetooth.BluetoothManager)?.adapter
+        when {
+            adapter == null || !adapter.isEnabled -> {
+                tv.visibility = View.VISIBLE
+                tv.text = "⚠️ 蓝牙已关闭，位置无法共享给同伴"
+            }
+            MeshBus.peerCount == 0 -> {
+                tv.visibility = View.VISIBLE
+                tv.text = "附近无蓝牙邻居，同伴暂看不到你的位置"
+            }
+            else -> tv.visibility = View.GONE
         }
     }
 
@@ -65,6 +108,14 @@ class ConvoyFragment : Fragment() {
         val here = Button(ctx).apply { text = "定位"; setOnClickListener { recenter() } }
         bar.addView(road, rowLp()); bar.addView(sat, rowLp()); bar.addView(here, rowLp())
         root.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
+
+        health = android.widget.TextView(ctx).apply {
+            textSize = 13f
+            setTextColor(0xFFB45309.toInt())
+            setPadding(dp(8), 0, dp(8), dp(4))
+            visibility = View.GONE
+        }
+        root.addView(health, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         val m = MapView(ctx)
         m.setTileSource(TileSourceFactory.MAPNIK)
@@ -121,6 +172,8 @@ class ConvoyFragment : Fragment() {
             }
             marker.position = point
             marker.title = o.optString("n", "同伴")
+            marker.alpha = 1f
+            peerLastSeen[id] = System.currentTimeMillis()
             m.invalidate()
         } catch (_: Exception) {}
     }
