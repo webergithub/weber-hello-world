@@ -511,6 +511,7 @@ addEventListener('resize', () => {
 });
 
 let flashlight = null, hemiLight = null, nightHinted = false;
+let lampLights = [], lampTimer = 0;
 function makeScene() {
   scene = new THREE.Scene();
   const sky = 0xa9d7ef;
@@ -534,6 +535,12 @@ function makeScene() {
   scene.add(sunLight);
   scene.add(sunLight.target);
   scene.add(camera);   // 相机入场景图，第一人称手持道具（相机子节点）才会渲染
+  lampLights = [];
+  for (let i = 0; i < 5; i++) {
+    const pl = new THREE.PointLight(0xffdf9e, 0, 26, 1.6);
+    scene.add(pl);
+    lampLights.push(pl);
+  }
 }
 
 /* 材质缓存 */
@@ -1002,6 +1009,19 @@ function buildInstancedProps(city, g, treePlace, benchPlace, lampPlace, bushPlac
     const heads = new THREE.InstancedMesh(new THREE.SphereGeometry(0.32, 8, 6), new THREE.MeshBasicMaterial({ color: 0xfff1c4 }), lampPlace.length);
     lampPlace.forEach((l, idx) => { compose(poles, idx, l.x, 2.7, l.z); compose(heads, idx, l.x, 5.5, l.z); });
     g.add(poles); g.add(heads);
+    // 夜间地面光晕（白天透明，入夜由昼夜循环渐显）
+    const glows = new THREE.InstancedMesh(new THREE.CircleGeometry(3.4, 14),
+      new THREE.MeshBasicMaterial({ color: 0xffe2a8, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false }), lampPlace.length);
+    const gm = new THREE.Matrix4();
+    lampPlace.forEach((l, idx) => {
+      gm.makeRotationX(-Math.PI / 2);
+      gm.setPosition(l.x, 0.06, l.z);
+      glows.setMatrixAt(idx, gm);
+    });
+    g.add(glows);
+    city.lampGlowMat = glows.material;
+    city.lamps = city.lamps || [];
+    lampPlace.forEach((l) => city.lamps.push({ x: l.x, z: l.z }));
   }
   // 灌木
   if (bushPlace.length) {
@@ -1555,6 +1575,18 @@ function genRealCity(cityKey) {
     if (i % 2 === 0) city.spots.push({ x: spX, z: spZ, prop: 'indoor', label: tSpot('indoor') });
     city.shops.push({ x: sx, z: sz });
   }
+
+  /* ---- 沿街路灯（约 38m 一盏，左右交替） ---- */
+  const lampPlace = [];
+  D.streets.forEach((st, si) => {
+    const path = buildPath(st.pts);
+    for (let s = 19; s < path.total; s += 38) {
+      const p = pathPoint(path, s);
+      const side = (si + Math.round(s / 38)) % 2 ? 1 : -1;
+      lampPlace.push({ x: p.x - p.dz * (st.w / 2 + 1.2) * side, z: p.z + p.dx * (st.w / 2 + 1.2) * side });
+    }
+  });
+  buildInstancedProps(city, g, [], [], lampPlace, []);
 
   /* ---- 街头行人（沿人行道巡走） ---- */
   city.walkers = [];
@@ -4452,6 +4484,7 @@ function endGame(allFound) {
 
 function backToMenu() {
   G.phase = 'menu';
+  updateCareerLine();
   $('hud').classList.add('hidden');
   $('endScreen').classList.add('hidden');
   $('hideBanner').classList.add('hidden');
@@ -4615,6 +4648,22 @@ function tick() {
       const sky = new THREE.Color(G.weather === 'rain' ? 0x707d8a : 0xa9d7ef).lerp(new THREE.Color(0x0c1630), nf);
       scene.background = sky;
       if (scene.fog) scene.fog.color.copy(sky);
+      // 夜间路灯：地面光晕渐显 + 玩家附近 5 盏挂真实点光源
+      if (G.city.lampGlowMat) G.city.lampGlowMat.opacity = nf * 0.2;
+      if (G.city.lamps && lampLights.length) {
+        if (nf > 0.2) {
+          lampTimer -= dt;
+          if (lampTimer <= 0) {
+            lampTimer = 1;
+            G.city.lamps
+              .map((l) => ({ l, d: dist2d(player.x, player.z, l.x, l.z) }))
+              .sort((a, b) => a.d - b.d)
+              .slice(0, lampLights.length)
+              .forEach((s2, i) => lampLights[i].position.set(s2.l.x, 5.2, s2.l.z));
+          }
+          lampLights.forEach((pl) => { pl.intensity = nf; });
+        } else lampLights.forEach((pl) => { pl.intensity = 0; });
+      }
       flashlight.intensity = flashlight.visible ? 1.3 : 0;
       if (flashlight.visible) {
         flashlight.position.set(player.x, 1.7 + (player.y || 0), player.z);
@@ -4875,6 +4924,16 @@ function applyStaticLang() {
     b.classList.toggle('on', b.dataset.lang === LANG);
     b.addEventListener('click', () => { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); });
   });
+  updateCareerLine();
+}
+
+function updateCareerLine() {
+  const el = $('careerLine');
+  if (!el) return;
+  try {
+    const st = JSON.parse(localStorage.getItem('ct_stats') || 'null');
+    el.textContent = st && st.games ? t('career', st.games, st.wins || 0, st.caps || 0) : '';
+  } catch (e) { el.textContent = ''; }
 }
 
 /* ---- 启动 ---- */
