@@ -146,6 +146,49 @@ class VoiceFragment : Fragment() {
         if (recording) { recording = false; status.text = "处理中…" }
     }
 
+    // 保时长变调（G-VC-2）：先线性重采样变调（时长随之变），再 OLA 重叠相加拉回原时长——
+    // 与 iOS AVAudioUnitTimePitch 的"变调不变速"听感一致（OLA 有轻微颗粒感，卡通场景可接受）。
+    private fun pitchPreserve(data: ByteArray, f: Double): ByteArray {
+        if (f == 1.0) return data
+        val src = ShortArray(data.size / 2) {
+            (((data[it * 2 + 1].toInt()) shl 8) or (data[it * 2].toInt() and 0xFF)).toShort()
+        }
+        // 1) 重采样 ×f：音调 ×f，长度 ÷f
+        val shifted = ShortArray((src.size / f).toInt()) { i ->
+            val pos = i * f
+            val i0 = pos.toInt().coerceAtMost(src.size - 1)
+            val i1 = (i0 + 1).coerceAtMost(src.size - 1)
+            val t = pos - i0
+            ((src[i0] * (1 - t)) + (src[i1] * t)).toInt().toShort()
+        }
+        // 2) OLA 时间拉伸 ×f：Hann 窗 50% 重叠，把时长拉回原值
+        val frame = 1024
+        val hs = frame / 2                    // 合成跳距
+        val ha = (hs / f).coerceAtLeast(1.0)  // 分析跳距
+        val outLen = src.size
+        val acc = DoubleArray(outLen + frame)
+        val norm = DoubleArray(outLen + frame)
+        val win = DoubleArray(frame) { 0.5 - 0.5 * kotlin.math.cos(2.0 * Math.PI * it / (frame - 1)) }
+        var outPos = 0
+        var k = 0
+        while (outPos + frame < acc.size) {
+            val inPos = (k * ha).toInt()
+            if (inPos + frame >= shifted.size) break
+            for (j in 0 until frame) {
+                acc[outPos + j] += shifted[inPos + j] * win[j]
+                norm[outPos + j] += win[j]
+            }
+            outPos += hs; k++
+        }
+        val out = ByteArray(outLen * 2)
+        for (i in 0 until outLen) {
+            val v = if (norm[i] > 1e-6) (acc[i] / norm[i]).toInt().coerceIn(-32768, 32767) else 0
+            out[i * 2] = (v and 0xFF).toByte()
+            out[i * 2 + 1] = ((v shr 8) and 0xFF).toByte()
+        }
+        return out
+    }
+
     // 机器人音色：16-bit PCM 环形调制（逐样本乘 40Hz 正弦），经典金属声
     private fun applyRingMod(src: ByteArray): ByteArray {
         val out = src.copyOf()
@@ -165,6 +208,7 @@ class VoiceFragment : Fragment() {
     private fun play() {
         var data = recorded ?: return
         if (data.isEmpty()) return
+        data = pitchPreserve(data, factor)   // 保时长变调（G-VC-2）
         if (ringMod) data = applyRingMod(data)
         runCatching { track?.stop(); track?.release() }
         val at = AudioTrack(
@@ -172,8 +216,6 @@ class VoiceFragment : Fragment() {
             data.size, AudioTrack.MODE_STATIC
         )
         at.write(data, 0, data.size)
-        // 改变消费采样率 → 变调+变速（卡通变声）
-        at.playbackRate = (SR * factor).toInt().coerceIn(4000, 96000)
         at.play()
         track = at
         status.text = "播放中…"

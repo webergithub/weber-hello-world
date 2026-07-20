@@ -25,6 +25,12 @@ enum Identity {
         set { UserDefaults.standard.set(newValue.isEmpty ? "public" : newValue, forKey: "trailmate.team") }
     }
 
+    // 隐身（G-DR-3）：开启后不向同伴广播自己的位置
+    static var ghost: Bool {
+        get { UserDefaults.standard.bool(forKey: "trailmate.ghost") }
+        set { UserDefaults.standard.set(newValue, forKey: "trailmate.ghost") }
+    }
+
     static func newTeamCode() -> String {
         let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")   // 去掉易混字符
         var s = ""
