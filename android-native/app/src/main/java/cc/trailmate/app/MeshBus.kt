@@ -42,6 +42,14 @@ object Identity {
         val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
         return (1..6).map { chars[Random.nextInt(chars.length)] }.joinToString("")
     }
+
+    // 隐身（G-DR-3）：开启后不向同伴广播自己的位置
+    fun ghost(ctx: Context): Boolean =
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).getBoolean("ghost", false)
+
+    fun setGhost(ctx: Context, v: Boolean) {
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).edit().putBoolean("ghost", v).apply()
+    }
 }
 
 /**

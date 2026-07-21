@@ -260,6 +260,12 @@ console.log('[9] 营地短语音')
   const swiftBus = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshBus.swift'), 'utf8')
   const ktBus = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshBus.kt'), 'utf8')
   check('kindVoice=3 双端一致', /kindVoice: UInt8 = 3/.test(swiftBus) && /KIND_VOICE: Byte = 3/.test(ktBus))
+
+  // 码字符集三端一致（G-PF-1）
+  const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  const idTs = readFileSync(join(ROOT, 'src/lib/id.ts'), 'utf8')
+  const identSwift = readFileSync(join(ROOT, 'ios12/Sources/Mesh/Identity.swift'), 'utf8')
+  check('6 位码字符集三端一致', idTs.includes(CHARSET) && identSwift.includes(CHARSET) && ktBus.includes(CHARSET))
 }
 
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)

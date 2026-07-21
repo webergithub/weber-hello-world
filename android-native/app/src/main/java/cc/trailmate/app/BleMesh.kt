@@ -101,8 +101,9 @@ class BleMesh(private val ctx: Context) {
 
     fun stop() {
         running = false
+        mainH.removeCallbacks(scanCycle)
+        stopScanOnly()
         try { manager.adapter?.bluetoothLeAdvertiser?.stopAdvertising(advCallback) } catch (_: Exception) {}
-        try { manager.adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
         clients.values.forEach { runCatching { it.close() } }
         clients.clear(); clientChars.clear(); subscribers.clear()
         synchronized(reasm) { reasm.clear() }
@@ -198,12 +199,39 @@ class BleMesh(private val ctx: Context) {
         }
     }
 
-    // MARK: - 中心（扫描 + 连接）
-    private fun startScanning() {
+    // MARK: - 中心（扫描 + 连接）· 占空比省电（G-ENG-2）
+    // 无邻居时持续扫描（保证快速发现）；已有连接后转 8s 扫 / 16s 停 循环——
+    // 新邻居仍能在下个扫描窗被发现，扫描耗电约降为 1/3。
+    private var scanActive = false
+    private val mainH = android.os.Handler(android.os.Looper.getMainLooper())
+    private val scanCycle = object : Runnable {
+        override fun run() {
+            if (!running) return
+            val peers = clientChars.size + subscribers.size
+            if (scanActive && peers > 0) {
+                stopScanOnly()
+                mainH.postDelayed(this, 16_000)
+            } else {
+                startScanOnly()
+                mainH.postDelayed(this, 8_000)
+            }
+        }
+    }
+
+    private fun startScanning() { mainH.post(scanCycle) }
+
+    private fun startScanOnly() {
+        if (scanActive) return
         val scanner = manager.adapter.bluetoothLeScanner ?: return
         val filters = listOf(ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICE_UUID)).build())
         val settings = ScanSettings.Builder().setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY).build()
-        scanner.startScan(filters, settings, scanCallback)
+        try { scanner.startScan(filters, settings, scanCallback); scanActive = true } catch (_: Exception) {}
+    }
+
+    private fun stopScanOnly() {
+        if (!scanActive) return
+        try { manager.adapter?.bluetoothLeScanner?.stopScan(scanCallback) } catch (_: Exception) {}
+        scanActive = false
     }
 
     private val scanCallback = object : ScanCallback() {

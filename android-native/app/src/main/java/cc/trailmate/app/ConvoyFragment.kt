@@ -70,6 +70,10 @@ class ConvoyFragment : Fragment() {
         val adapter = (ctx.getSystemService(android.content.Context.BLUETOOTH_SERVICE)
             as? android.bluetooth.BluetoothManager)?.adapter
         when {
+            Identity.ghost(ctx) -> {
+                tv.visibility = View.VISIBLE
+                tv.text = "🕶 隐身中：同伴看不到你的位置（仍能看到同伴）"
+            }
             adapter == null || !adapter.isEnabled -> {
                 tv.visibility = View.VISIBLE
                 tv.text = "⚠️ 蓝牙已关闭，位置无法共享给同伴"
@@ -106,7 +110,17 @@ class ConvoyFragment : Fragment() {
         val road = Button(ctx).apply { text = "道路"; setOnClickListener { map?.setTileSource(TileSourceFactory.MAPNIK) } }
         val sat = Button(ctx).apply { text = "卫星"; setOnClickListener { map?.setTileSource(esri) } }
         val here = Button(ctx).apply { text = "定位"; setOnClickListener { recenter() } }
-        bar.addView(road, rowLp()); bar.addView(sat, rowLp()); bar.addView(here, rowLp())
+        // 隐身开关（G-DR-3）：不再向同伴广播自己的位置
+        val ghost = Button(ctx).apply {
+            text = if (Identity.ghost(ctx)) "🕶 隐身中" else "隐身"
+            setOnClickListener {
+                val v = !Identity.ghost(ctx)
+                Identity.setGhost(ctx, v)
+                text = if (v) "🕶 隐身中" else "隐身"
+                renderHealth()
+            }
+        }
+        bar.addView(road, rowLp()); bar.addView(sat, rowLp()); bar.addView(here, rowLp()); bar.addView(ghost, rowLp())
         root.addView(bar, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         health = android.widget.TextView(ctx).apply {
@@ -148,6 +162,7 @@ class ConvoyFragment : Fragment() {
 
     private fun broadcastMyLocation() {
         val ctx = context ?: return
+        if (Identity.ghost(ctx)) return   // 隐身：不广播（G-DR-3）
         val loc = myLoc?.myLocation ?: return
         val json = JSONObject()
             .put("id", Identity.deviceId(ctx)).put("n", Identity.nick(ctx))
