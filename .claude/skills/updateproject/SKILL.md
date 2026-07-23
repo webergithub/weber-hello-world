@@ -31,8 +31,8 @@ description: 将本项目（CityTwin 城市猎手）部署/更新到 Weber 的�
 
 用 GitHub Actions 部署（仓库已有 `.github/workflows/deploy.yml`）：
 
-1. 前置（一次性）：仓库 Settings→Secrets and variables→Actions 需已配置
-   `DEPLOY_HOST=145.241.235.191` · `DEPLOY_USER=ubuntu` · `DEPLOY_PATH=/home/ubuntu/website/citytwin` · `DEPLOY_SSH_KEY=<私钥全文>`；
+1. 前置（一次性）：仓库 Settings→Secrets and variables→Actions 只需配置 **1 个**
+   `DEPLOY_SSH_KEY=<私钥全文>`（host/user/path 已内置进 deploy.yml，可选 secret 覆盖）；
 2. 触发：用 GitHub MCP 的 `actions_run_trigger`（method=run_workflow, workflow_id=deploy.yml, ref=当前分支）；
    或依赖 push 自动触发；
 3. 验证：`actions_list`（list_workflow_jobs）查看最新 run —— **"Deploy via rsync" 步骤必须是 success 而非 skipped**；
