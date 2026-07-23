@@ -1,14 +1,19 @@
 # ============================================================
-# CityTwin 自动部署到你的服务器（rsync over SSH）
+# CityTwin 自动部署到 opc 服务器（rsync over SSH）
 #
-# 使用前在 GitHub 仓库 Settings → Secrets and variables → Actions
-# 添加 4 个 Repository secrets：
-#   DEPLOY_HOST     服务器 IP 或域名
-#   DEPLOY_USER     SSH 用户名（Oracle Cloud 通常是 opc）
-#   DEPLOY_SSH_KEY  SSH 私钥内容（对应服务器 ~/.ssh/authorized_keys 里的公钥）
-#   DEPLOY_PATH     目标目录（如 /var/www/citytwin 或 /home/opc/citytwin）
+# 服务器/用户/路径已内置（来自 updateProject.md，非机密）：
+#   HOST = 145.241.235.191   USER = ubuntu
+#   PATH = /home/ubuntu/website/citytwin   →  http://145.241.235.191/citytwin/
 #
-# 然后在仓库 Actions 页面手动 Run workflow，或推送到部署分支时自动触发。
+# 你只需在 GitHub 配置【1 个】Secret 即可启用自动部署：
+#   Settings → Secrets and variables → Actions → New repository secret
+#   名称：DEPLOY_SSH_KEY
+#   内容：Drive 里 ssh-key-2026-05-05.key 文件全文（-----BEGIN … END----- 整段）
+#
+# 如需改服务器，另配可选 Secret 覆盖默认值：
+#   DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH
+#
+# 配好后：推送本分支即自动部署，或在 Actions 页面手动 Run workflow。
 # GitHub 托管的 runner 可直接访问公网服务器，不受本地网络限制。
 # ============================================================
 name: Deploy CityTwin to server
@@ -22,17 +27,21 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      DEPLOY_HOST: ${{ secrets.DEPLOY_HOST || '145.241.235.191' }}
+      DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'ubuntu' }}
+      DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/home/ubuntu/website/citytwin' }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check secrets
+      - name: Check deploy key
         id: check
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
         run: |
-          if [ -z "$DEPLOY_HOST" ]; then
+          if [ -z "$DEPLOY_SSH_KEY" ]; then
             echo "configured=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::未配置 DEPLOY_* secrets，跳过部署（在仓库 Settings→Secrets 配置后重跑即可）"
+            echo "::notice::未配置 DEPLOY_SSH_KEY，跳过部署。在仓库 Settings→Secrets 添加该私钥后重跑即可自动部署。"
           else
             echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
@@ -40,18 +49,25 @@ jobs:
       - name: Deploy via rsync
         if: steps.check.outputs.configured == 'true'
         env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
         run: |
           mkdir -p ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
-          ssh -i ~/.ssh/deploy_key "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o BatchMode=yes"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
           rsync -avz --delete \
-            -e "ssh -i ~/.ssh/deploy_key" \
+            -e "$SSH" \
             index.html game.js cities.js lib data README.md \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
-          echo "✅ 部署完成 → http://$DEPLOY_HOST/ (视你的 web 服务配置而定)"
+
+      - name: Verify deployment
+        if: steps.check.outputs.configured == 'true'
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o BatchMode=yes"
+          $SSH "$DEPLOY_USER@$DEPLOY_HOST" \
+            "ls -lh '$DEPLOY_PATH/index.html' && echo VERIFY_OK"
+          echo "✅ 部署完成 → http://$DEPLOY_HOST/citytwin/"
