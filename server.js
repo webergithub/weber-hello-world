@@ -474,6 +474,16 @@ wss.on('connection', (socket) => {
       return;
     }
 
+    if (msg.type === 'typing') {
+      // Ephemeral "is typing…" ping (no text), relayed to everyone else.
+      broadcast(
+        room,
+        { type: 'typing', from: member.id, fromName: member.name },
+        member.id
+      );
+      return;
+    }
+
     if (msg.type === 'setLang') {
       member.speakLang = msg.speakLang || member.speakLang;
       broadcast(room, { type: 'roster', members: roster(room) });

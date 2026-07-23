@@ -229,6 +229,9 @@ function handle(msg) {
     case 'partial':
       renderPartial(msg);
       break;
+    case 'typing':
+      renderTyping(msg);
+      break;
     case 'message':
       clearPartial(msg.from);
       renderMessage(msg);
@@ -264,6 +267,10 @@ async function renderMessage(msg) {
   const who = document.createElement('div');
   who.className = 'who';
   who.textContent = mine ? 'You' : msg.fromName;
+  const time = document.createElement('span');
+  time.className = 'time';
+  time.textContent = formatTime(msg.ts);
+  who.appendChild(time);
   el.appendChild(who);
 
   const primary = document.createElement('div');
@@ -307,20 +314,48 @@ async function renderMessage(msg) {
   if (state.speakAloud && !mine && !msg.history) speakAloud(pri.text, state.recvPrimary);
 }
 
-function renderPartial(msg) {
-  let el = partials.get(msg.from);
+function formatTime(ts) {
+  const d = ts ? new Date(ts) : new Date();
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+// A single ephemeral indicator per person, shared by "speaking…" (voice) and
+// "typing…" (composer). Typing pings auto-expire; a real message clears it.
+const typingTimers = new Map(); // from -> timeout id
+
+function ensureIndicator(from) {
+  let el = partials.get(from);
   if (!el) {
     el = document.createElement('div');
     el.className = 'msg partial';
     feed.appendChild(el);
-    partials.set(msg.from, el);
+    partials.set(from, el);
   }
-  el.textContent = `${msg.fromName} is speaking… ${msg.text}`;
+  return el;
+}
+
+function renderPartial(msg) {
+  const el = ensureIndicator(msg.from);
+  el.textContent = msg.text
+    ? `${msg.fromName} is speaking… ${msg.text}`
+    : `${msg.fromName} is speaking…`;
   scrollFeed();
 }
+
+function renderTyping(msg) {
+  const el = ensureIndicator(msg.from);
+  el.textContent = `${msg.fromName} is typing…`;
+  scrollFeed();
+  // Auto-clear if no further typing pings arrive shortly.
+  clearTimeout(typingTimers.get(msg.from));
+  typingTimers.set(msg.from, setTimeout(() => clearPartial(msg.from), 3500));
+}
+
 function clearPartial(from) {
   const el = partials.get(from);
   if (el) { el.remove(); partials.delete(from); }
+  clearTimeout(typingTimers.get(from));
+  typingTimers.delete(from);
 }
 
 function makeTag(text) {
@@ -388,7 +423,19 @@ function autoGrow() {
   ta.style.height = 'auto';
   ta.style.height = Math.min(ta.scrollHeight, 120) + 'px';
 }
-$('composer').addEventListener('input', autoGrow);
+
+// Let others see "is typing…" while I compose — throttled to one ping/second.
+let lastTypingSent = 0;
+function notifyTyping() {
+  const now = Date.now();
+  if (now - lastTypingSent < 1000) return;
+  lastTypingSent = now;
+  send({ type: 'typing' });
+}
+$('composer').addEventListener('input', () => {
+  autoGrow();
+  if ($('composer').value.trim()) notifyTyping();
+});
 
 // ---- Text-to-speech -------------------------------------------------------
 function speakAloud(text, lang) {

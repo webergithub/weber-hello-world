@@ -33,8 +33,10 @@ on a flaky connection.
 Settings, invites, and "leave room" all live under the **☰ My menu** in the top
 bar, keeping the room screen focused on the conversation.
 
-Bonus niceties: optional **read‑aloud** (text‑to‑speech) of incoming messages in
-your primary language, live roster of who's in the room, and auto‑reconnect.
+Bonus niceties: **message timestamps**, live **"is typing…"** and **"is
+speaking…"** indicators, optional **read‑aloud** (text‑to‑speech) of incoming
+messages in your primary language, live roster of who's in the room, and
+auto‑reconnect.
 
 ---
 

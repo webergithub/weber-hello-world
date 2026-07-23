@@ -109,6 +109,28 @@ try {
       .filter((m) => m.textContent.includes('Good morning')).length);
   ok(hostOwnCount === 1, `host sees its own message once (got ${hostOwnCount})`);
 
+  // Messages carry a timestamp in their header.
+  const hasTime = await guest.evaluate(() =>
+    [...document.querySelectorAll('#feed .msg .who .time')]
+      .some((t) => /\d{1,2}[:.]\d{2}/.test(t.textContent)));
+  ok(hasTime, 'messages show a timestamp');
+
+  // Typing in the host composer shows a live "is typing…" line on the guest.
+  // Type over >1s so more than one throttled ping is emitted (robust to timing).
+  await host.type('#composer', 'typing indicator now', { delay: 90 });
+  const typingSeen = await guest.waitForFunction(() =>
+    [...document.querySelectorAll('#feed .msg.partial')].some((m) =>
+      /is typing/.test(m.textContent)), { timeout: 5000 })
+    .then(() => true).catch(() => false);
+  ok(typingSeen, 'guest sees a live "is typing…" indicator');
+  // Sending clears the indicator.
+  await host.click('#send-btn');
+  const typingCleared = await guest.waitForFunction(() =>
+    ![...document.querySelectorAll('#feed .msg.partial')].some((m) =>
+      /is typing/.test(m.textContent)), { timeout: 5000 })
+    .then(() => true).catch(() => false);
+  ok(typingCleared, 'typing indicator clears once the message arrives');
+
   // ---- Guest replies in Chinese; host reads English ----
   await openSettings(host);
   await host.selectOption('#recv-primary', 'en');
