@@ -7,7 +7,12 @@ const PORT = process.env.PORT || '3199';
 const env = { ...process.env, PORT, WHISPER_MOCK: '1' };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const server = spawn('node', ['server.js'], { env, stdio: ['ignore', 'ignore', 'inherit'] });
+// The shared server has persistence off so the suites don't leave a data file
+// behind; the persistence suite spins up its own instances with it forced on.
+const server = spawn('node', ['server.js'], {
+  env: { ...env, PERSIST: '0' },
+  stdio: ['ignore', 'ignore', 'inherit'],
+});
 
 async function waitReady() {
   for (let i = 0; i < 60; i++) {
@@ -27,7 +32,7 @@ function runSuite(file) {
   });
 }
 
-const SUITES = ['test/e2e.mjs', 'test/browser.mjs', 'test/pwa.mjs'];
+const SUITES = ['test/e2e.mjs', 'test/browser.mjs', 'test/pwa.mjs', 'test/persist.mjs'];
 
 let failed = 0;
 if (!(await waitReady())) {

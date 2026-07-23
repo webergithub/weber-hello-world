@@ -13,6 +13,7 @@
 // each person read the room in whatever language(s) they chose.
 
 import http from 'node:http';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import express from 'express';
@@ -23,16 +24,23 @@ import { offlineTranslate } from './phrasebook.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
 
+// Persistence: rooms + their message history are written to disk so a restart
+// (or crash) doesn't drop an in-progress conversation. Disable with PERSIST=0.
+const PERSIST = process.env.PERSIST !== '0';
+const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data', 'rooms.json');
+const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 24 * 60 * 60 * 1000); // prune empty rooms after 24h
+
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------------------
-// Rooms & participants (in-memory; a room evaporates when its last device
-// leaves). Good enough for a live session — no database required.
+// Rooms & participants. Members are live WebSocket connections (never
+// persisted); each room's message history is snapshotted to disk so it
+// survives a restart, and empty rooms are pruned after ROOM_TTL_MS.
 // ---------------------------------------------------------------------------
 
-/** @type {Map<string, {code: string, createdAt: number, members: Map<string, object>}>} */
+/** @type {Map<string, {code: string, createdAt: number, lastActivity: number, members: Map<string, object>, history: object[]}>} */
 const rooms = new Map();
 
 const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I ambiguity
@@ -51,10 +59,87 @@ const HISTORY_LIMIT = 100; // recent messages kept per room for late joiners
 function ensureRoom(code) {
   let room = rooms.get(code);
   if (!room) {
-    room = { code, createdAt: Date.now(), members: new Map(), history: [] };
+    const now = Date.now();
+    room = { code, createdAt: now, lastActivity: now, members: new Map(), history: [] };
     rooms.set(code, room);
   }
   return room;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence — load on boot, debounced save on change, sync save on shutdown.
+// ---------------------------------------------------------------------------
+
+function snapshot() {
+  return {
+    rooms: [...rooms.values()].map((r) => ({
+      code: r.code,
+      createdAt: r.createdAt,
+      lastActivity: r.lastActivity,
+      history: r.history,
+    })),
+  };
+}
+
+function loadRooms() {
+  if (!PERSIST) return;
+  try {
+    const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    const now = Date.now();
+    for (const r of data.rooms || []) {
+      const last = r.lastActivity || r.createdAt || now;
+      if (now - last > ROOM_TTL_MS) continue; // stale, skip
+      rooms.set(r.code, {
+        code: r.code,
+        createdAt: r.createdAt || now,
+        lastActivity: last,
+        members: new Map(),
+        history: Array.isArray(r.history) ? r.history : [],
+      });
+    }
+    console.log(`Loaded ${rooms.size} room(s) from ${DATA_FILE}`);
+  } catch {
+    /* no snapshot yet — first run */
+  }
+}
+
+let saveTimer = null;
+function scheduleSave() {
+  if (!PERSIST || saveTimer) return;
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    try {
+      fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+      const tmp = `${DATA_FILE}.tmp`;
+      fs.writeFileSync(tmp, JSON.stringify(snapshot()));
+      fs.renameSync(tmp, DATA_FILE); // atomic replace
+    } catch (err) {
+      console.error('room save failed:', String(err));
+    }
+  }, 1000);
+}
+
+function saveSync() {
+  if (!PERSIST) return;
+  try {
+    fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+    fs.writeFileSync(DATA_FILE, JSON.stringify(snapshot()));
+  } catch (err) {
+    console.error('room save failed:', String(err));
+  }
+}
+
+// Periodically drop rooms that have been empty and idle past the TTL.
+function sweepRooms() {
+  const now = Date.now();
+  let changed = false;
+  for (const room of rooms.values()) {
+    if (room.members.size === 0 && now - room.lastActivity > ROOM_TTL_MS) {
+      rooms.delete(room.code);
+      changed = true;
+    }
+  }
+  if (changed) scheduleSave();
 }
 
 // Build the absolute base URL a phone should use to reach this server. We
@@ -317,6 +402,7 @@ wss.on('connection', (socket) => {
     if (msg.type === 'join') {
       const code = String(msg.room || '').toUpperCase();
       room = ensureRoom(code);
+      room.lastActivity = Date.now();
       const isHost = room.members.size === 0 || Boolean(msg.host);
       member = {
         id: `u${idSeq++}`,
@@ -364,6 +450,8 @@ wss.on('connection', (socket) => {
       // Keep a bounded history so anyone who joins or reloads later can catch up.
       room.history.push(payload);
       if (room.history.length > HISTORY_LIMIT) room.history.shift();
+      room.lastActivity = payload.ts;
+      scheduleSave();
       // Exclude the sender: their own client renders an instant local echo, so
       // relaying it back would show the message twice.
       broadcast(room, payload, member.id);
@@ -396,9 +484,8 @@ wss.on('connection', (socket) => {
   socket.on('close', () => {
     if (member && room) {
       room.members.delete(member.id);
-      if (room.members.size === 0) {
-        rooms.delete(room.code);
-      } else {
+      room.lastActivity = Date.now();
+      if (room.members.size > 0) {
         broadcast(room, { type: 'roster', members: roster(room) });
         broadcast(room, {
           type: 'system',
@@ -406,9 +493,27 @@ wss.on('connection', (socket) => {
           ts: Date.now(),
         });
       }
+      // An empty room is kept (with its history) until the TTL sweep prunes it,
+      // so a brief disconnect or a server restart doesn't lose the conversation.
     }
   });
 });
+
+// Boot: restore persisted rooms, then start pruning + serving.
+loadRooms();
+const sweepTimer = setInterval(sweepRooms, 30 * 60 * 1000);
+sweepTimer.unref?.();
+
+// Flush to disk on graceful shutdown.
+let shuttingDown = false;
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  saveSync();
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 server.listen(PORT, () => {
   console.log(`LinkTalk running on http://localhost:${PORT}`);

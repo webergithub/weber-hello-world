@@ -47,9 +47,10 @@ your primary language, live roster of who's in the room, and auto‑reconnect.
 └──────────────┘                └───────────────────────┘                └──────────────┘
 ```
 
-- **`server.js`** — Express static host + WebSocket relay. Manages rooms (in
-  memory), mints invite codes, renders join QR codes, and exposes a translation
-  proxy so the browser needs no API keys and hits no CORS walls.
+- **`server.js`** — Express static host + WebSocket relay. Manages rooms (kept
+  in memory, snapshotted to disk), mints invite codes, renders join QR codes,
+  and exposes a translation proxy so the browser needs no API keys and hits no
+  CORS walls.
 - **`public/`** — the PWA. `index.html` (create / join), `room.html` (the room),
   `js/room.js` (the client), `js/langs.js` (language table), `css/style.css`,
   `sw.js` (service worker for install + offline), `manifest.webmanifest`.
@@ -87,13 +88,14 @@ the phone reached the server through.
 npm test          # starts the server (Whisper mock) and runs every suite
 ```
 
-`npm test` orchestrates three suites (server started automatically):
+`npm test` orchestrates four suites (server started automatically):
 
 - `test/e2e.mjs` — REST, translation chain, Whisper transcription, WebSocket
   relay, and message history.
 - `test/browser.mjs` — full two-phone browser flow: create/join, live
   translation into primary+secondary, voice input, and reload-catches-up.
 - `test/pwa.mjs` — service worker registration and offline app-shell loading.
+- `test/persist.mjs` — restarts the server and confirms room history survives.
 
 ---
 
@@ -150,8 +152,16 @@ If Whisper isn't configured, the mic reports it in Settings and typing still wor
 
 ## Notes & limitations
 
-- **Rooms are in memory.** A room disappears when its last device leaves; there's
-  no database. Perfect for ad‑hoc conversations, not for persistence.
+- **Rooms persist to disk.** Each room's message history is snapshotted to
+  `data/rooms.json` (configurable), so a server restart or crash doesn't drop an
+  in‑progress conversation — reconnecting devices get the history back. Empty,
+  idle rooms are pruned after a TTL. Configure with env vars:
+
+  | Variable | Meaning | Default |
+  | --- | --- | --- |
+  | `PERSIST` | set to `0` to keep everything in memory only | on |
+  | `DATA_FILE` | snapshot location | `data/rooms.json` |
+  | `ROOM_TTL_MS` | how long an empty room is kept before pruning | `86400000` (24h) |
 - **True AirDrop / NFC** are OS‑level transports. A pure web app can't open the
   AirDrop radio directly, so LinkTalk uses the browser's Web Share API (which
   *invokes* AirDrop / Nearby Share) and Web NFC where the platform allows. A native
