@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CityTwin · 照片级真实3D城市（Google 3D Tiles）</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0a1020;
+    font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif; color: #eef2f7; }
+  #app { position: absolute; inset: 0; }
+  #bar { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); z-index: 10;
+    display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
+    background: rgba(13, 20, 35, .82); border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 12px; padding: 10px 14px; backdrop-filter: blur(8px); max-width: 94vw;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, .5); }
+  select, input, button { font-family: inherit; font-size: 14px; color: #eef2f7;
+    background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .22);
+    border-radius: 8px; padding: 7px 10px; }
+  select option { color: #0b1220; }
+  input#key { width: 300px; }
+  button { background: #ffd166; color: #0b1220; font-weight: 700; cursor: pointer; border: none; }
+  button:hover { filter: brightness(1.08); }
+  #status { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); z-index: 10;
+    background: rgba(13, 20, 35, .82); border: 1px solid rgba(255, 255, 255, .14);
+    border-radius: 10px; padding: 8px 16px; font-size: 13.5px; backdrop-filter: blur(6px);
+    max-width: 90vw; text-align: center; }
+  #hint { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); z-index: 9;
+    font-size: 12px; color: #9fb0c8; background: rgba(13, 20, 35, .6); padding: 5px 12px;
+    border-radius: 8px; }
+  a { color: #ffd166; }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+  <div id="bar">
+    <select id="city">
+      <option value="london">🇬🇧 伦敦</option>
+      <option value="shanghai">🇨🇳 上海</option>
+      <option value="istanbul">🇹🇷 伊斯坦布尔</option>
+      <option value="newyork">🇺🇸 纽约</option>
+      <option value="dubai">🇦🇪 迪拜</option>
+    </select>
+    <input id="key" type="password" placeholder="粘贴你的 Google Maps API key" autocomplete="off">
+    <button id="go">加载真实3D城市</button>
+  </div>
+  <div id="hint">🖱 拖拽=旋转 · 滚轮=缩放 · 右键拖=平移　|　key 只存在你本地浏览器，不上传</div>
+  <div id="status">填入 key → 选城市 → 点「加载」。首次加载会从太空视角开始，滚轮拉近即可看到街道。</div>
+
+  <script src="citytwin3d.bundle.js"></script>
+  <script>
+    (function () {
+      var keyInput = document.getElementById('key');
+      var saved = localStorage.getItem('ct_gkey');
+      if (saved) keyInput.value = saved;
+      function load() {
+        var k = keyInput.value.trim();
+        if (k) localStorage.setItem('ct_gkey', k);
+        if (window.CT3D) window.CT3D.load(document.getElementById('city').value, k);
+      }
+      document.getElementById('go').addEventListener('click', load);
+      keyInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') load(); });
+    })();
+  </script>
+</body>
+</html>
