@@ -223,6 +223,18 @@ input:focus, select:focus { border-color: var(--brand); }
 
 .system-line { text-align: center; color: var(--muted); font-size: 12px; }
 
+.conn-banner {
+  text-align: center;
+  font-size: 13px;
+  color: #ffd9a0;
+  background: rgba(202, 165, 58, 0.14);
+  border: 1px solid rgba(202, 165, 58, 0.4);
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+}
+.conn-banner::before { content: "⚠ "; }
+
 /* Composer */
 .composer { display: flex; gap: 8px; margin-top: 12px; align-items: flex-end; }
 .composer textarea {

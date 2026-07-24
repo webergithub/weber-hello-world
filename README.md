@@ -35,8 +35,9 @@ bar, keeping the room screen focused on the conversation.
 
 Bonus niceties: **message timestamps**, live **"is typing…"** and **"is
 speaking…"** indicators, optional **read‑aloud** (text‑to‑speech) of incoming
-messages in your primary language, live roster of who's in the room, and
-auto‑reconnect.
+messages in your primary language, live roster of who's in the room, and a
+**"Reconnecting…" banner** with automatic reconnect (it re‑syncs history without
+duplicating the conversation).
 
 ---
 

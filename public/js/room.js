@@ -167,12 +167,27 @@ if ('NDEFReader' in window) {
 // ---- WebSocket ------------------------------------------------------------
 let ws;
 let reconnectTimer = null;
+let everConnected = false;
+
+function setConnected(up) {
+  // Only nag about the connection once we've actually been online — a first
+  // connection in progress shouldn't flash "Reconnecting…".
+  $('conn-banner').classList.toggle('hidden', up || !everConnected);
+}
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  const sock = new WebSocket(`${proto}://${location.host}/ws`);
+  ws = sock;
 
-  ws.addEventListener('open', () => {
+  // Only the current socket drives UI/reconnect — a superseded one (e.g. a
+  // failed offline retry closing late) must not flap the banner back on.
+  const current = () => sock === ws;
+
+  sock.addEventListener('open', () => {
+    if (!current()) return;
+    everConnected = true;
+    setConnected(true);
     send({
       type: 'join',
       room: ROOM,
@@ -182,16 +197,19 @@ function connect() {
     });
   });
 
-  ws.addEventListener('message', (ev) => {
+  sock.addEventListener('message', (ev) => {
+    if (!current()) return;
     let msg;
     try { msg = JSON.parse(ev.data); } catch { return; }
     handle(msg);
   });
 
-  ws.addEventListener('close', () => {
+  sock.addEventListener('close', () => {
+    if (!current()) return;
+    setConnected(false);
     scheduleReconnect();
   });
-  ws.addEventListener('error', () => ws.close());
+  sock.addEventListener('error', () => { try { sock.close(); } catch {} });
 }
 
 function scheduleReconnect() {
@@ -201,6 +219,20 @@ function scheduleReconnect() {
     connect();
   }, 1500);
 }
+
+// React immediately when the device itself goes offline/online, rather than
+// waiting for the socket to notice — snappier banner + reconnect.
+window.addEventListener('offline', () => {
+  setConnected(false);
+  if (ws) { try { ws.close(); } catch {} }
+});
+window.addEventListener('online', () => {
+  clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+  if (!ws || ws.readyState === WebSocket.CLOSED || ws.readyState === WebSocket.CLOSING) {
+    connect();
+  }
+});
 
 function send(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -220,8 +252,7 @@ function handle(msg) {
       renderMembers();
       break;
     case 'history':
-      // Replay what was said before we joined (no read-aloud for old lines).
-      for (const m of msg.messages) renderMessage({ ...m, history: true });
+      replaceHistory(msg.messages);
       break;
     case 'system':
       addSystemLine(msg.text);
@@ -257,6 +288,17 @@ function addSystemLine(text) {
   el.textContent = text;
   feed.appendChild(el);
   scrollFeed();
+}
+
+// The server sends a history payload on join AND on every reconnect, so treat
+// it as the authoritative recent state: reset the feed and replay it rather
+// than appending (which would duplicate the whole conversation on reconnect).
+function replaceHistory(messages) {
+  feed.innerHTML = '';
+  partials.clear();
+  for (const id of typingTimers.values()) clearTimeout(id);
+  typingTimers.clear();
+  for (const m of messages) renderMessage({ ...m, history: true });
 }
 
 async function renderMessage(msg) {

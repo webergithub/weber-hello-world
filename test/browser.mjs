@@ -156,6 +156,24 @@ try {
     .then(() => true).catch(() => false);
   ok(voiceArrived, 'voice message transcribed by Whisper and relayed');
 
+  // ---- Reconnect: dropping and restoring the network must not duplicate the
+  //      conversation, and should surface then clear the reconnect banner. ----
+  const msgsBefore = await guest.evaluate(() =>
+    document.querySelectorAll('#feed .msg:not(.partial)').length);
+  await guestCtx.setOffline(true);
+  const bannerShown = await guest.waitForSelector('#conn-banner', { state: 'visible', timeout: 6000 })
+    .then(() => true).catch(() => false);
+  ok(bannerShown, 'reconnect banner appears when the connection drops');
+  await guestCtx.setOffline(false);
+  const bannerCleared = await guest.waitForSelector('#conn-banner', { state: 'hidden', timeout: 8000 })
+    .then(() => true).catch(() => false);
+  ok(bannerCleared, 'reconnect banner clears once reconnected');
+  await guest.waitForTimeout(600); // let history replay settle
+  const msgsAfter = await guest.evaluate(() =>
+    document.querySelectorAll('#feed .msg:not(.partial)').length);
+  ok(msgsAfter === msgsBefore,
+    `reconnect does not duplicate messages (before ${msgsBefore}, after ${msgsAfter})`);
+
   // ---- History: a phone that reloads mid-conversation sees prior messages ----
   await guest.reload();
   await guest.waitForSelector('#menu-btn');
