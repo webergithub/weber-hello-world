@@ -102,6 +102,27 @@ try {
     .then(() => true).catch(() => false);
   ok(origFound, 'original English text kept under the translation');
 
+  // ---- Per-message actions: copy + read-aloud ----
+  await guestCtx.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await guest.evaluate(() => {
+    // Spy on TTS so we can assert without audio hardware.
+    window.__spoken = [];
+    speechSynthesis.speak = (u) => window.__spoken.push({ text: u.text, lang: u.lang });
+  });
+  await guest.evaluate(() => {
+    const el = [...document.querySelectorAll('#feed .msg')].find((m) =>
+      (m.querySelector('.primary')?.textContent || '').includes('早上好'));
+    el.querySelector('.msg-action.copy').click();
+    el.querySelector('.msg-action.say').click();
+  });
+  await guest.waitForTimeout(300);
+  const clip = await guest.evaluate(() => navigator.clipboard.readText());
+  ok(clip.includes('早上好') && clip.includes('Good morning'),
+    'copy button puts translation + original on the clipboard');
+  const spoken = await guest.evaluate(() => window.__spoken);
+  ok(spoken.length === 1 && spoken[0].text.includes('早上好') && spoken[0].lang === 'zh-CN',
+    `read-aloud button speaks the translation in the right locale (${JSON.stringify(spoken[0] || null)})`);
+
   // Sender must see its own message exactly once (no local-echo + relay dupe).
   await host.waitForTimeout(400);
   const hostOwnCount = await host.evaluate(() =>

@@ -349,6 +349,37 @@ async function renderMessage(msg) {
     el.appendChild(orig);
   }
 
+  // Per-message actions: copy the text I read, or hear this one line aloud
+  // (independent of the global read-aloud setting).
+  const spokenLang = pri.translated ? state.recvPrimary : msg.srcLang;
+  const actions = document.createElement('div');
+  actions.className = 'msg-actions';
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-action copy';
+  copyBtn.title = 'Copy';
+  copyBtn.textContent = '⧉';
+  copyBtn.addEventListener('click', async () => {
+    // Copy what I read; include the original when it differs.
+    const parts = [pri.text];
+    if (msg.text !== pri.text) parts.push(msg.text);
+    try {
+      await navigator.clipboard.writeText(parts.join('\n'));
+      toast('Copied');
+    } catch {
+      toast('Copy failed');
+    }
+  });
+  actions.appendChild(copyBtn);
+
+  const sayBtn = document.createElement('button');
+  sayBtn.className = 'msg-action say';
+  sayBtn.title = 'Read aloud';
+  sayBtn.textContent = '🔊';
+  sayBtn.addEventListener('click', () => speakAloud(pri.text, spokenLang));
+  actions.appendChild(sayBtn);
+
+  el.appendChild(actions);
   scrollFeed();
 
   // Speak the primary translation aloud, if enabled and it's a fresh incoming
