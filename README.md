@@ -34,7 +34,8 @@ Settings, invites, and "leave room" all live under the **☰ My menu** in the to
 bar, keeping the room screen focused on the conversation.
 
 Bonus niceties: **message timestamps**, live **"is typing…"** and **"is
-speaking…"** indicators, per‑message **copy** and **tap‑to‑hear 🔊** buttons,
+speaking…"** indicators, per‑message **copy** and **tap‑to‑hear 🔊** buttons, a
+**"↓ N new" unread chip** (scrolling up to re‑read is never yanked back down),
 optional **read‑aloud** (text‑to‑speech) of every incoming message in your
 primary language, live roster of who's in the room, and a **"Reconnecting…"
 banner** with automatic reconnect (it re‑syncs history without duplicating the

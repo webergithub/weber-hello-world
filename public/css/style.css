@@ -194,6 +194,14 @@ input:focus, select:focus { border-color: var(--brand); }
 .member.host::before { content: "★ "; color: var(--accent); }
 
 /* Feed */
+.feed-wrap { position: relative; }
+.new-msgs {
+  position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+  border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card-2); color: var(--text);
+  font-size: 13px; font-weight: 600; padding: 7px 14px; cursor: pointer;
+  box-shadow: var(--shadow);
+}
 .feed {
   display: flex; flex-direction: column; gap: 12px;
   min-height: 160px; max-height: 52vh; overflow-y: auto;

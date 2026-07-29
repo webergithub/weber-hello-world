@@ -298,11 +298,15 @@ function replaceHistory(messages) {
   partials.clear();
   for (const id of typingTimers.values()) clearTimeout(id);
   typingTimers.clear();
+  clearUnread();
   for (const m of messages) renderMessage({ ...m, history: true });
 }
 
 async function renderMessage(msg) {
   const mine = msg.from === state.me;
+  // Decide once, before appending (which changes scrollHeight): follow the
+  // feed for my own lines, history replay, or when already reading the tail.
+  const stick = mine || Boolean(msg.history) || isNearBottom();
   const el = document.createElement('div');
   el.className = 'msg' + (mine ? ' me' : '');
 
@@ -322,7 +326,8 @@ async function renderMessage(msg) {
 
   el.dataset.src = msg.srcLang;
   feed.appendChild(el);
-  scrollFeed();
+  if (stick) scrollFeed(true);
+  else bumpUnread();
 
   // Translate into my primary read language.
   const pri = await translate(msg.text, msg.srcLang, state.recvPrimary);
@@ -380,7 +385,7 @@ async function renderMessage(msg) {
   actions.appendChild(sayBtn);
 
   el.appendChild(actions);
-  scrollFeed();
+  if (stick) scrollFeed(true);
 
   // Speak the primary translation aloud, if enabled and it's a fresh incoming
   // line (never replay the whole history through the speakers).
@@ -438,9 +443,36 @@ function makeTag(text) {
   return t;
 }
 
-function scrollFeed() {
-  feed.scrollTop = feed.scrollHeight;
+// Scroll handling: follow the conversation only while the reader is already at
+// (or near) the bottom. If they've scrolled up to re-read, leave them there
+// and count arrivals into the "↓ N new" chip instead.
+function isNearBottom() {
+  return feed.scrollHeight - feed.scrollTop - feed.clientHeight < 60;
 }
+
+function scrollFeed(force = false) {
+  if (force || isNearBottom()) feed.scrollTop = feed.scrollHeight;
+}
+
+let unread = 0;
+const newMsgsBtn = $('new-msgs');
+
+function bumpUnread() {
+  unread++;
+  newMsgsBtn.textContent = `↓ ${unread} new`;
+  newMsgsBtn.classList.remove('hidden');
+}
+function clearUnread() {
+  unread = 0;
+  newMsgsBtn.classList.add('hidden');
+}
+newMsgsBtn.addEventListener('click', () => {
+  scrollFeed(true);
+  clearUnread();
+});
+feed.addEventListener('scroll', () => {
+  if (isNearBottom()) clearUnread();
+});
 
 // ---- Translation proxy ----------------------------------------------------
 const localCache = new Map();

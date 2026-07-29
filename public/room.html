@@ -37,7 +37,10 @@
     <!-- Conversation -->
     <div class="card">
       <h2>Conversation</h2>
-      <div class="feed" id="feed"></div>
+      <div class="feed-wrap">
+        <div class="feed" id="feed"></div>
+        <button class="new-msgs hidden" id="new-msgs">↓ New messages</button>
+      </div>
       <div class="composer">
         <button class="mic" id="mic-btn" title="Tap to record">🎤</button>
         <textarea id="composer" rows="1" placeholder="Type or tap the mic to speak…"></textarea>

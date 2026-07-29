@@ -195,6 +195,30 @@ try {
   ok(msgsAfter === msgsBefore,
     `reconnect does not duplicate messages (before ${msgsBefore}, after ${msgsAfter})`);
 
+  // ---- Unread chip: scrolling up must not be yanked down by new arrivals ----
+  // Shrink the feed so it definitely overflows, then read from the top.
+  await guest.evaluate(() => {
+    const f = document.getElementById('feed');
+    f.style.maxHeight = '120px';
+    f.scrollTop = 0;
+  });
+  await host.fill('#composer', 'Scroll test one');
+  await host.click('#send-btn');
+  const chipShown = await guest.waitForSelector('#new-msgs', { state: 'visible', timeout: 6000 })
+    .then(() => true).catch(() => false);
+  ok(chipShown, 'unread chip appears for messages arriving while scrolled up');
+  const stayedPut = await guest.evaluate(() => document.getElementById('feed').scrollTop < 60);
+  ok(stayedPut, 'feed does not auto-scroll away from the reading position');
+  await guest.click('#new-msgs');
+  const chipGone = await guest.waitForSelector('#new-msgs', { state: 'hidden', timeout: 4000 })
+    .then(() => true).catch(() => false);
+  const atBottom = await guest.evaluate(() => {
+    const f = document.getElementById('feed');
+    return f.scrollHeight - f.scrollTop - f.clientHeight < 60;
+  });
+  ok(chipGone && atBottom, 'tapping the chip jumps to the newest message and clears it');
+  await guest.evaluate(() => { document.getElementById('feed').style.maxHeight = ''; });
+
   // ---- History: a phone that reloads mid-conversation sees prior messages ----
   await guest.reload();
   await guest.waitForSelector('#menu-btn');
