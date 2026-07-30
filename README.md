@@ -89,6 +89,9 @@ the phone reached the server through.
 > secure context. `localhost` counts as secure; for other phones use an HTTPS
 > tunnel. Plain text messaging works without HTTPS.
 
+For putting it on a real server (Caddy/nginx/Docker/PaaS, certificates,
+env vars, post-deploy checklist), see **[DEPLOY.md](DEPLOY.md)**.
+
 ### Tests
 
 ```bash
