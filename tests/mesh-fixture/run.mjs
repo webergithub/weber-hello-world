@@ -290,5 +290,67 @@ console.log('[10] Android 保时长变调 WSOLA')
   check('原声 f=1.0 原样返回', pitchPreserve(new Int16Array([1, 2, 3]), 1.0).length === 3)
 }
 
+// ---------- 11. 送达回执（G-CM-2：A→B→回执→A 计数；跨中继；不为他人消息计数） ----------
+console.log('[11] 送达回执')
+{
+  const KIND_CHAT = 1, KIND_ACK = 4
+  // 链 A-B-C：C 只能经 B 中继，回执也要能走回程中继
+  const radio = new Radio()
+  const nodes = { A: new SimNode('A'), B: new SimNode('B'), C: new SimNode('C') }
+  Object.values(nodes).forEach(n => radio.add(n))
+  radio.link('A', 'B'); radio.link('B', 'C')
+
+  // 模拟营地逻辑：每台机 seen/myMids/ackBy + 收到聊天即回执
+  const app = {}
+  for (const id of ['A', 'B', 'C']) {
+    app[id] = { seen: new Set(), myMids: new Set(), ackBy: new Map() }
+    const me = app[id]
+    const node = nodes[id]
+    node.onBus = (frame) => {
+      const d = busDecode(frame, 'K7Q9ZP')
+      if (!d) return
+      const msg = JSON.parse(d.body.toString('utf8'))
+      if (d.kind === KIND_CHAT) {
+        if (me.seen.has(msg.mid)) return
+        me.seen.add(msg.mid)
+        node.send(busEncode(KIND_ACK, 'K7Q9ZP', Buffer.from(JSON.stringify({ mid: msg.mid, by: id }))))
+      } else if (d.kind === KIND_ACK) {
+        if (!me.myMids.has(msg.mid)) return
+        if (!me.ackBy.has(msg.mid)) me.ackBy.set(msg.mid, new Set())
+        me.ackBy.get(msg.mid).add(msg.by)
+      }
+    }
+  }
+  // 手动驱动：SimNode.delivered 是数组，改为轮询处理新到载荷
+  const pump = () => {
+    let moved = true
+    while (moved) {
+      moved = false
+      for (const id of ['A', 'B', 'C']) {
+        const node = nodes[id], me = app[id]
+        while ((me.cursor ?? 0) < node.delivered.length) {
+          const frame = node.delivered[me.cursor = (me.cursor ?? 0) + 1, me.cursor - 1]
+          node.onBus(frame); moved = true
+        }
+      }
+    }
+  }
+
+  const mid = 'chat-001'
+  app.A.myMids.add(mid); app.A.seen.add(mid)
+  nodes.A.send(busEncode(KIND_CHAT, 'K7Q9ZP', Buffer.from(JSON.stringify({ mid, n: '我', t: '收到请回执', ts: 0 }))))
+  pump()
+
+  check('B、C（含经中继者）都收到消息', app.B.seen.has(mid) && app.C.seen.has(mid))
+  check('A 聚合到 2 个去重回执（B 直连 + C 经中继）',
+    app.A.ackBy.get(mid)?.size === 2, `got=${app.A.ackBy.get(mid)?.size}`)
+  check('B 不为别人的消息计数回执', !app.B.ackBy.has(mid))
+
+  // KIND_ACK=4 双端防漂移
+  const swiftBus2 = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshBus.swift'), 'utf8')
+  const ktBus2 = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshBus.kt'), 'utf8')
+  check('kindAck=4 双端一致', /kindAck: UInt8 = 4/.test(swiftBus2) && /KIND_ACK: Byte = 4/.test(ktBus2))
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)

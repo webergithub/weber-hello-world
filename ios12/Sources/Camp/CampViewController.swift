@@ -25,6 +25,11 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
     private var recordStart = Date()
     private var player: AVAudioPlayer?
 
+    // 送达回执（G-CM-2）：自己发出的 mid → 已回执的设备 id 集合
+    private struct AckMsg: Codable { let mid: String; let by: String }
+    private var myMids = Set<String>()
+    private var ackBy: [String: Set<String>] = [:]
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "营地"
@@ -96,9 +101,18 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
         MeshBus.shared.start()
         MeshBus.shared.subscribe(MeshBus.kindChat) { [weak self] data in
             guard let self = self, let msg = try? JSONDecoder().decode(ChatMsg.self, from: data) else { return }
-            self.appendIfNew(msg)
+            if self.appendIfNew(msg) { self.sendAck(msg.mid) }
         }
         MeshBus.shared.subscribe(MeshBus.kindVoice) { [weak self] data in self?.onVoice(data) }
+        MeshBus.shared.subscribe(MeshBus.kindAck) { [weak self] data in
+            guard let self = self, let ack = try? JSONDecoder().decode(AckMsg.self, from: data),
+                  self.myMids.contains(ack.mid) else { return }
+            var set = self.ackBy[ack.mid] ?? []
+            if set.insert(ack.by).inserted {
+                self.ackBy[ack.mid] = set
+                self.table.reloadData()   // "✓已送达 N" 随回执刷新
+            }
+        }
         MeshBus.shared.onPeers { [weak self] count in self?.updatePeersTitle(count) }
         // 链路健康（PR-P1-1）：蓝牙关闭时立刻在标题栏亮红字，绝不"界面照常"
         MeshBus.shared.onState { [weak self] available in
@@ -136,6 +150,7 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
     @objc private func sendTapped() {
         guard let text = field.text?.trimmingCharacters(in: .whitespaces), !text.isEmpty else { return }
         let msg = ChatMsg(mid: UUID().uuidString, n: myName, t: text, ts: Date().timeIntervalSince1970)
+        myMids.insert(msg.mid)   // 送达回执按此聚合（G-CM-2）
         appendIfNew(msg)
         if let data = try? JSONEncoder().encode(msg) { MeshBus.shared.send(MeshBus.kindChat, data) }
         field.text = ""
@@ -188,6 +203,7 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
             return
         }
         let mid = UUID().uuidString
+        myMids.insert(mid)   // 送达回执按此聚合（G-CM-2）
         let d = (dur * 10).rounded() / 10
         let meta = VoiceMeta(mid: mid, n: myName, d: d, ts: Date().timeIntervalSince1970)
         guard let json = try? JSONEncoder().encode(meta) else { return }
@@ -215,7 +231,9 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("voice_\(meta.mid).m4a")
         try? m4a.write(to: url)
         voiceFiles[meta.mid] = url
-        appendIfNew(ChatMsg(mid: meta.mid, n: meta.n, t: "🎤 语音 \(meta.d)s（点按播放）", ts: meta.ts))
+        if appendIfNew(ChatMsg(mid: meta.mid, n: meta.n, t: "🎤 语音 \(meta.d)s（点按播放）", ts: meta.ts)) {
+            sendAck(meta.mid)
+        }
     }
 
     func tableView(_ t: UITableView, didSelectRowAt ip: IndexPath) {
@@ -227,14 +245,22 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
         player?.play()
     }
 
-    private func appendIfNew(_ msg: ChatMsg) {
-        if seenMids.contains(msg.mid) { return }
+    @discardableResult
+    private func appendIfNew(_ msg: ChatMsg) -> Bool {
+        if seenMids.contains(msg.mid) { return false }
         seenMids.insert(msg.mid)
         messages.append(msg)
         table.reloadData()
         if !messages.isEmpty {
             table.scrollToRow(at: IndexPath(row: messages.count - 1, section: 0), at: .bottom, animated: true)
         }
+        return true
+    }
+
+    // 送达回执（G-CM-2）
+    private func sendAck(_ mid: String) {
+        let ack = AckMsg(mid: mid, by: Identity.deviceId)
+        if let data = try? JSONEncoder().encode(ack) { MeshBus.shared.send(MeshBus.kindAck, data) }
     }
 
     // MARK: - 键盘
@@ -263,7 +289,9 @@ final class CampViewController: UIViewController, UITableViewDataSource, UITable
             let mine = (m.n == myName)
             cell.textLabel?.textColor = .darkText
             cell.textLabel?.font = .systemFont(ofSize: 15)
-            cell.textLabel?.text = mine ? "我：\(m.t)" : "\(m.n)：\(m.t)"
+            var line = mine ? "我：\(m.t)" : "\(m.n)：\(m.t)"
+            if let acks = ackBy[m.mid], !acks.isEmpty { line += "  ✓已送达 \(acks.count)" }
+            cell.textLabel?.text = line
         }
         return cell
     }
