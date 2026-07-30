@@ -33,6 +33,10 @@ class CampFragment : Fragment() {
     // (mid, 显示文本, 语音文件路径或 null)
     private val entries = ArrayList<Triple<String, String, String?>>()
 
+    // 送达回执（G-CM-2）：自己发出的 mid → 已回执的设备 id 集合
+    private val myMids = HashSet<String>()
+    private val ackBy = HashMap<String, MutableSet<String>>()
+
     // 短语音（G-CM-1）
     private var recorder: android.media.MediaRecorder? = null
     private var recordFile: java.io.File? = null
@@ -104,6 +108,7 @@ class CampFragment : Fragment() {
         // 每次重建都注册：MeshBus 为"每类型单 handler"，新实例自动顶替旧实例
         MeshBus.subscribe(MeshBus.KIND_CHAT) { body -> onChat(body) }
         MeshBus.subscribe(MeshBus.KIND_VOICE) { body -> onVoice(body) }
+        MeshBus.subscribe(MeshBus.KIND_ACK) { body -> onAck(body) }
         MeshBus.onPeers("camp") { n -> renderStatus(n) }
         ctx.registerReceiver(btStateReceiver,
             android.content.IntentFilter(android.bluetooth.BluetoothAdapter.ACTION_STATE_CHANGED))
@@ -145,6 +150,7 @@ class CampFragment : Fragment() {
         val text = input.text.toString().trim()
         if (text.isEmpty()) return
         val mid = UUID.randomUUID().toString()
+        myMids.add(mid)   // 送达回执按此聚合（G-CM-2）
         val json = JSONObject()
             .put("mid", mid).put("n", Identity.nick(ctx)).put("t", text)
             .put("ts", System.currentTimeMillis() / 1000.0)
@@ -160,7 +166,26 @@ class CampFragment : Fragment() {
     private fun onChat(body: ByteArray) {
         try {
             val o = JSONObject(String(body, Charsets.UTF_8))
-            appendIfNew(o.getString("mid"), "${o.getString("n")}：${o.getString("t")}")
+            if (appendIfNew(o.getString("mid"), "${o.getString("n")}：${o.getString("t")}")) {
+                sendAck(o.getString("mid"))
+            }
+        } catch (_: Exception) {}
+    }
+
+    // MARK: - 送达回执（G-CM-2）
+    private fun sendAck(mid: String) {
+        val ctx = context ?: return
+        val json = JSONObject().put("mid", mid).put("by", Identity.deviceId(ctx))
+        MeshBus.send(MeshBus.KIND_ACK, json.toString().toByteArray(Charsets.UTF_8))
+    }
+
+    private fun onAck(body: ByteArray) {
+        try {
+            val o = JSONObject(String(body, Charsets.UTF_8))
+            val mid = o.getString("mid")
+            if (mid !in myMids) return   // 只关心自己发的消息
+            val added = ackBy.getOrPut(mid) { HashSet() }.add(o.getString("by"))
+            if (added) renderLog()       // "✓已送达 N" 随回执刷新
         } catch (_: Exception) {}
     }
 
@@ -207,6 +232,7 @@ class CampFragment : Fragment() {
         payload[0] = (json.size shr 8).toByte(); payload[1] = json.size.toByte()
         System.arraycopy(json, 0, payload, 2, json.size)
         System.arraycopy(m4a, 0, payload, 2 + json.size, m4a.size)
+        myMids.add(mid)   // 送达回执按此聚合（G-CM-2）
         val mine = java.io.File(ctx.cacheDir, "voice_$mid.m4a").also { f.copyTo(it, overwrite = true) }
         appendIfNew(mid, "我：🎤 语音 ${d}s（点按播放）", mine.absolutePath)
         MeshBus.send(MeshBus.KIND_VOICE, payload)
@@ -223,7 +249,9 @@ class CampFragment : Fragment() {
             val ctx = context ?: return
             val f = java.io.File(ctx.cacheDir, "voice_$mid.m4a")
             f.writeBytes(body.copyOfRange(2 + jlen, body.size))
-            appendIfNew(mid, "${o.getString("n")}：🎤 语音 ${o.optDouble("d", 0.0)}s（点按播放）", f.absolutePath)
+            if (appendIfNew(mid, "${o.getString("n")}：🎤 语音 ${o.optDouble("d", 0.0)}s（点按播放）", f.absolutePath)) {
+                sendAck(mid)
+            }
         } catch (_: Exception) {}
     }
 
@@ -234,10 +262,11 @@ class CampFragment : Fragment() {
         }
     }
 
-    private fun appendIfNew(mid: String, line: String, voicePath: String? = null) {
-        if (!seenMids.add(mid)) return
+    private fun appendIfNew(mid: String, line: String, voicePath: String? = null): Boolean {
+        if (!seenMids.add(mid)) return false
         entries.add(Triple(mid, line, voicePath))
         renderLog()
+        return true
     }
 
     private fun renderLog() {
@@ -249,11 +278,12 @@ class CampFragment : Fragment() {
                 text = "还没有消息。开启蓝牙、与附近同伴（iOS/安卓均可）进入本页即可互聊互发语音，无需网络。"
             })
         } else {
-            entries.forEach { (_, line, voicePath) ->
+            entries.forEach { (mid, line, voicePath) ->
+                val acks = ackBy[mid]?.size ?: 0
                 msgBox.addView(TextView(ctx).apply {
                     textSize = 15f
                     setPadding(0, dp(3), 0, dp(3))
-                    text = line
+                    text = if (acks > 0) "$line  ✓已送达 $acks" else line
                     if (voicePath != null) {
                         setTextColor(0xFF0F766E.toInt())
                         setOnClickListener { play(voicePath) }
