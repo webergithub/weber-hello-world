@@ -268,5 +268,27 @@ console.log('[9] 营地短语音')
   check('6 位码字符集三端一致', idTs.includes(CHARSET) && identSwift.includes(CHARSET) && ktBus.includes(CHARSET))
 }
 
+// ---------- 10. 保时长变声 WSOLA（G-VC-2：长度守恒 + 主频精确 ×f） ----------
+console.log('[10] Android 保时长变调 WSOLA')
+{
+  const { pitchPreserve, dominantHz, SR } = await import('./pitchshift.mjs')
+  const F0 = 200
+  const src = new Int16Array(Math.trunc(SR * 0.5))
+  for (let i = 0; i < src.length; i++) src[i] = Math.round(12000 * Math.sin((2 * Math.PI * F0 * i) / SR))
+  const baseHz = dominantHz(src)
+  let allOk = true
+  for (const f of [1.45, 1.7, 1.6, 1.25, 0.72, 1.9, 0.6]) {   // 与 VoiceFragment 预设一致
+    const out = pitchPreserve(src, f)
+    let nan = false, peak = 0
+    for (const v of out) { if (!Number.isFinite(v)) nan = true; peak = Math.max(peak, Math.abs(v)) }
+    const ratio = dominantHz(out) / baseHz
+    if (!(out.length === src.length && !nan && peak > 2000 && Math.abs(ratio - f) / f < 0.08)) {
+      allOk = false; console.log(`    f=${f} → ×${ratio.toFixed(2)} peak=${peak}`)
+    }
+  }
+  check('7 个预设：长度守恒 + 主频精确 ×f + 无削波/NaN', allOk)
+  check('原声 f=1.0 原样返回', pitchPreserve(new Int16Array([1, 2, 3]), 1.0).length === 3)
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)
