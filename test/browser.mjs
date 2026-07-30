@@ -152,6 +152,17 @@ try {
     .then(() => true).catch(() => false);
   ok(typingCleared, 'typing indicator clears once the message arrives');
 
+  // ---- Quick language switch under the composer ----
+  await guest.selectOption('#quick-speak', 'ja');
+  const mirrored = await guest.evaluate(() => document.getElementById('speak-lang').value);
+  ok(mirrored === 'ja', 'quick-switch mirrors into the Settings sheet');
+  const rosterUpdated = await host.waitForFunction(() =>
+    [...document.querySelectorAll('#members .member')].some((m) =>
+      m.textContent.includes('Japanese')), { timeout: 5000 })
+    .then(() => true).catch(() => false);
+  ok(rosterUpdated, 'room roster reflects the quick-switched language');
+  await guest.selectOption('#quick-speak', 'zh'); // restore for later steps
+
   // ---- Guest replies in Chinese; host reads English ----
   await openSettings(host);
   await host.selectOption('#recv-primary', 'en');

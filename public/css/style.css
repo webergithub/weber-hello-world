@@ -170,6 +170,16 @@ input:focus, select:focus { border-color: var(--brand); }
 
 .mic.busy { background: #caa53a; animation: none; }
 
+/* Quick language switch under the composer */
+.quick-lang {
+  display: flex; align-items: center; gap: 8px; margin-top: 10px;
+}
+.quick-lang label { margin: 0; font-size: 12px; color: var(--muted); flex: 0 0 auto; }
+.quick-lang select {
+  width: auto; flex: 1; max-width: 260px;
+  padding: 7px 10px; font-size: 13px; border-radius: 10px;
+}
+
 .icon-btn {
   border: 1px solid var(--line); background: var(--bg-soft); color: var(--text);
   border-radius: 12px; padding: 9px 12px; font-size: 14px; cursor: pointer;

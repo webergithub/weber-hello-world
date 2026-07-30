@@ -59,15 +59,24 @@ function savePrefs() {
 
 // ---- Language selectors ---------------------------------------------------
 fillLangSelect($('speak-lang'), { selected: state.speakLang });
+fillLangSelect($('quick-speak'), { selected: state.speakLang });
 fillLangSelect($('recv-primary'), { selected: state.recvPrimary });
 fillLangSelect($('recv-secondary'), { includeNone: true, selected: state.recvSecondary });
 $('speak-aloud').checked = state.speakAloud;
 
-$('speak-lang').addEventListener('change', (e) => {
-  state.speakLang = e.target.value;
+// The speak language is settable from two places — the Settings sheet and the
+// quick-switch under the composer — so route both through one function that
+// keeps them mirrored and tells the room.
+function setSpeakLang(code) {
+  state.speakLang = code;
+  $('speak-lang').value = code;
+  $('quick-speak').value = code;
   savePrefs();
-  send({ type: 'setLang', speakLang: state.speakLang });
-});
+  send({ type: 'setLang', speakLang: code });
+}
+
+$('speak-lang').addEventListener('change', (e) => setSpeakLang(e.target.value));
+$('quick-speak').addEventListener('change', (e) => setSpeakLang(e.target.value));
 $('recv-primary').addEventListener('change', (e) => {
   state.recvPrimary = e.target.value;
   savePrefs();
