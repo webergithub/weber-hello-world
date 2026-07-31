@@ -177,6 +177,7 @@ if ('NDEFReader' in window) {
 let ws;
 let reconnectTimer = null;
 let everConnected = false;
+let roomClosed = false; // set when an admin closes the room — stop reconnecting
 
 function setConnected(up) {
   // Only nag about the connection once we've actually been online — a first
@@ -222,7 +223,7 @@ function connect() {
 }
 
 function scheduleReconnect() {
-  if (reconnectTimer) return;
+  if (roomClosed || reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
     reconnectTimer = null;
     connect();
@@ -265,6 +266,14 @@ function handle(msg) {
       break;
     case 'system':
       addSystemLine(msg.text);
+      break;
+    case 'closed':
+      // An admin ended this room. Don't reconnect — that would recreate it.
+      roomClosed = true;
+      addSystemLine('This room was closed.');
+      $('conn-banner').textContent = 'This room was closed by an administrator.';
+      $('conn-banner').classList.remove('hidden');
+      setTimeout(() => { location.href = '/'; }, 2500);
       break;
     case 'partial':
       renderPartial(msg);

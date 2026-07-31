@@ -57,7 +57,10 @@ conversation).
 - **`server.js`** — Express static host + WebSocket relay. Manages rooms (kept
   in memory, snapshotted to disk), mints invite codes, renders join QR codes,
   and exposes a translation proxy so the browser needs no API keys and hits no
-  CORS walls.
+  CORS walls. Also serves the ops surface: `/api/health`, `/api/metrics`, rate
+  limits, and the admin console.
+- **`metrics.js` / `ratelimit.js`** — in-process counters and a per-IP token
+  bucket protecting the endpoints that cost money.
 - **`public/`** — the PWA. `index.html` (create / join), `room.html` (the room),
   `js/room.js` (the client), `js/langs.js` (language table), `css/style.css`,
   `sw.js` (service worker for install + offline), `manifest.webmanifest`.
@@ -91,6 +94,23 @@ the phone reached the server through.
 
 For putting it on a real server (Caddy/nginx/Docker/PaaS, certificates,
 env vars, post-deploy checklist), see **[DEPLOY.md](DEPLOY.md)**.
+
+## Operating it
+
+The server ships with a small ops surface — health probe, metrics, rate limits
+on the endpoints that cost money, and a token-protected admin console at
+`/admin` (rooms list, room detail, close a room, live metrics). It is
+**disabled unless `ADMIN_TOKEN` is set**, so an unconfigured deployment never
+exposes room contents:
+
+```bash
+ADMIN_TOKEN=$(openssl rand -hex 24) npm start   # then open /admin
+curl localhost:3000/api/health
+curl localhost:3000/api/metrics
+```
+
+Roadmap for further backend work (moderation, pluggable storage, multi-instance
+scaling, usage accounting) is in **[BACKEND.md](BACKEND.md)**.
 
 ### Tests
 

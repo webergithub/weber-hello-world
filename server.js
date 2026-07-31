@@ -5,7 +5,10 @@
 //   2. Run a WebSocket relay so devices in the same room see each other's
 //      messages in real time.
 //   3. Mint room invites (short code + shareable URL) and render join QR codes.
-//   4. Proxy machine translation so the browser avoids CORS and API keys.
+//   4. Proxy machine translation and Whisper transcription so the browser
+//      avoids CORS and never holds API keys.
+//   5. Operate: health/metrics endpoints, rate limits on the endpoints that
+//      cost money, and a token-protected admin console (see BACKEND.md).
 //
 // The design keeps *translation on the receiver side*: the server relays the
 // original text plus its source language, and every receiving device
@@ -20,6 +23,8 @@ import express from 'express';
 import { WebSocketServer } from 'ws';
 import QRCode from 'qrcode';
 import { offlineTranslate } from './phrasebook.js';
+import { metrics, snapshotMetrics, uptimeSec } from './metrics.js';
+import { rateLimit, LIMITS } from './ratelimit.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = process.env.PORT || 3000;
@@ -33,6 +38,12 @@ const ROOM_TTL_MS = Number(process.env.ROOM_TTL_MS || 24 * 60 * 60 * 1000); // p
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Pretty URL for the admin console (the page itself is a static shell; all of
+// its data requires the admin token — see the Admin API section below).
+app.get('/admin', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'admin.html'));
+});
 
 // ---------------------------------------------------------------------------
 // Rooms & participants. Members are live WebSocket connections (never
@@ -62,8 +73,15 @@ function ensureRoom(code) {
     const now = Date.now();
     room = { code, createdAt: now, lastActivity: now, members: new Map(), history: [] };
     rooms.set(code, room);
+    metrics.rooms.created++;
   }
   return room;
+}
+
+function memberCount() {
+  let n = 0;
+  for (const r of rooms.values()) n += r.members.size;
+  return n;
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +154,7 @@ function sweepRooms() {
   for (const room of rooms.values()) {
     if (room.members.size === 0 && now - room.lastActivity > ROOM_TTL_MS) {
       rooms.delete(room.code);
+      metrics.rooms.pruned++;
       changed = true;
     }
   }
@@ -156,8 +175,35 @@ function baseUrl(req) {
 // REST endpoints
 // ---------------------------------------------------------------------------
 
+// Liveness/readiness probe. Reports 503 while shutting down so a load balancer
+// can drain this instance before it disappears.
+app.get('/api/health', (_req, res) => {
+  const body = {
+    status: shuttingDown ? 'shutting_down' : 'ok',
+    uptimeSec: uptimeSec(),
+    rooms: rooms.size,
+    members: memberCount(),
+    persist: PERSIST,
+    translate: {
+      provider: process.env.TRANSLATE_URL ? 'custom' : 'mymemory',
+      offlineOnly: OFFLINE_ONLY,
+    },
+    whisper: {
+      configured: WHISPER_MOCK || Boolean(process.env.WHISPER_API_KEY),
+      mock: WHISPER_MOCK,
+      model: WHISPER_MODEL,
+    },
+  };
+  res.status(shuttingDown ? 503 : 200).json(body);
+});
+
+// Cumulative in-process counters (reset on restart).
+app.get('/api/metrics', (_req, res) => {
+  res.json(snapshotMetrics({ rooms_current: rooms.size, members_current: memberCount() }));
+});
+
 // Create a room and hand back its code + invite URL.
-app.post('/api/rooms', (req, res) => {
+app.post('/api/rooms', rateLimit('rooms', LIMITS.rooms), (req, res) => {
   const code = makeRoomCode();
   ensureRoom(code);
   const url = `${baseUrl(req)}/room.html?room=${code}`;
@@ -236,12 +282,17 @@ async function callProvider(clean, from, to) {
 }
 
 async function translateText(text, from, to) {
+  metrics.translate.requests++;
   const clean = (text || '').trim();
   if (!clean) return { text: '', translated: false };
-  if (!from || !to || from === to) return { text: clean, translated: false };
+  if (!from || !to || from === to) {
+    metrics.translate.sameLanguage++;
+    return { text: clean, translated: false };
+  }
 
   const key = `${from}|${to}|${clean}`;
   if (translateCache.has(key)) {
+    metrics.translate.cacheHits++;
     return { text: translateCache.get(key), translated: true, cached: true };
   }
 
@@ -251,9 +302,11 @@ async function translateText(text, from, to) {
       const out = await callProvider(clean, from, to);
       if (out) {
         translateCache.set(key, out);
+        metrics.translate.provider++;
         return { text: out, translated: true };
       }
     } catch {
+      metrics.translate.failures++;
       // fall through to the offline phrasebook
     }
   }
@@ -262,14 +315,16 @@ async function translateText(text, from, to) {
   const offline = offlineTranslate(clean, from, to);
   if (offline) {
     translateCache.set(key, offline);
+    metrics.translate.offline++;
     return { text: offline, translated: true, source: 'offline' };
   }
 
   // 5. Give up — hand back the original, flagged.
+  metrics.translate.untranslated++;
   return { text: clean, translated: false, error: 'unavailable' };
 }
 
-app.post('/api/translate', async (req, res) => {
+app.post('/api/translate', rateLimit('translate', LIMITS.translate), async (req, res) => {
   const { text, from, to } = req.body || {};
   const result = await translateText(text, from, to);
   res.json(result);
@@ -313,6 +368,7 @@ app.get('/api/transcribe/status', (_req, res) => {
 
 app.post(
   '/api/transcribe',
+  rateLimit('transcribe', LIMITS.transcribe),
   express.raw({ type: () => true, limit: '25mb' }),
   async (req, res) => {
     const lang = String(req.query.lang || '').slice(0, 8) || undefined;
@@ -320,13 +376,17 @@ app.post(
     if (!audio || !audio.length) {
       return res.status(400).json({ error: 'no_audio' });
     }
+    metrics.transcribe.requests++;
+    metrics.transcribe.bytes += audio.length;
 
     // Mock mode: skip the network, echo a deterministic phrase so the whole
     // record → transcribe → translate → relay pipeline is testable offline.
     if (WHISPER_MOCK) {
+      metrics.transcribe.mock++;
       return res.json({ text: process.env.WHISPER_MOCK_TEXT || 'hello', mock: true });
     }
     if (!process.env.WHISPER_API_KEY) {
+      metrics.transcribe.failures++;
       return res.status(503).json({ error: 'not_configured' });
     }
 
@@ -351,15 +411,104 @@ app.post(
 
       if (!resp.ok) {
         const detail = await resp.text();
+        metrics.transcribe.failures++;
         return res.status(502).json({ error: 'whisper_failed', status: resp.status, detail });
       }
       const data = await resp.json();
+      metrics.transcribe.ok++;
       res.json({ text: (data.text || '').trim() });
     } catch (err) {
+      metrics.transcribe.failures++;
       res.status(500).json({ error: 'transcribe_error', detail: String(err) });
     }
   }
 );
+
+// ---------------------------------------------------------------------------
+// Admin API (see BACKEND.md).
+//
+// Security posture: the console is *disabled* unless ADMIN_TOKEN is set — an
+// unconfigured deployment must never expose room contents. The token is checked
+// on every request; serve behind HTTPS so it isn't sent in the clear.
+// ---------------------------------------------------------------------------
+
+const ADMIN_TOKEN = process.env.ADMIN_TOKEN || '';
+
+function requireAdmin(req, res, next) {
+  if (!ADMIN_TOKEN) {
+    return res.status(503).json({ error: 'admin_disabled', hint: 'set ADMIN_TOKEN to enable' });
+  }
+  const auth = req.headers.authorization || '';
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ error: 'unauthorized' });
+  }
+  next();
+}
+
+function roomSummary(room) {
+  return {
+    code: room.code,
+    members: room.members.size,
+    messages: room.history.length,
+    createdAt: room.createdAt,
+    lastActivity: room.lastActivity,
+    languages: [...new Set([...room.members.values()].map((m) => m.speakLang))],
+  };
+}
+
+app.get('/api/admin/overview', requireAdmin, (_req, res) => {
+  res.json({
+    metrics: snapshotMetrics(),
+    rooms: { current: rooms.size, members: memberCount() },
+    config: {
+      persist: PERSIST,
+      roomTtlMs: ROOM_TTL_MS,
+      historyLimit: HISTORY_LIMIT,
+      limits: LIMITS,
+      whisperConfigured: WHISPER_MOCK || Boolean(process.env.WHISPER_API_KEY),
+    },
+  });
+});
+
+app.get('/api/admin/rooms', requireAdmin, (_req, res) => {
+  const list = [...rooms.values()]
+    .map(roomSummary)
+    .sort((a, b) => b.lastActivity - a.lastActivity);
+  res.json({ rooms: list });
+});
+
+app.get('/api/admin/rooms/:code', requireAdmin, (req, res) => {
+  const room = rooms.get(String(req.params.code || '').toUpperCase());
+  if (!room) return res.status(404).json({ error: 'room_not_found' });
+  res.json({
+    ...roomSummary(room),
+    people: [...room.members.values()].map((m) => ({
+      id: m.id,
+      name: m.name,
+      speakLang: m.speakLang,
+      isHost: m.isHost,
+    })),
+    recent: room.history.slice(-30),
+  });
+});
+
+// Close a room: tell everyone why, disconnect them, and drop the history.
+app.delete('/api/admin/rooms/:code', requireAdmin, (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  const room = rooms.get(code);
+  if (!room) return res.status(404).json({ error: 'room_not_found' });
+
+  const members = room.members.size;
+  broadcast(room, { type: 'closed', reason: 'closed_by_admin' });
+  for (const m of room.members.values()) {
+    try { m.socket.close(); } catch { /* already gone */ }
+  }
+  rooms.delete(code);
+  metrics.rooms.closedByAdmin++;
+  scheduleSave();
+  res.json({ closed: code, disconnected: members });
+});
 
 // ---------------------------------------------------------------------------
 // WebSocket relay
@@ -390,6 +539,8 @@ let idSeq = 1;
 wss.on('connection', (socket) => {
   let member = null;
   let room = null;
+  metrics.ws.opened++;
+  socket.on('close', () => metrics.ws.closed++);
 
   socket.on('message', (buf) => {
     let msg;
@@ -412,6 +563,7 @@ wss.on('connection', (socket) => {
         socket,
       };
       room.members.set(member.id, member);
+      metrics.ws.joins++;
 
       socket.send(
         JSON.stringify({ type: 'welcome', you: member.id, isHost, room: code })
@@ -451,6 +603,8 @@ wss.on('connection', (socket) => {
       room.history.push(payload);
       if (room.history.length > HISTORY_LIMIT) room.history.shift();
       room.lastActivity = payload.ts;
+      metrics.messages.relayed++;
+      metrics.messages.chars += text.length;
       scheduleSave();
       // Exclude the sender: their own client renders an instant local echo, so
       // relaying it back would show the message twice.

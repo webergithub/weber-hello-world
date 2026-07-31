@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0b1020" />
+  <title>LinkTalk · admin</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap admin-wrap">
+    <div class="topbar">
+      <div class="brand" style="font-size:18px"><span class="dot"></span> LinkTalk <span class="small" style="margin-left:6px">admin</span></div>
+      <button class="icon-btn hidden" id="signout">Sign out</button>
+    </div>
+
+    <!-- Token gate -->
+    <div class="card" id="gate">
+      <h2>Admin token</h2>
+      <p class="hint">The console is disabled unless the server was started with <code>ADMIN_TOKEN</code>. The token is kept in this tab only.</p>
+      <label for="token">Token</label>
+      <input id="token" type="password" placeholder="paste ADMIN_TOKEN" autocomplete="off" />
+      <button class="btn" id="signin">Unlock →</button>
+      <p class="small" id="gate-err" style="margin-top:10px;color:var(--danger)"></p>
+    </div>
+
+    <!-- Dashboard -->
+    <div id="dash" class="hidden">
+      <div class="card">
+        <h2>Service</h2>
+        <div class="stat-grid" id="stats"></div>
+        <p class="small" id="refreshed" style="margin-top:12px"></p>
+      </div>
+
+      <div class="card">
+        <h2>Rooms</h2>
+        <p class="hint" id="rooms-empty">No active rooms.</p>
+        <table class="admin-table hidden" id="rooms-table">
+          <thead><tr><th>Room</th><th>People</th><th>Msgs</th><th>Last active</th><th></th></tr></thead>
+          <tbody id="rooms-body"></tbody>
+        </table>
+      </div>
+
+      <div class="card hidden" id="detail-card">
+        <div class="sheet-head" style="position:static;background:transparent;border:none;margin:0 0 6px;padding:0">
+          <h2 id="detail-title">Room</h2>
+          <button class="icon-btn" id="detail-close" aria-label="Close">✕</button>
+        </div>
+        <div id="detail-people" class="members" style="margin-bottom:12px"></div>
+        <div class="feed" id="detail-feed" style="max-height:40vh"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script type="module" src="/js/admin.js"></script>
+</body>
+</html>

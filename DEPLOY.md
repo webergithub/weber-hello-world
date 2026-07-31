@@ -126,6 +126,28 @@ work. Two notes:
 | `PERSIST` | `0` = keep rooms in memory only | on |
 | `DATA_FILE` | room snapshot location | `data/rooms.json` |
 | `ROOM_TTL_MS` | how long an empty room is kept | `86400000` (24h) |
+| `ADMIN_TOKEN` | enables the `/admin` console; **unset = console disabled** | — |
+| `RATE_TRANSLATE_PER_MIN` | per-IP translate requests/minute | `240` |
+| `RATE_TRANSCRIBE_PER_MIN` | per-IP transcribe requests/minute | `60` |
+| `RATE_ROOMS_PER_MIN` | per-IP room creations/minute | `60` |
+| `RATE_LIMIT` | `0` = disable rate limiting entirely | on |
+
+### Monitoring hooks
+
+- **Liveness/readiness:** `GET /api/health` — returns `200 {"status":"ok"}`, or
+  `503 {"status":"shutting_down"}` while the process drains, so load balancers
+  and k8s probes can pull it out of rotation cleanly.
+- **Metrics:** `GET /api/metrics` — JSON counters (rooms, sockets, messages,
+  translations broken down by cache/provider/offline/failure, transcriptions,
+  rate-limit trips). Scrape into whatever you use for dashboards.
+- **Admin console:** `/admin`, guarded by `ADMIN_TOKEN` (see
+  [BACKEND.md](BACKEND.md)). Serve it over HTTPS — the token is sent as a
+  bearer header. If you'd rather not expose it publicly, restrict `/admin` and
+  `/api/admin/` to your VPN in the proxy config.
+
+> Rate limits key on `X-Forwarded-For`'s first hop, so make sure your proxy sets
+> it (the Caddy and nginx configs above do). If every phone shares one NAT
+> egress IP, raise the limits accordingly.
 
 ## Post-deploy checklist
 

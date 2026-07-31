@@ -7,7 +7,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev
 
-COPY server.js phrasebook.js ./
+COPY server.js phrasebook.js metrics.js ratelimit.js ./
 COPY public ./public
 
 # Room history is snapshotted here; mount a volume to keep it across restarts.

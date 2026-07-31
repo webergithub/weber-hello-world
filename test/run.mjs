@@ -32,7 +32,13 @@ function runSuite(file) {
   });
 }
 
-const SUITES = ['test/e2e.mjs', 'test/browser.mjs', 'test/pwa.mjs', 'test/persist.mjs'];
+const SUITES = [
+  'test/e2e.mjs',
+  'test/browser.mjs',
+  'test/pwa.mjs',
+  'test/persist.mjs',
+  'test/admin.mjs',
+];
 
 let failed = 0;
 if (!(await waitReady())) {
