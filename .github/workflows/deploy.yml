@@ -57,9 +57,11 @@ jobs:
           ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
           SSH="ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no -o BatchMode=yes"
           $SSH "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p '$DEPLOY_PATH'"
+          # 注意：--delete 会删除目标目录中不在本清单内的一切。
+          # 因此后端服务、数据库、.env 绝不能放在 $DEPLOY_PATH 下（应放 /opt/citytwin）。
           rsync -avz --delete \
             -e "$SSH" \
-            index.html game.js cities.js lib data README.md \
+            index.html game.js cities.js lib data photoreal README.md \
             "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/"
 
       - name: Verify deployment

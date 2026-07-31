@@ -45,7 +45,7 @@ echo "📦 代码就绪：$DIR ($(git rev-parse --short HEAD))"
 # 3) 部署（rsync over SSH）
 SSH="ssh -i $KEY -o StrictHostKeyChecking=no"
 $SSH "$SRV" "mkdir -p $DEST"
-rsync -avz -e "$SSH" index.html game.js cities.js lib data README.md "$SRV:$DEST/"
+rsync -avz -e "$SSH" index.html game.js cities.js lib data photoreal README.md "$SRV:$DEST/"
 
 # 4) 验证
 $SSH "$SRV" "ls -lh $DEST/index.html && echo VERIFY_OK"
