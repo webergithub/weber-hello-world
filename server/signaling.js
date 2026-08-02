@@ -13,6 +13,12 @@
 //   单条消息上限 MAX_MSG_BYTES，超限断开（4002）。
 //   单 IP 并发连接上限 MAX_CONN_PER_IP，超限拒绝（4001）。
 //   TLS：本进程只监听明文 ws，公网部署必须挂在反向代理（Caddy/Nginx）后走 wss。
+//
+// 业务帧中继（BR-1.2，哑中继）：
+//   {type:'relay-join', room}  room = SHA256('trailmate-room-v1|' + 队伍码) 的十六进制
+//   {type:'relay', room, kind, body}  body = base64(端到端密文)
+//   服务端只按 room 分房转发，**看不到队伍码、看不懂 kind、无法解密 body**。
+//   队伍码绝不上传：它是 PBKDF2 派生密钥的唯一输入，上传即等于交出密钥。
 
 import { WebSocketServer } from 'ws'
 
@@ -27,6 +33,10 @@ const wss = new WebSocketServer({ port: PORT })
 
 /** room -> Map<peerId, ws> */
 const rooms = new Map()
+
+/** 中继房间：roomHash -> Set<ws>（BR-1.2）。roomHash 由客户端算，服务端不知队伍码。 */
+const relayRooms = new Map()
+const ROOM_RE = /^[0-9a-f]{64}$/   // SHA256 十六进制
 /** ip -> 并发连接数 */
 const ipConns = new Map()
 
@@ -42,6 +52,16 @@ function leave(ws) {
   peers.delete(peerId)
   for (const other of peers.values()) send(other, { type: 'left', peerId })
   if (peers.size === 0) rooms.delete(room)
+}
+
+function leaveRelay(ws) {
+  const r = ws.relayRoom
+  if (!r) return
+  const peers = relayRooms.get(r)
+  if (!peers) return
+  peers.delete(ws)
+  if (peers.size === 0) relayRooms.delete(r)
+  ws.relayRoom = null
 }
 
 wss.on('connection', (ws, req) => {
@@ -96,6 +116,42 @@ wss.on('connection', (ws, req) => {
       return
     }
 
+    // 业务帧中继（BR-1.2）：按「房间哈希」分房转发密文。
+    // 安全关键：客户端发来的 room 是 SHA256(trailmate-room-v1|队伍码)，**不是队伍码本身**——
+    // 队伍码是端到端加密密钥的唯一输入，一旦上传服务端即可自行派生密钥解密，哑中继将破功。
+    // 服务端因此只看得见：房间哈希、kind 字节、密文。既不理解也无法还原业务内容。
+    if (msg.type === 'relay') {
+      const { room, kind, body } = msg
+      if (typeof room !== 'string' || !ROOM_RE.test(room)) return
+      if (!Number.isInteger(kind) || kind < 0 || kind > 255) return
+      if (typeof body !== 'string' || body.length > MAX_MSG_BYTES) return
+      // 必须已通过 relay-join（含 token 校验）且只能发往自己所在房间——
+      // 否则任何知道房间哈希的连接都能无凭据注入帧。
+      if (ws.relayRoom !== room) return
+      const peers = relayRooms.get(room)
+      if (!peers || !peers.has(ws)) return
+      for (const other of peers) {
+        if (other !== ws) send(other, { type: 'relay', kind, body })
+      }
+      return
+    }
+
+    // 加入中继房间：只上报房间哈希，不上报队伍码
+    if (msg.type === 'relay-join') {
+      const { room } = msg
+      if (typeof room !== 'string' || !ROOM_RE.test(room)) return
+      if (TOKEN && msg.token !== TOKEN) {
+        ws.close(4003, 'bad token')
+        return
+      }
+      leaveRelay(ws)
+      ws.relayRoom = room
+      if (!relayRooms.has(room)) relayRooms.set(room, new Set())
+      relayRooms.get(room).add(ws)
+      send(ws, { type: 'relay-joined', peers: relayRooms.get(room).size - 1 })
+      return
+    }
+
     // 未通过 join（含 token 校验）的连接不允许转发
     if (!ws.meta.room) return
 
@@ -110,6 +166,7 @@ wss.on('connection', (ws, req) => {
 
   const cleanup = () => {
     leave(ws)
+    leaveRelay(ws)
     const left = (ipConns.get(ip) || 1) - 1
     if (left <= 0) ipConns.delete(ip)
     else ipConns.set(ip, left)

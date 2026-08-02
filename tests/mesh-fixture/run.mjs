@@ -352,5 +352,76 @@ console.log('[11] 送达回执')
   check('kindAck=4 双端一致', /kindAck: UInt8 = 4/.test(swiftBus2) && /KIND_ACK: Byte = 4/.test(ktBus2))
 }
 
+// ---------- 12. 网络中继哑中继（BR-1.2/1.6：真服务端 + 真客户端） ----------
+console.log('[12] 服务端业务帧中继（哑中继）')
+{
+  const { spawn } = await import('node:child_process')
+  const { WebSocket } = await import('ws')
+  const mc = await import('./meshcrypto.mjs')
+  const PORT = 18899, TOKEN = 'relay-secret', TEAM = 'K7Q9ZP'
+
+  const seen = []   // 服务端进程输出，用于事后检索泄漏
+  const srv = spawn('node', [join(ROOT, 'server/signaling.js')], {
+    env: { ...process.env, PORT: String(PORT), SIGNAL_TOKEN: TOKEN }, stdio: 'pipe',
+  })
+  srv.stdout.on('data', d => seen.push(String(d)))
+  srv.stderr.on('data', d => seen.push(String(d)))
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('server start timeout')), 5000)
+    srv.stdout.on('data', d => { if (String(d).includes('已启动')) { clearTimeout(t); res() } })
+  })
+
+  const connect = () => new Promise((res, rej) => {
+    const c = new WebSocket(`ws://127.0.0.1:${PORT}`)
+    c.on('open', () => res(c)); c.on('error', rej)
+  })
+  const next = (c, ms = 1500) => new Promise((res) => {
+    const t = setTimeout(() => res({ kind: 'timeout' }), ms)
+    c.once('message', d => { clearTimeout(t); res({ kind: 'msg', data: JSON.parse(String(d)) }) })
+    c.once('close', code => { clearTimeout(t); res({ kind: 'close', code }) })
+  })
+  const joinRelay = async (c, team, token = TOKEN) => {
+    c.send(JSON.stringify({ type: 'relay-join', room: mc.roomId(team), token }))
+    return next(c)
+  }
+
+  const a = await connect(), b = await connect()
+  await joinRelay(a, TEAM); await joinRelay(b, TEAM)
+
+  // 甲发一条加密位置帧 → 乙必须收到并能解密
+  const plain = Buffer.from(JSON.stringify({ id: 'devA', n: '我', lat: 30.2594, lng: 120.13, ts: 1 }))
+  const cipher = mc.encrypt(TEAM, plain)
+  a.send(JSON.stringify({ type: 'relay', room: mc.roomId(TEAM), kind: 2, body: cipher.toString('base64') }))
+  const got = await next(b)
+  const decrypted = got.kind === 'msg' ? mc.decrypt(TEAM, Buffer.from(got.data.body, 'base64')) : null
+  check('同房间中继送达，且收端解密还原一致', decrypted?.equals(plain) === true)
+  check('中继保留 kind 字节（路由用）', got.data?.kind === 2)
+
+  // 异队伍：房间哈希不同 → 收不到
+  const c3 = await connect(); await joinRelay(c3, 'OTHER99')
+  a.send(JSON.stringify({ type: 'relay', room: mc.roomId(TEAM), kind: 2, body: cipher.toString('base64') }))
+  check('异队伍（不同房间哈希）收不到', (await next(c3, 900)).kind === 'timeout')
+
+  // 未 relay-join 直接发 relay → 不得被转发（我实现时曾漏掉此校验）
+  const sneak = await connect()
+  sneak.send(JSON.stringify({ type: 'relay', room: mc.roomId(TEAM), kind: 2, body: cipher.toString('base64') }))
+  check('未入房连接注入的帧不被转发', (await next(b, 900)).kind === 'timeout')
+
+  // 错 token 入房 → 断开
+  const bad = await connect()
+  const badRes = await joinRelay(bad, TEAM, 'wrong')
+  check('错 token 无法加入中继房（4003）', badRes.kind === 'close' && badRes.code === 4003, JSON.stringify(badRes))
+
+  // 核心安全断言：整个链路上队伍码明文零出现
+  const wireDump = JSON.stringify({ sentByClient: { room: mc.roomId(TEAM), body: cipher.toString('base64') },
+                                    serverOutput: seen.join('') })
+  check('队伍码明文从未出现在上行报文与服务端输出中', !wireDump.includes(TEAM))
+  check('房间哈希不可反推为密钥：与 PBKDF2 盐做了域分离', mc.ROOM_SALT !== mc.SALT)
+  check('密文里检索不到业务明文（坐标）', !cipher.toString('binary').includes('120.13'))
+
+  for (const c of [a, b, c3, sneak, bad]) { try { c.close() } catch {} }
+  srv.kill()
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)
