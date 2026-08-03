@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# ⚠️⚠️ 已废弃（DEPRECATED）：本脚本会往 /etc/nginx/conf.d/ 写独立 server 块，
+# 与同机其他站点共享爆炸半径；且其 SELinux/firewalld 分支在 Ubuntu 镜像上是死代码。
+# 请改用：deploy/server-setup.sh（安全的 include 子目录模式）
+# 如确要运行旧脚本：FORCE=1 bash deploy-on-server.sh
+if [ "${FORCE:-0}" != "1" ]; then
+  echo "⚠️ 本脚本已废弃，请改用 deploy/server-setup.sh（详见脚本头部说明）"; exit 1
+fi
 # ============================================================
 # CityTwin 服务器部署脚本（Oracle Cloud / 通用 Linux）
 # 在你的服务器上执行（首次或更新都用它）：

@@ -4202,6 +4202,22 @@ $('quitBtn').addEventListener('click', () => { setPause(false); backToMenu(); })
 /* ============================================================
  * 游戏流程
  * ============================================================ */
+/* ---- 城市建筑数据按需加载：首屏不再加载 13MB，选城/开局时注入对应 data 脚本 ---- */
+const _cityDataLoading = {};
+function loadCityData(cityKey) {
+  if (cityKey === 'town' || (window.CITY_BUILDINGS && window.CITY_BUILDINGS[cityKey])) return Promise.resolve();
+  if (_cityDataLoading[cityKey]) return _cityDataLoading[cityKey];
+  _cityDataLoading[cityKey] = new Promise((resolve) => {
+    const s = document.createElement('script');
+    s.src = 'data/buildings-' + cityKey + '.js';
+    s.onload = () => resolve();
+    // 加载失败不阻塞开局：genRealCity 会回退到程序化建筑
+    s.onerror = () => { delete _cityDataLoading[cityKey]; resolve(); };
+    document.head.appendChild(s);
+  });
+  return _cityDataLoading[cityKey];
+}
+
 function resetWorld() {
   G.seed = (Math.random() * 2 ** 31) | 0;
   rng = mulberry32(G.seed);
@@ -4232,6 +4248,19 @@ function readConfig() {
 
 function startGame() {
   AudioSys.ensure();
+  const btn = $('startBtn');
+  if (!(window.CITY_BUILDINGS && window.CITY_BUILDINGS[G.citySel]) && G.citySel !== 'town') {
+    btn.disabled = true;
+    btn.textContent = '⏳ ' + (LANG === 'zh' ? '加载城市数据…' : 'Loading city data…');
+  }
+  loadCityData(G.citySel).then(() => {
+    btn.disabled = false;
+    applyStaticLang();   // 恢复按钮文案
+    startGameNow();
+  });
+}
+
+function startGameNow() {
   readConfig();
   resetWorld();
   G.captures = 0; G.spent = 0; G.earned = 0;
@@ -4540,8 +4569,10 @@ document.querySelectorAll('.cityCard').forEach((card) => {
     G.citySel = card.dataset.city;
     document.querySelectorAll('.cityCard').forEach((c2) => c2.classList.toggle('sel', c2 === card));
     AudioSys.click();
-    resetWorld(); // 立即切换菜单背景到所选城市
-    menuOrbit = 0;
+    const sel = card.dataset.city;
+    loadCityData(sel).then(() => {
+      if (G.citySel === sel && (G.phase === 'menu' || G.phase === 'end')) { resetWorld(); menuOrbit = 0; }
+    });
   });
 });
 
@@ -4943,7 +4974,8 @@ updateHUD();
 tick();
 
 // 调试钩子（仅用于自动化测试/研究地图）
-window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain,
+const _debugOK = location.protocol === 'file:' || /[?&]debug\b/.test(location.search) || localStorage.getItem('ct_debug') === '1';
+if (_debugOK) window.__hs = { G, player, camera, markers: () => spotMarkers, capture: captureHider, setupRain,
   rippleInfo: () => ({ n: ripples.length, active: ripples.filter((r) => r.mesh.material.opacity > 0.01).length }),
   ambInfo: () => { const a = AudioSys._amb || {}; const o = {}; for (const k in a) o[k] = +a[k].g.gain.value.toFixed(4); return o; },
   heldInfo: () => ({ torch: heldTorch.visible, scope: !$('scopeMask').classList.contains('hidden') }) };

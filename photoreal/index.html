@@ -41,10 +41,11 @@
       <option value="newyork">🇺🇸 纽约</option>
       <option value="dubai">🇦🇪 迪拜</option>
     </select>
-    <input id="key" type="password" placeholder="粘贴你的 Google Maps API key" autocomplete="off">
+    <input id="key" type="password" placeholder="API key（可选：留空=使用站点代理）" autocomplete="off">
     <button id="go">加载真实3D城市</button>
   </div>
-  <div id="hint">🖱 拖拽=旋转 · 滚轮=缩放 · 右键拖=平移　|　key 只存在你本地浏览器，不上传</div>
+  <div id="hint">🖱 拖拽=旋转 · 滚轮=缩放 · 右键拖=平移　|　在部署站点上可留空 key 直接加载；自填 key 只存本地浏览器</div>
+  <div id="attribution" style="position:absolute;left:10px;bottom:10px;z-index:10;font-size:11px;color:#cfd8e3;background:rgba(10,16,32,.55);padding:3px 8px;border-radius:6px;">地图数据 © Google</div>
   <div id="status">填入 key → 选城市 → 点「加载」。首次加载会从太空视角开始，滚轮拉近即可看到街道。</div>
 
   <script src="citytwin3d.bundle.js"></script>

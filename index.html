@@ -352,11 +352,7 @@
 
   <script src="lib/three.min.js"></script>
   <script src="cities.js"></script>
-  <script src="data/buildings-london.js"></script>
-  <script src="data/buildings-shanghai.js"></script>
-  <script src="data/buildings-istanbul.js"></script>
-  <script src="data/buildings-newyork.js"></script>
-  <script src="data/buildings-dubai.js"></script>
+  <!-- 建筑数据(约13MB)不再随首屏加载，由 game.js 按所选城市懒加载 data/buildings-<city>.js -->
   <script src="game.js"></script>
 </body>
 </html>

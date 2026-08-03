@@ -19,7 +19,7 @@ description: 将本项目（CityTwin 城市猎手）部署/更新到 Weber 的�
 | SSH 私钥（仅本地机器有） | `D:\claudeSpace\ssh-key-2026-05-05.key`（Windows）/ Mac 对应钥匙串路径 |
 | 访问地址 | `http://145.241.235.191/citytwin/`（挂在主站 nginx 下） |
 
-需要部署的文件（纯静态，无构建步骤）：`index.html game.js cities.js lib/ data/ README.md`
+需要部署的文件（纯静态，无构建步骤）：`index.html game.js cities.js lib/ data/ photoreal/ README.md`
 
 ## 强制规则
 
