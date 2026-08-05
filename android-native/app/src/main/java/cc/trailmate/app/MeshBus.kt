@@ -50,6 +50,21 @@ object Identity {
     fun setGhost(ctx: Context, v: Boolean) {
         ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).edit().putBoolean("ghost", v).apply()
     }
+
+    // 网络中继（BR-1.1）：relayUrl 为空 = 只用蓝牙（默认，等同今日行为）。token 对应服务端 SIGNAL_TOKEN。
+    fun relayUrl(ctx: Context): String =
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).getString("relayUrl", "") ?: ""
+
+    fun setRelayUrl(ctx: Context, url: String) {
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).edit().putString("relayUrl", url.trim()).apply()
+    }
+
+    fun relayToken(ctx: Context): String =
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).getString("relayToken", "") ?: ""
+
+    fun setRelayToken(ctx: Context, t: String) {
+        ctx.getSharedPreferences(SP, Context.MODE_PRIVATE).edit().putString("relayToken", t.trim()).apply()
+    }
 }
 
 /**
@@ -66,11 +81,15 @@ object MeshBus : BleMesh.Listener {
 
     private var appCtx: Context? = null
     private var mesh: BleMesh? = null
+    private var net: NetTransport? = null
     // 每类型单 handler：后注册者替换前者。Fragment 切 Tab 重建时新实例自动顶替旧实例，
     // 避免向单例累积 lambda 造成旧 Fragment 泄漏与消息重复处理。
     private val handlers = HashMap<Byte, (ByteArray) -> Unit>()
     private val peerHandlers = HashMap<String, (Int) -> Unit>()
+    private val cloudHandlers = HashMap<String, (Int) -> Unit>()
     var peerCount = 0
+        private set
+    var cloudCount = 0    // 云端在线数（BR-1.5：与蓝牙邻居分开显示，不混淆）
         private set
 
     /** 幂等启动（需已授蓝牙权限）。返回是否成功开启。 */
@@ -78,14 +97,34 @@ object MeshBus : BleMesh.Listener {
         val app = ctx.applicationContext
         appCtx = app
         val m = mesh ?: BleMesh(app).also { it.listener = this; mesh = it }
-        return m.start()
+        val ok = m.start()
+        startNet(app)   // 网络中继与 BLE 并行（BR-1.1）；relayUrl 为空则空转
+        return ok
+    }
+
+    // 启动/重启网络通道。队伍码变化或首次配置 URL 时调用。
+    fun startNet(ctx: Context) {
+        val app = ctx.applicationContext
+        appCtx = app
+        net?.stop(); net = null
+        cloudCount = 0
+        val url = Identity.relayUrl(app)
+        if (url.isEmpty()) { cloudHandlers.values.forEach { it(0) }; return }
+        net = NetTransport(
+            url = url,
+            room = MeshCrypto.roomId(Identity.team(app)),
+            token = Identity.relayToken(app),
+            onFrame = { kind, sealed -> dispatchSealed(kind, sealed) },   // 网络收帧：用本机队伍码解密
+            onCloud = { n -> cloudCount = n; cloudHandlers.values.forEach { it(n) } },
+        ).also { it.start() }
     }
 
     fun send(kind: Byte, payload: ByteArray) {
         val ctx = appCtx ?: return
         val teamStr = Identity.team(ctx)
-        // 端到端加密（G-CM-3）：信封 team 明文分房，业务负载全密文
+        // 端到端加密（G-CM-3）：信封 team 明文仅供 BLE 分房，业务负载全密文
         val sealed = MeshCrypto.encrypt(teamStr, payload)
+        // BLE 通道：完整信封帧
         val team = teamStr.toByteArray(Charsets.UTF_8).let {
             if (it.size > 32) it.copyOfRange(0, 32) else it
         }
@@ -95,6 +134,8 @@ object MeshBus : BleMesh.Listener {
         System.arraycopy(team, 0, frame, 2, team.size)
         System.arraycopy(sealed, 0, frame, 2 + team.size, sealed.size)
         mesh?.send(frame)
+        // 网络通道：只发 roomId + kind + 密文，**队伍码不上网**（BR-1.2）
+        net?.relay(kind, sealed)
     }
 
     fun subscribe(kind: Byte, handler: (ByteArray) -> Unit) {
@@ -106,6 +147,21 @@ object MeshBus : BleMesh.Listener {
         handler(peerCount)
     }
 
+    fun onCloud(tag: String, handler: (Int) -> Unit) {
+        cloudHandlers[tag] = handler
+        handler(cloudCount)
+    }
+
+    // 解密并分发（两条通道共用）。BR-1.3 双通道去重：业务层已幂等——
+    // 聊天/语音按 mid appendIfNew、位置按设备 id 覆盖、回执用 Set，故同帧双至无害，无需额外去重层。
+    private fun dispatchSealed(kind: Byte, sealed: ByteArray) {
+        val ctx = appCtx ?: return
+        val team = Identity.team(ctx)
+        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃（网络侧亦借此天然处理房间哈希碰撞）
+        val body = MeshCrypto.decrypt(team, sealed) ?: return
+        handlers[kind]?.invoke(body)
+    }
+
     // MARK: - BleMesh.Listener（主线程）
     override fun onMeshMessage(payload: ByteArray) {
         if (payload.size < 2) return
@@ -114,11 +170,8 @@ object MeshBus : BleMesh.Listener {
         if (payload.size < 2 + tlen) return
         val ctx = appCtx ?: return
         val team = String(payload, 2, tlen, Charsets.UTF_8)
-        if (team != Identity.team(ctx)) return   // 队伍过滤
-        val sealed = payload.copyOfRange(2 + tlen, payload.size)
-        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃
-        val body = MeshCrypto.decrypt(team, sealed) ?: return
-        handlers[kind]?.invoke(body)
+        if (team != Identity.team(ctx)) return   // BLE 侧队伍过滤（明文 team）
+        dispatchSealed(kind, payload.copyOfRange(2 + tlen, payload.size))
     }
 
     override fun onMeshPeers(count: Int) {

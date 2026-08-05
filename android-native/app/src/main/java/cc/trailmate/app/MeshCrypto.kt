@@ -87,4 +87,13 @@ object MeshCrypto {
         }
         return out.copyOf(keyLen)
     }
+
+    // 中继房间哈希（BR-1.2）：SHA256("trailmate-room-v1|" + 队伍码)。
+    // 与加密派生盐 trailmate-mesh-v1 不同做域分离；上网的只有它，队伍码绝不上传。
+    // 与 tests/mesh-fixture/meshcrypto.mjs 的 roomId 一致。
+    fun roomId(team: String): String {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        val h = md.digest("trailmate-room-v1|$team".toByteArray(Charsets.UTF_8))
+        return h.joinToString("") { "%02x".format(it) }
+    }
 }

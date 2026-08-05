@@ -40,4 +40,6 @@ dependencies {
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     // 小票 OCR：ML Kit 文字识别（模型内置离线可用，无需 Google 服务；数字金额用拉丁模型足够）
     implementation 'com.google.mlkit:text-recognition:16.0.1'
+    // 网络中继通道（BR-1.1）：WebSocket 客户端，与 BLE 并行；relayUrl 为空则完全不启用
+    implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 }
