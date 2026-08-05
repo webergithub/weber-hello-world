@@ -1,7 +1,7 @@
 // MeshCrypto 的 JS 参考实现（与 iOS MeshCrypto.swift / Android MeshCrypto.kt 逐字节一致）
 //   密钥：PBKDF2-HMAC-SHA256(队伍码, "trailmate-mesh-v1", 10000) → 64B = 32B AES + 32B MAC
 //   格式：[ver=1][IV 16B][AES-256-CBC/PKCS7 密文][HMAC-SHA256(ver‖iv‖ct) 前 16B]
-import { pbkdf2Sync, createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { pbkdf2Sync, createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual, createHash } from 'node:crypto'
 
 export const VER = 1
 export const SALT = 'trailmate-mesh-v1'
@@ -51,4 +51,11 @@ export function decrypt(team, blob) {
   } catch {
     return null
   }
+}
+
+// 中继房间哈希（BR-1.2）：服务端只拿到它，拿不到队伍码。
+// 用与 PBKDF2 不同的盐做**域分离**——即便服务端拿到房间哈希，也无法反推或复用为解密密钥。
+export const ROOM_SALT = 'trailmate-room-v1'
+export function roomId(team) {
+  return createHash('sha256').update(`${ROOM_SALT}|${team}`, 'utf8').digest('hex')
 }
