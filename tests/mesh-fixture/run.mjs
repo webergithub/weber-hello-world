@@ -419,6 +419,13 @@ console.log('[12] 服务端业务帧中继（哑中继）')
   check('房间哈希不可反推为密钥：与 PBKDF2 盐做了域分离', mc.ROOM_SALT !== mc.SALT)
   check('密文里检索不到业务明文（坐标）', !cipher.toString('binary').includes('120.13'))
 
+  // roomId 三端防漂移：Android/iOS 源码用同一 SHA256 域分离串
+  const ktCrypto = readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/MeshCrypto.kt'), 'utf8')
+  check('Android roomId 用同一域分离串 trailmate-room-v1|', ktCrypto.includes('trailmate-room-v1|$team'))
+  check('Android NetTransport 只上传密文（relay 带 room+kind+base64 body）',
+    readFileSync(join(ROOT, 'android-native/app/src/main/java/cc/trailmate/app/NetTransport.kt'), 'utf8')
+      .match(/put\("type", "relay"\)[\s\S]*put\("body"/) != null)
+
   for (const c of [a, b, c3, sneak, bad]) { try { c.close() } catch {} }
   srv.kill()
 }
