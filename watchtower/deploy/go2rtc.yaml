@@ -1,0 +1,35 @@
+# go2rtc 引导配置。
+#
+# 运行期 Watchtower 会通过 REST 动态增删流，这份文件只用于**冷启动**：
+# go2rtc 先起来、流已经在，Watchtower 还没连上时也能看直播。
+# 用 `python -m watchtower go2rtc-config > go2rtc.yaml` 可以从数据库重新生成。
+
+api:
+  listen: ":1984"
+
+rtsp:
+  listen: ":8554"
+  # 允许外部往这里推流（360 端侧转推、手机推流等场景用得到）
+  default_query: "video&audio"
+
+webrtc:
+  candidates:
+    - stun:8555
+
+log:
+  level: info
+
+streams: {}
+  # 示例（真实配置由 Watchtower 写入，这里仅供参考）：
+  #
+  # 海康/大华等标准 RTSP：
+  #   front_door: rtsp://admin:password@192.168.1.64:554/Streaming/Channels/101
+  #
+  # 小米/米家（需要公网换密钥，did/model/uid 从米家账号导出）：
+  #   living_room: xiaomi://1234567890:cn@192.168.1.123?did=9876543210&model=isa.camera.hlc7&subtype=hd
+  #
+  # TP-Link Tapo（支持双向语音）：
+  #   garage: tapo://user:password@192.168.1.50
+  #
+  # 经 Micam 桥接的小米摄像头：
+  #   balcony: rtsp://127.0.0.1:8554/mi_balcony

@@ -6,6 +6,7 @@ const LedgerApp = lazy(() => import('./features/ledger/LedgerApp').then((m) => (
 const ConvoyApp = lazy(() => import('./features/convoy/ConvoyApp').then((m) => ({ default: m.ConvoyApp })))
 const CampApp = lazy(() => import('./features/camp/CampApp').then((m) => ({ default: m.CampApp })))
 const VoiceApp = lazy(() => import('./features/voice/VoiceApp').then((m) => ({ default: m.VoiceApp })))
+const WatchApp = lazy(() => import('./features/watch/WatchApp').then((m) => ({ default: m.WatchApp })))
 
 function TabBar() {
   const tabs = [
@@ -14,6 +15,7 @@ function TabBar() {
     { to: '/camp', label: '营地', icon: '🏕️' },
     { to: '/ledger', label: '记账', icon: '🧾' },
     { to: '/voice', label: '变声', icon: '🎭' },
+    { to: '/watch', label: '监控', icon: '📹' },
   ]
   return (
     <nav className="tabbar">
@@ -39,6 +41,9 @@ export function App() {
             <Route path="/camp" element={<CampApp />} />
             <Route path="/ledger" element={<LedgerApp />} />
             <Route path="/voice" element={<VoiceApp />} />
+            <Route path="/watch" element={<WatchApp />} />
+            {/* 推送里的深链：/watch/event/:id、/watch/digest/:day 先落到主页 */}
+            <Route path="/watch/*" element={<WatchApp />} />
             <Route path="*" element={<Navigate to="/groups" replace />} />
           </Routes>
         </Suspense>

@@ -1,0 +1,58 @@
+{
+  "api_token": "换成足够长的随机串，公网部署必填",
+  "api_host": "0.0.0.0",
+  "api_port": 8900,
+  "timezone": "Asia/Shanghai",
+
+  "go2rtc": {
+    "base_url": "http://127.0.0.1:1984",
+    "rtsp_host": "127.0.0.1",
+    "rtsp_port": 8554,
+    "public_base_url": "https://watch.example.com"
+  },
+
+  "analysis": {
+    "enabled": true,
+    "detector": "auto",
+    "model_path": "yolo26n.pt",
+    "fps": 2.0,
+    "min_score": 0.35,
+    "open_frames": 2,
+    "close_seconds": 8.0,
+    "pre_roll": 3.0,
+    "post_roll": 3.0
+  },
+
+  "face": {
+    "enabled": false,
+    "local_only": true
+  },
+
+  "digest": {
+    "enabled": true,
+    "at": "23:30",
+    "target_seconds": 90.0,
+    "per_clip_seconds": 6.0,
+    "max_clips": 24,
+    "orientation": "landscape",
+    "narrate": true
+  },
+
+  "privacy": {
+    "blur_faces": true,
+    "retention_days": 30,
+    "digest_retention_days": 180
+  },
+
+  "push": {
+    "enabled": true,
+    "quiet_hours": "23:00-07:00",
+    "min_score": 0.5,
+    "aggregate_window": 300.0,
+    "daily_digest": true
+  },
+
+  "storage": {
+    "root": "/data"
+  }
+}

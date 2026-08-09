@@ -1,0 +1,54 @@
+# Watchtower 一键部署。
+#
+#   cp watchtower.example.json watchtower.json   # 改里面的 api_token
+#   docker compose up -d
+#
+# 为什么用 network_mode: host —— 三个功能都要求它：
+#   1. ONVIF 设备发现走 UDP 组播，桥接网络收不到；
+#   2. go2rtc 的 WebRTC 需要直接的 UDP 端口；
+#   3. 小米/Tapo 这类私有 P2P 协议要能直连摄像头局域网 IP。
+# 如果你的宿主机不能用 host 网络，请改成 bridge 并显式映射 1984/8554/8555/8900，
+# 同时接受"设备发现失效、WebRTC 可能打不通"的代价。
+
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    container_name: watchtower-go2rtc
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml
+    environment:
+      TZ: Asia/Shanghai
+
+  watchtower:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: watchtower
+    network_mode: host
+    restart: unless-stopped
+    depends_on:
+      - go2rtc
+    volumes:
+      - ./data:/data
+      - ./watchtower.json:/app/watchtower.json
+    environment:
+      TZ: Asia/Shanghai
+      # 公网暴露前务必设置，否则任何人都能看你的摄像头
+      WATCHTOWER_API_TOKEN: ${WATCHTOWER_API_TOKEN:-}
+      # 剪影解说（可选）：装了 anthropic 且配了 key 才生效
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+  # 只有接入小米/米家摄像头且 go2rtc 直连不稳时才需要，默认不启：
+  #   docker compose --profile xiaomi up -d
+  micam:
+    image: ghcr.io/miiot/micam:latest
+    container_name: watchtower-micam
+    network_mode: host
+    restart: unless-stopped
+    profiles: ["xiaomi"]
+    volumes:
+      - ./micam:/config
+    environment:
+      TZ: Asia/Shanghai

@@ -22,3 +22,12 @@ android-native/gradlew.bat
 android-native/gradle/wrapper/gradle-wrapper.jar
 tests/mesh-fixture/.split.bundle.mjs
 tests/mesh-fixture/.backup.bundle.mjs
+
+# watchtower（服务端运行产物：录像、事件、剪影、数据库、本地配置）
+watchtower/**/data/
+watchtower/**/__pycache__/
+watchtower/**/*.pyc
+watchtower/**/.pytest_cache/
+watchtower/deploy/watchtower.json
+watchtower/deploy/micam/
+watchtower/server/watchtower.json

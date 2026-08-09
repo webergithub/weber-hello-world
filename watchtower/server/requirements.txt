@@ -1,0 +1,5 @@
+# Watchtower 服务端基础依赖。
+# 适配器层、分析事件聚合、剪影选段、推送策略全部只用标准库 —— 这几个包只为 HTTP 服务本身。
+fastapi>=0.115
+uvicorn[standard]>=0.32
+pydantic>=2.9

@@ -1,0 +1,16 @@
+# 可选：AI 相关能力。装哪个用哪个，一个都不装也能跑通全流程（自动降级）。
+#
+#   opencv-python-headless  运动检测(MOG2)、人脸打码
+#   onnxruntime + pillow    ONNX 检测器（边缘设备推荐，比原生 PyTorch 快 2~3 倍）
+#   ultralytics             YOLO 检测器（精度最好，需要更多内存）
+#   anthropic               一日剪影的自然语言解说
+#
+# 装完把 analysis.detector 设成 auto 即可，系统会自动选可用的最高档。
+
+opencv-python-headless>=4.10
+onnxruntime>=1.19
+pillow>=10.4
+numpy>=1.26
+
+# ultralytics>=8.3        # 需要 torch，体积较大，按需放开
+# anthropic>=0.40         # 剪影解说，需 ANTHROPIC_API_KEY
