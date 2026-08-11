@@ -128,6 +128,33 @@ function sourceCard(s, { playable }) {
   return card;
 }
 
+/** 推荐位 4/5：正版订阅/付费渠道。没有直链，只有跳转。 */
+function offerCard(rec) {
+  const o = rec.offer;
+  const card = el('div', { class: 'source offer-card' });
+
+  card.append(
+    el('div', { class: 'source-head' },
+      el('span', { class: 'rank' }, String(rec.rank)),
+      el('span', { class: 'offer-type' }, o.typeLabel),
+      el('span', { class: 'provider' }, o.providerName),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'chip warn' }, '需订阅/付费'),
+    ),
+    el('div', { class: 'offer-body' },
+      o.logo ? el('img', { class: 'offer-logo', src: o.logo, alt: '' }) : null,
+      el('p', { class: 'offer-desc' },
+        `在 ${o.providerName} 上${o.typeLabel}（${o.region} 区）。正版平台的播放地址受 DRM 与一次性签名保护，只能跳转到官方页面观看。`),
+    ),
+    el('div', { class: 'actions' },
+      o.link
+        ? el('a', { class: 'play', href: o.link, target: '_blank', rel: 'noopener noreferrer' }, '前往正版观看 ↗')
+        : el('span', { class: 'provider' }, '该地区未提供跳转链接'),
+    ),
+  );
+  return card;
+}
+
 function updateBatchBar() {
   const bar = $('batchBar');
   bar.classList.toggle('hidden', selected.size === 0);
@@ -241,13 +268,25 @@ function renderResult(data) {
     info,
   );
 
-  // Top5
+  // 推荐位：前 3 直接可播，第 4/5 正版订阅/付费
+  const recs = data.recommendations || [];
+  $('topHeading').textContent = `🏆 Top${recs.length} 推荐`;
+  $('topSubhead').textContent = recs.length
+    ? `前 ${data.stats.recommendedDirect} 位可直接点开播放 · 后 ${data.stats.recommendedOffers} 位需订阅或付费的正版渠道`
+    : '';
+
   const topList = $('topList');
   topList.replaceChildren();
-  if (data.top.length === 0) {
-    topList.append(el('p', { class: 'blocked-reason' }, '没有找到可直接播放的片源。'));
+  if (recs.length === 0) {
+    topList.append(el('p', { class: 'blocked-reason' }, '没有找到可推荐的片源或观看渠道。'));
   }
-  for (const s of data.top) topList.append(sourceCard(s, { playable: true }));
+  for (const rec of recs) {
+    topList.append(
+      rec.kind === 'direct'
+        ? sourceCard({ ...rec.source, rank: rec.rank }, { playable: true })
+        : offerCard(rec),
+    );
+  }
 
   // 备选
   const altPanel = $('altPanel');

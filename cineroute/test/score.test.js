@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   scoreSource, rankSources, estimateReferenceRuntime, detectContainer, WEIGHTS,
+  resolveWeights, computeMaxDuration,
 } from '../src/core/score.js';
 
 /** 一个各项都健康的基准片源，测试里按需覆盖单个字段。 */
@@ -123,4 +124,69 @@ test('打分明细对每个维度都给出可展示的理由', () => {
     assert.ok(d.label && d.reason, `维度 ${d.key} 缺少 label/reason`);
     assert.ok(d.score <= d.max, `维度 ${d.key} 得分超过上限`);
   }
+});
+
+/* ── 排序偏好：清晰度优先、同清晰度下更长的胜出 ───────────────── */
+
+test('清晰度优先：1080p 排在 720p 之前，即使 720p 更长', () => {
+  const { top } = rankSources([
+    { ...base, id: 'p720-long', width: 960, height: 720, durationSec: 6200, bytes: 1_200_000_000 },
+    { ...base, id: 'p1080', width: 1440, height: 1080, durationSec: 5760, bytes: 2_000_000_000 },
+  ], { referenceRuntimeSec: 5760, maxDurationSec: 6200 });
+
+  assert.equal(top[0].id, 'p1080');
+});
+
+test('同清晰度下更长的版本胜出（未删减版偏好）', () => {
+  const { top } = rankSources([
+    { ...base, id: 'short-cut', durationSec: 4900, bytes: 1_700_000_000 },
+    { ...base, id: 'full-cut', durationSec: 5760, bytes: 2_000_000_000 },
+  ], { referenceRuntimeSec: 5760, maxDurationSec: 5760 });
+
+  assert.equal(top[0].id, 'full-cut');
+  assert.ok(top[0].score > top[1].score);
+});
+
+test('长于参考片长不再被扣分（可能是未删减版/修复加长版）', () => {
+  const exact = scoreSource({ ...base, durationSec: 5760 }, { referenceRuntimeSec: 5760, maxDurationSec: 6400 });
+  const longer = scoreSource({ ...base, durationSec: 6400 }, { referenceRuntimeSec: 5760, maxDurationSec: 6400 });
+
+  const dimOf = (s) => s.breakdown.find((d) => d.key === 'completeness');
+  assert.ok(dimOf(longer).score >= dimOf(exact).score, '更长的版本不应比刚好等于片长的低');
+  assert.match(dimOf(longer).reason, /未删减版|加长版/);
+});
+
+test('极短片段仍被判为非正片，长度偏好不能救它', () => {
+  const s = scoreSource({ ...base, durationSec: 142 }, { referenceRuntimeSec: 5760, maxDurationSec: 5760 });
+  assert.equal(s.blocked, true);
+  assert.match(s.blockReason, /片段或预告/);
+});
+
+test('清晰度与完整度合计权重高于可播性，主导都能播时的排序', () => {
+  const w = resolveWeights();
+  assert.ok(w.resolution + w.completeness > w.playability,
+    `期望 ${w.resolution}+${w.completeness} > ${w.playability}`);
+});
+
+test('resolveWeights 支持覆盖，且未指定的维度沿用默认', () => {
+  const w = resolveWeights({ resolution: 40 });
+  assert.equal(w.resolution, 40);
+  assert.equal(w.playability, WEIGHTS.playability);
+});
+
+test('覆盖权重后打分上限随之改变', () => {
+  const s = scoreSource(base, { referenceRuntimeSec: 5760, weights: { resolution: 40 } });
+  const res = s.breakdown.find((d) => d.key === 'resolution');
+  assert.equal(res.max, 40);
+});
+
+test('computeMaxDuration 忽略远超片长的合集，避免拉低正片的长度分', () => {
+  const sources = [
+    { durationSec: 5760 }, { durationSec: 5766 }, { durationSec: 30000 },
+  ];
+  assert.equal(computeMaxDuration(sources, 5760), 5766);
+});
+
+test('computeMaxDuration 在无参考片长时取全局最大', () => {
+  assert.equal(computeMaxDuration([{ durationSec: 100 }, { durationSec: 900 }], null), 900);
 });

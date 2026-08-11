@@ -9,7 +9,7 @@
  */
 
 import { parseQuery } from './match.js';
-import { rankSources, estimateReferenceRuntime } from './score.js';
+import { rankSources, estimateReferenceRuntime, computeMaxDuration } from './score.js';
 import { probeAll } from './probe.js';
 import { DIRECT_ADAPTERS, METADATA_ADAPTERS, adapterAvailability } from '../adapters/registry.js';
 
@@ -74,6 +74,72 @@ export function dedupeSources(sources) {
 }
 
 /**
+ * 正版渠道的展示优先级：订阅 → 租赁 → 购买 → 广告免费。
+ * 推荐位 4/5 留给"需要订阅或付费"的正版渠道，所以这三类排在免费之前。
+ */
+const OFFER_PRIORITY = { flatrate: 0, rent: 1, buy: 2, ads: 3, free: 4 };
+
+/** 同一平台可能同时出现在 flatrate 与 buy 里，按平台去重，保留优先级最高的那条。 */
+function rankOffers(offers) {
+  const byProvider = new Map();
+  for (const o of offers) {
+    const key = o.providerName;
+    const prev = byProvider.get(key);
+    if (!prev || (OFFER_PRIORITY[o.type] ?? 9) < (OFFER_PRIORITY[prev.type] ?? 9)) {
+      byProvider.set(key, o);
+    }
+  }
+  return [...byProvider.values()].sort(
+    (a, b) => (OFFER_PRIORITY[a.type] ?? 9) - (OFFER_PRIORITY[b.type] ?? 9),
+  );
+}
+
+/**
+ * 组装最终推荐位。
+ *
+ * 产品规则：**前 3 位给可以直接点开就看的片源，第 4、5 位给需要订阅或付费的正版渠道。**
+ * 两侧任一不足时互相回填，保证推荐位尽量填满：
+ *  - 直链不足 3 条 → 正版渠道往前顶；
+ *  - 正版渠道为空（未配置 TMDB 或该片无正版上架）→ 用更多直链补齐。
+ *
+ * @param {object[]} playable  已排序的可直接播放片源
+ * @param {object[]} offers    正版观看渠道
+ * @param {{directSlots?: number, total?: number}} [opts]
+ */
+export function buildRecommendations(playable, offers, opts = {}) {
+  const { directSlots = 3, total = 5 } = opts;
+  const rankedOffers = rankOffers(offers);
+
+  const directPicks = playable.slice(0, directSlots);
+  // 直链不足时，正版渠道可以多占几个位置。
+  const offerBudget = total - Math.max(directPicks.length, 0);
+  const offerPicks = rankedOffers.slice(0, offerBudget);
+
+  // 正版渠道不足时，用更多直链把位置补满。
+  const remaining = total - directPicks.length - offerPicks.length;
+  const extraDirect = remaining > 0
+    ? playable.slice(directPicks.length, directPicks.length + remaining)
+    : [];
+
+  const entries = [
+    ...[...directPicks, ...extraDirect].map((s) => ({
+      kind: 'direct',
+      access: 'direct-play',
+      accessLabel: '可直接播放',
+      source: s,
+    })),
+    ...offerPicks.map((o) => ({
+      kind: 'offer',
+      access: o.type,
+      accessLabel: o.typeLabel,
+      offer: o,
+    })),
+  ];
+
+  return entries.map((e, i) => ({ rank: i + 1, ...e }));
+}
+
+/**
  * 主入口。
  *
  * @param {string} rawQuery 用户输入，可含年份，如 "Metropolis 1927"
@@ -115,8 +181,12 @@ export async function searchAll(rawQuery, opts = {}) {
     runtimeSource = referenceRuntimeSec ? 'median' : null;
   }
 
+  // 3b) 长度偏好的分母：候选中的最长时长（在参考片长 1.5 倍以内取，防合集拉偏）。
+  const maxDurationSec = computeMaxDuration(sources, referenceRuntimeSec);
+  const rankCtx = { referenceRuntimeSec, maxDurationSec, weights: opts.weights };
+
   // 4) 第一趟：不带探测结果预排名，挑出值得探测的候选。
-  const pre = rankSources(sources, { referenceRuntimeSec, limit: probeLimit });
+  const pre = rankSources(sources, { ...rankCtx, limit: probeLimit });
   const preOrdered = [...pre.top, ...pre.overflow, ...pre.alternatives];
 
   // 5) 只探测靠前的候选。
@@ -128,12 +198,28 @@ export async function searchAll(rawQuery, opts = {}) {
         ...(opts.probeFn ? { probeFn: opts.probeFn } : {}),
       });
 
-  // 6) 第二趟：带真实探测结果重排，得到最终 Top5。
-  const final = rankSources(probed, { referenceRuntimeSec, limit });
+  // 6) 第二趟：带真实探测结果重排。
+  const final = rankSources(probed, { ...rankCtx, limit });
+
+  // 7) 组推荐位：前 3 位直接可播，第 4/5 位正版订阅/付费渠道。
+  const recommendations = buildRecommendations(
+    [...final.top, ...final.overflow],
+    offers,
+    { directSlots: opts.directSlots ?? 3, total: limit },
+  );
+
+  const directCount = recommendations.filter((r) => r.kind === 'direct').length;
+  const offerCount = recommendations.filter((r) => r.kind === 'offer').length;
 
   const notes = [];
   if (runtimeSource === 'median') {
     notes.push('未配置 TMDB_API_KEY，参考片长取候选时长中位数，完整度判定精度略降');
+  }
+  if (offerCount === 0) {
+    notes.push('未取到正版订阅/付费渠道，推荐位 4-5 已用可直接播放的片源补齐（配置 TMDB_API_KEY 可启用）');
+  }
+  if (directCount < (opts.directSlots ?? 3)) {
+    notes.push(`只找到 ${directCount} 个可直接播放的片源，其余推荐位由正版渠道顶上`);
   }
   if (final.top.length === 0 && final.alternatives.length > 0) {
     notes.push('没有浏览器可直接播放的片源，但下方备选可下载后用本地播放器观看');
@@ -155,6 +241,9 @@ export async function searchAll(rawQuery, opts = {}) {
           poster: null,
           overview: null,
         },
+    // 最终推荐位：前 3 直接可播，第 4/5 正版订阅/付费。
+    recommendations,
+    // 全部可直接播放的片源（推荐位只取其中前几条）。
     top: final.top,
     alternatives: final.alternatives.slice(0, 10),
     offers,
@@ -165,6 +254,9 @@ export async function searchAll(rawQuery, opts = {}) {
       probed: opts.skipProbe ? 0 : Math.min(probeLimit, preOrdered.length),
       playable: final.top.length + final.overflow.length,
       blocked: final.alternatives.length,
+      recommendedDirect: directCount,
+      recommendedOffers: offerCount,
+      maxDurationSec,
     },
     notes,
   };

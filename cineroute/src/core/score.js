@@ -1,26 +1,53 @@
 /**
  * 片源质量打分引擎（满分 100，可解释）。
  *
- * 设计立场：**"能不能真的播出来"优先于"清不清晰"**。
+ * 设计立场：**"能不能真的播出来"是硬门槛，"清不清晰、全不全"决定排位**。
  * 一个 4K 的 MKV 在浏览器里是黑屏，一个 480p 的 MP4 能立刻出画面——
- * 对"点开就要看"的产品来说后者才是好片源。所以可播性既是最高权重维度，
- * 也是一票否决的硬门槛：容器不可播的片源不进 Top5，只进"可下载后本地播放"的备选区。
+ * 所以可播性是一票否决项：容器不可播的片源不进推荐位，只进"可下载后本地播放"的备选区。
+ * 但在**都能播**的候选之间，排序由清晰度与片长完整度主导（合计 48 分）。
  *
- * 每个维度都产出 {score, max, reason}，前端把 reason 直接展示给用户，
- * 让"为什么这条排第一"是可解释的，而不是一个黑箱数字。
+ * 每个维度先产出一个 0..1 的归一化比值，再乘以权重。这样调整权重
+ * 不会牵动任何维度的内部判据，也让权重可以按需覆盖（见 resolveWeights）。
  */
 
 import { nonFeatureHint } from './match.js';
 
-/** 各维度权重（相加 = 100）。 */
+/**
+ * 各维度权重（相加 = 100）。
+ *
+ * 清晰度 26 + 完整度 22 = 48，高于可播性 30：在都能播的前提下，
+ * "更清晰、更完整（更长）"是排序的主导因素。
+ */
 export const WEIGHTS = {
-  playability: 30,   // 浏览器能否直接播 + 能否拖进度条
-  resolution: 20,    // 清晰度
-  completeness: 18,  // 是不是完整正片（而非预告/片段）
-  bitrate: 12,       // 码率健康度：太低糊，太高下载慢
-  trust: 12,         // 许可清晰度与馆藏可信度
-  popularity: 8,     // 人气/健康度
+  playability: 30,   // 硬门槛：浏览器能否直接播 + 能否拖进度条
+  resolution: 26,    // 清晰度 —— 主导排序
+  completeness: 22,  // 片长完整度 —— 主导排序，且偏好更长的版本
+  trust: 10,         // 许可清晰度与馆藏可信度
+  bitrate: 8,        // 码率健康度：太低糊，太高下载慢
+  popularity: 4,     // 人气/健康度
 };
+
+/**
+ * 解析权重覆盖。支持 `CINEROUTE_WEIGHTS="resolution=30,completeness=25"`，
+ * 也支持通过 ctx.weights 传入。未覆盖的维度沿用默认值。
+ * @param {Record<string, number>} [override]
+ */
+export function resolveWeights(override) {
+  const merged = { ...WEIGHTS };
+  const fromEnv = process.env.CINEROUTE_WEIGHTS;
+  if (fromEnv) {
+    for (const pair of fromEnv.split(',')) {
+      const [k, v] = pair.split('=').map((s) => s?.trim());
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Number(v);
+    }
+  }
+  if (override) {
+    for (const [k, v] of Object.entries(override)) {
+      if (k in merged && Number.isFinite(Number(v))) merged[k] = Number(v);
+    }
+  }
+  return merged;
+}
 
 /**
  * 容器 → 浏览器原生播放能力。
@@ -49,18 +76,19 @@ const CONTAINER_SUPPORT = {
   gif: { level: 'no', note: '动图预览，不是正片' },
 };
 
-const PLAYABILITY_BASE = { native: 24, partial: 17, hls: 20, no: 0 };
+/** 归一化的可播性基准（0..1，留 0.2 给 Range 支持）。 */
+const PLAYABILITY_BASE = { native: 0.8, hls: 0.67, partial: 0.57, no: 0 };
 
 /** 明确的自由许可 → 高可信；未知许可 → 低分但不否决。 */
 const LICENSE_TIERS = [
-  { test: /publicdomain|public[\s-]?domain|pdm|mark\/1\.0/i, score: 12, label: '公有领域' },
-  { test: /cc0|zero/i, score: 12, label: 'CC0 公共领域贡献' },
-  { test: /by-sa/i, score: 11, label: 'CC BY-SA 署名-相同方式共享' },
-  { test: /by-nc-nd/i, score: 8, label: 'CC BY-NC-ND 署名-非商业-禁演绎' },
-  { test: /by-nc/i, score: 9, label: 'CC BY-NC 署名-非商业' },
-  { test: /by-nd/i, score: 9, label: 'CC BY-ND 署名-禁演绎' },
-  { test: /creativecommons\.org\/licenses\/by/i, score: 11, label: 'CC BY 署名' },
-  { test: /creativecommons/i, score: 9, label: 'Creative Commons 许可' },
+  { test: /publicdomain|public[\s-]?domain|pdm|mark\/1\.0/i, ratio: 1, label: '公有领域' },
+  { test: /cc0|zero/i, ratio: 1, label: 'CC0 公共领域贡献' },
+  { test: /by-sa/i, ratio: 0.92, label: 'CC BY-SA 署名-相同方式共享' },
+  { test: /by-nc-nd/i, ratio: 0.67, label: 'CC BY-NC-ND 署名-非商业-禁演绎' },
+  { test: /by-nc/i, ratio: 0.75, label: 'CC BY-NC 署名-非商业' },
+  { test: /by-nd/i, ratio: 0.75, label: 'CC BY-ND 署名-禁演绎' },
+  { test: /creativecommons\.org\/licenses\/by/i, ratio: 0.92, label: 'CC BY 署名' },
+  { test: /creativecommons/i, ratio: 0.75, label: 'Creative Commons 许可' },
 ];
 
 /** 已知的高可信馆藏/来源，额外加信任分（上限内）。 */
@@ -80,44 +108,46 @@ export function detectContainer(source) {
   return m ? m[1].toLowerCase() : '';
 }
 
-/** 维度 1：可播性（0-30）。同时决定是否触发硬门槛。 */
-function scorePlayability(source) {
+/** 维度 1：可播性。同时决定是否触发硬门槛。 */
+function dimPlayability(source) {
   const container = detectContainer(source);
-  const support = CONTAINER_SUPPORT[container] || { level: 'partial', note: `未知容器 .${container || '?'}，可播性待探测` };
-  let score = PLAYABILITY_BASE[support.level];
+  const support = CONTAINER_SUPPORT[container]
+    || { level: 'partial', note: `未知容器 .${container || '?'}，可播性待探测` };
+  let ratio = PLAYABILITY_BASE[support.level];
   const notes = [support.note];
 
-  // Range 支持决定能否拖动进度条与断点续传，值 0-6 分。
+  // Range 支持决定能否拖动进度条与断点续传。
   if (source.rangeSupported === true) {
-    score += 6;
+    ratio += 0.2;
     notes.push('支持 Range，可拖动进度条与断点续传');
   } else if (source.rangeSupported === false) {
     notes.push('不支持 Range，只能从头顺序播放，下载不可续传');
   } else {
-    score += 2;
+    ratio += 0.07;
     notes.push('Range 支持未探测');
   }
 
   // 明确探测失败（404/超时）是强负信号。
   if (source.reachable === false) {
-    score = 0;
+    ratio = 0;
     notes.push('探测不可达，链接可能已失效');
   }
 
   // 非 HTTPS 在 HTTPS 页面里会被混合内容策略拦截。
   if (source.url && source.url.startsWith('http://')) {
-    score = Math.max(0, score - 5);
+    ratio = Math.max(0, ratio - 0.17);
     notes.push('明文 HTTP，HTTPS 页面内会被混合内容策略拦截');
   }
 
   return {
     key: 'playability',
     label: '可播性',
-    score: clamp(score, 0, WEIGHTS.playability),
-    max: WEIGHTS.playability,
+    ratio: clamp(ratio, 0, 1),
     reason: notes.join('；'),
     blocked: support.level === 'no' || source.reachable === false,
-    blockReason: support.level === 'no' ? support.note : (source.reachable === false ? '链接探测不可达' : null),
+    blockReason: support.level === 'no'
+      ? support.note
+      : (source.reachable === false ? '链接探测不可达' : null),
   };
 }
 
@@ -136,8 +166,14 @@ function inferHeightFromFormat(format) {
   return null;
 }
 
-/** 维度 2：清晰度（0-20）。 */
-function scoreResolution(source) {
+/** 清晰度阶梯 → 归一化比值。 */
+const RESOLUTION_LADDER = [
+  [2160, 1.00], [1440, 0.94], [1080, 0.88], [720, 0.72],
+  [576, 0.54], [480, 0.40], [360, 0.24], [240, 0.10],
+];
+
+/** 维度 2：清晰度。权重最高的排序维度之一。 */
+function dimResolution(source) {
   let height = source.height ? Number(source.height) : null;
   let inferred = false;
   if (!height) {
@@ -146,159 +182,167 @@ function scoreResolution(source) {
   }
 
   if (!height) {
-    return {
-      key: 'resolution', label: '清晰度',
-      score: 7, max: WEIGHTS.resolution,
-      reason: '上游未提供分辨率，按中位水平计分',
-    };
+    return { key: 'resolution', label: '清晰度', ratio: 0.35, reason: '上游未提供分辨率，按中位水平计分' };
   }
 
-  const table = [
-    [2160, 20], [1440, 19], [1080, 18], [720, 15],
-    [576, 11], [480, 8], [360, 5], [240, 2],
-  ];
-  let score = 1;
-  for (const [h, s] of table) {
-    if (height >= h) { score = s; break; }
+  let ratio = 0.04;
+  for (const [h, r] of RESOLUTION_LADDER) {
+    if (height >= h) { ratio = r; break; }
   }
   // 推断出来的分辨率置信度低，打个折。
-  if (inferred) score = Math.round(score * 0.85);
+  if (inferred) ratio *= 0.85;
 
   const label = height >= 2160 ? '4K' : height >= 1080 ? '1080p' : height >= 720 ? '720p' : `${height}p`;
   return {
     key: 'resolution', label: '清晰度',
-    score: clamp(score, 0, WEIGHTS.resolution), max: WEIGHTS.resolution,
-    reason: inferred ? `由格式名推断约 ${label}` : `${source.width ? `${source.width}×${height}` : label}`,
+    ratio: clamp(ratio, 0, 1),
+    reason: inferred ? `由格式名推断约 ${label}` : (source.width ? `${source.width}×${height}` : label),
   };
 }
 
 /**
- * 维度 3：完整度（0-18）。
+ * 维度 3：片长完整度。**偏好更长的版本。**
  *
- * 这是把"预告片/片段"挡在 Top5 之外的关键维度。
- * 参考片长优先用权威元数据（TMDB runtime）；没有权威值时，
- * 用同一部作品所有候选片源时长的**中位数**当参考——
- * 归档站里正片副本通常多于预告片副本，中位数天然落在正片时长上，
- * 这样在完全没有外部 API key 的情况下依然能过滤片段。
+ * 由两部分构成：
+ *  - 完整度基准（75%）：相对参考片长的达标程度。**不对称**——
+ *    短于参考片长按缺失比例扣分，达到或超过参考片长给满分，
+ *    因为更长的版本通常意味着未删减版 / 修复加长版，而非缺陷。
+ *  - 长度偏好（25%）：相对本次候选中最长片源的比值，
+ *    让两个都"完整"的版本之间，更长的那个胜出。
+ *
+ * 参考片长优先用权威元数据（TMDB runtime）；没有权威值时用候选时长中位数——
+ * 归档站里正片副本通常多于预告片副本，中位数天然落在正片时长上。
  */
-function scoreCompleteness(source, referenceRuntimeSec) {
+function dimCompleteness(source, referenceRuntimeSec, maxDurationSec) {
   const dur = source.durationSec ? Number(source.durationSec) : null;
   const hint = nonFeatureHint(`${source.title || ''} ${source.filename || ''}`);
 
   if (hint) {
     return {
-      key: 'completeness', label: '完整度',
-      score: 0, max: WEIGHTS.completeness,
-      reason: `标题含「${hint}」，判定为非正片`,
-      suspicious: true,
+      key: 'completeness', label: '完整度', ratio: 0,
+      reason: `标题含「${hint}」，判定为非正片`, suspicious: true,
     };
   }
 
-  if (!dur || !referenceRuntimeSec) {
+  if (!dur) {
+    return { key: 'completeness', label: '完整度', ratio: 0.5, reason: '上游未提供时长' };
+  }
+
+  const mins = Math.round(dur / 60);
+
+  if (!referenceRuntimeSec) {
+    // 没有参照系时，只能靠"相对最长候选"排序。
+    const lengthOnly = maxDurationSec ? clamp(dur / maxDurationSec, 0, 1) : 0.5;
     return {
       key: 'completeness', label: '完整度',
-      score: 9, max: WEIGHTS.completeness,
-      reason: dur ? '无参考片长可比对，按中位水平计分' : '上游未提供时长',
+      ratio: clamp(0.4 + lengthOnly * 0.6, 0, 1),
+      reason: `${mins} 分钟，无参考片长可比对，按相对时长计分`,
     };
   }
 
   const ratio = dur / referenceRuntimeSec;
-  const mins = Math.round(dur / 60);
   const refMins = Math.round(referenceRuntimeSec / 60);
-  let score;
+  let base;
   let reason;
   let suspicious = false;
 
-  if (ratio >= 0.9 && ratio <= 1.12) {
-    score = 18; reason = `${mins} 分钟，与参考片长 ${refMins} 分钟一致`;
-  } else if (ratio >= 0.75 && ratio < 0.9) {
-    score = 11; reason = `${mins} 分钟，比参考片长短约 ${Math.round((1 - ratio) * 100)}%，可能有删减`;
-  } else if (ratio > 1.12 && ratio <= 1.3) {
-    score = 12; reason = `${mins} 分钟，长于参考片长，可能是加长版或含片头广告`;
-  } else if (ratio >= 0.5 && ratio < 0.75) {
-    score = 5; reason = `${mins} 分钟，明显短于参考片长 ${refMins} 分钟，疑似删减版`;
-  } else if (ratio < 0.5) {
-    score = 0; reason = `仅 ${mins} 分钟，参考片长 ${refMins} 分钟，判定为片段或预告`;
+  if (ratio < 0.5) {
+    base = 0;
+    reason = `仅 ${mins} 分钟，参考片长 ${refMins} 分钟，判定为片段或预告`;
     suspicious = true;
+  } else if (ratio < 0.75) {
+    base = 0.3;
+    reason = `${mins} 分钟，明显短于参考片长 ${refMins} 分钟，疑似删减版`;
+  } else if (ratio < 0.9) {
+    base = 0.65;
+    reason = `${mins} 分钟，比参考片长短约 ${Math.round((1 - ratio) * 100)}%，可能有删减`;
+  } else if (ratio < 1) {
+    base = 0.88;
+    reason = `${mins} 分钟，接近参考片长 ${refMins} 分钟`;
+  } else if (ratio <= 1.35) {
+    base = 1;
+    reason = ratio > 1.03
+      ? `${mins} 分钟，长于参考片长 ${refMins} 分钟，可能是未删减版/修复加长版`
+      : `${mins} 分钟，与参考片长 ${refMins} 分钟一致`;
   } else {
-    score = 6; reason = `${mins} 分钟，远长于参考片长，疑似合集`;
+    // 远长于片长通常是合集或含大量片头片尾，不再继续加分但也不判定为非正片。
+    base = 0.8;
+    reason = `${mins} 分钟，远长于参考片长 ${refMins} 分钟，可能是合集`;
   }
 
-  return { key: 'completeness', label: '完整度', score, max: WEIGHTS.completeness, reason, suspicious };
+  if (suspicious) {
+    return { key: 'completeness', label: '完整度', ratio: 0, reason, suspicious: true };
+  }
+
+  // 长度偏好：在都达标的候选之间，更长的胜出。
+  const lengthPref = maxDurationSec ? clamp(dur / maxDurationSec, 0, 1) : 0.8;
+  return {
+    key: 'completeness', label: '完整度',
+    ratio: clamp(base * 0.75 + lengthPref * 0.25, 0, 1),
+    reason,
+  };
 }
 
-/** 维度 4：码率健康度（0-12）。 */
-function scoreBitrate(source) {
+/** 维度 4：码率健康度。 */
+function dimBitrate(source) {
   const bytes = source.bytes ? Number(source.bytes) : null;
   const dur = source.durationSec ? Number(source.durationSec) : null;
   if (!bytes || !dur || dur <= 0) {
-    return {
-      key: 'bitrate', label: '码率', score: 6, max: WEIGHTS.bitrate,
-      reason: '缺少体积或时长，无法计算码率',
-    };
+    return { key: 'bitrate', label: '码率', ratio: 0.5, reason: '缺少体积或时长，无法计算码率' };
   }
 
   const kbps = (bytes * 8) / 1000 / dur;
   const mb = bytes / 1024 / 1024;
-  let score;
+  let ratio;
   let verdict;
-  if (kbps < 200) { score = 2; verdict = '码率过低，画面会明显模糊'; }
-  else if (kbps < 600) { score = 6; verdict = '码率偏低，适合弱网'; }
-  else if (kbps < 1500) { score = 10; verdict = '码率适中'; }
-  else if (kbps <= 6000) { score = 12; verdict = '码率理想'; }
-  else if (kbps <= 15000) { score = 10; verdict = '码率较高，加载偏慢'; }
-  else { score = 7; verdict = '码率很高，适合下载而非在线播放'; }
+  if (kbps < 200) { ratio = 0.17; verdict = '码率过低，画面会明显模糊'; }
+  else if (kbps < 600) { ratio = 0.5; verdict = '码率偏低，适合弱网'; }
+  else if (kbps < 1500) { ratio = 0.83; verdict = '码率适中'; }
+  else if (kbps <= 6000) { ratio = 1; verdict = '码率理想'; }
+  else if (kbps <= 15000) { ratio = 0.83; verdict = '码率较高，加载偏慢'; }
+  else { ratio = 0.58; verdict = '码率很高，适合下载而非在线播放'; }
 
   return {
-    key: 'bitrate', label: '码率',
-    score, max: WEIGHTS.bitrate,
+    key: 'bitrate', label: '码率', ratio,
     reason: `${Math.round(kbps)} kbps · ${mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`}，${verdict}`,
   };
 }
 
-/** 维度 5：来源可信度（0-12）。 */
-function scoreTrust(source) {
+/** 维度 5：来源可信度。 */
+function dimTrust(source) {
   const license = source.license || '';
-  let base = 4;
+  let ratio = 0.33;
   let label = '许可未标注';
   for (const tier of LICENSE_TIERS) {
-    if (tier.test.test(license)) { base = tier.score; label = tier.label; break; }
+    if (tier.test.test(license)) { ratio = tier.ratio; label = tier.label; break; }
   }
 
   const collections = Array.isArray(source.collections) ? source.collections : [];
   const hit = collections.find((c) => TRUSTED_COLLECTIONS.has(String(c).toLowerCase()));
-  let score = base;
   const notes = [label];
   if (hit) {
-    score = Math.min(WEIGHTS.trust, score + 2);
+    ratio = Math.min(1, ratio + 0.17);
     notes.push(`收录于 ${hit} 馆藏`);
   }
   if (source.ownedByUser) {
-    score = WEIGHTS.trust;
+    ratio = 1;
     notes.length = 0;
     notes.push('来自你自己的媒体库');
   }
 
-  return {
-    key: 'trust', label: '来源可信',
-    score: clamp(score, 0, WEIGHTS.trust), max: WEIGHTS.trust,
-    reason: notes.join('；'),
-  };
+  return { key: 'trust', label: '来源可信', ratio: clamp(ratio, 0, 1), reason: notes.join('；') };
 }
 
-/** 维度 6：人气/健康度（0-8）。对数归一，避免头部条目碾压一切。 */
-function scorePopularity(source) {
+/** 维度 6：人气/健康度。对数归一，避免头部条目碾压一切。 */
+function dimPopularity(source) {
   const downloads = Number(source.downloads || 0);
   if (!downloads) {
-    return {
-      key: 'popularity', label: '人气', score: 2, max: WEIGHTS.popularity,
-      reason: '无下载量数据',
-    };
+    return { key: 'popularity', label: '人气', ratio: 0.25, reason: '无下载量数据' };
   }
   // 1e6 次下载封顶
-  const score = clamp((Math.log10(downloads) / 6) * WEIGHTS.popularity, 0, WEIGHTS.popularity);
   return {
-    key: 'popularity', label: '人气', score: Math.round(score * 10) / 10, max: WEIGHTS.popularity,
+    key: 'popularity', label: '人气',
+    ratio: clamp(Math.log10(downloads) / 6, 0, 1),
     reason: `${downloads.toLocaleString('en-US')} 次下载`,
   };
 }
@@ -306,25 +350,39 @@ function scorePopularity(source) {
 /**
  * 给单个片源打分。
  *
- * @param {object} source 片源（见 types.js 的 PlaySource）
- * @param {{referenceRuntimeSec?: number|null}} [ctx]
- * @returns {object} 带 score / breakdown / blocked 的片源副本
+ * @param {object} source 片源
+ * @param {{referenceRuntimeSec?: number|null, maxDurationSec?: number|null,
+ *          weights?: Record<string, number>}} [ctx]
  */
 export function scoreSource(source, ctx = {}) {
-  const breakdown = [
-    scorePlayability(source),
-    scoreResolution(source),
-    scoreCompleteness(source, ctx.referenceRuntimeSec ?? null),
-    scoreBitrate(source),
-    scoreTrust(source),
-    scorePopularity(source),
+  const weights = resolveWeights(ctx.weights);
+  const dims = [
+    dimPlayability(source),
+    dimResolution(source),
+    dimCompleteness(source, ctx.referenceRuntimeSec ?? null, ctx.maxDurationSec ?? null),
+    dimBitrate(source),
+    dimTrust(source),
+    dimPopularity(source),
   ];
+
+  const breakdown = dims.map((d) => {
+    const max = weights[d.key];
+    return {
+      key: d.key,
+      label: d.label,
+      score: Math.round(d.ratio * max * 10) / 10,
+      max,
+      reason: d.reason,
+      ...(d.blocked !== undefined ? { blocked: d.blocked, blockReason: d.blockReason } : {}),
+      ...(d.suspicious !== undefined ? { suspicious: d.suspicious } : {}),
+    };
+  });
 
   const total = breakdown.reduce((sum, d) => sum + d.score, 0);
   const playability = breakdown[0];
   const completeness = breakdown[2];
 
-  // 硬门槛：浏览器放不出来的、或判定为片段的，不进 Top5。
+  // 硬门槛：浏览器放不出来的、或判定为片段的，不进推荐位。
   const blocked = Boolean(playability.blocked) || Boolean(completeness.suspicious);
   const blockReason = playability.blocked
     ? playability.blockReason
@@ -337,26 +395,33 @@ export function scoreSource(source, ctx = {}) {
     breakdown,
     blocked,
     blockReason,
-    // 即使被挡在 Top5 之外，仍然可以下载后本地播放——除非链接根本不可达。
+    // 即使被挡在推荐位之外，仍然可以下载后本地播放——除非链接根本不可达。
     downloadable: source.reachable !== false,
   };
 }
 
 /**
  * 对一组片源打分并排序。
- * 返回 { top, alternatives }：top 是可直接播放的前 N 条，
- * alternatives 是被硬门槛挡下但仍可下载的片源（附原因）。
+ *
+ * 同分时的决胜次序体现"优先清晰度、其次时长"的产品要求：
+ * 总分 → 分辨率 → 时长 → 体积。
  *
  * @param {object[]} sources
- * @param {{referenceRuntimeSec?: number|null, limit?: number}} [ctx]
+ * @param {{referenceRuntimeSec?: number|null, maxDurationSec?: number|null,
+ *          limit?: number, weights?: Record<string, number>}} [ctx]
  */
 export function rankSources(sources, ctx = {}) {
   const limit = ctx.limit ?? 5;
   const scored = sources.map((s) => scoreSource(s, ctx));
-  const byScore = (a, b) => b.score - a.score;
 
-  const playable = scored.filter((s) => !s.blocked).sort(byScore);
-  const alternatives = scored.filter((s) => s.blocked).sort(byScore);
+  const compare = (a, b) =>
+    b.score - a.score
+    || (Number(b.height) || 0) - (Number(a.height) || 0)
+    || (Number(b.durationSec) || 0) - (Number(a.durationSec) || 0)
+    || (Number(b.bytes) || 0) - (Number(a.bytes) || 0);
+
+  const playable = scored.filter((s) => !s.blocked).sort(compare);
+  const alternatives = scored.filter((s) => s.blocked).sort(compare);
 
   return {
     top: playable.slice(0, limit).map((s, i) => ({ ...s, rank: i + 1 })),
@@ -367,9 +432,6 @@ export function rankSources(sources, ctx = {}) {
 
 /**
  * 无权威片长时的参考片长估计：取所有候选时长的中位数。
- * 见 scoreCompleteness 的说明——这是本系统在零 API key 情况下
- * 依然能把预告片挡在门外的关键技巧。
- *
  * @param {object[]} sources
  * @returns {number|null}
  */
@@ -381,6 +443,25 @@ export function estimateReferenceRuntime(sources) {
   if (durations.length === 0) return null;
   const mid = Math.floor(durations.length / 2);
   return durations.length % 2 ? durations[mid] : (durations[mid - 1] + durations[mid]) / 2;
+}
+
+/**
+ * "长度偏好"的分母：候选中的最长时长。
+ *
+ * 但要防止一个 5 小时的合集把所有正片的长度分压到很低，
+ * 因此只在参考片长的 1.5 倍以内取最大值。
+ *
+ * @param {object[]} sources
+ * @param {number|null} referenceRuntimeSec
+ * @returns {number|null}
+ */
+export function computeMaxDuration(sources, referenceRuntimeSec) {
+  const cap = referenceRuntimeSec ? referenceRuntimeSec * 1.5 : Infinity;
+  const durations = sources
+    .map((s) => Number(s.durationSec))
+    .filter((d) => Number.isFinite(d) && d > 0 && d <= cap);
+  if (durations.length === 0) return null;
+  return Math.max(...durations);
 }
 
 export { CONTAINER_SUPPORT };

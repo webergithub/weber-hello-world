@@ -99,6 +99,19 @@ h1 .cn { color: var(--accent); font-size: 20px; margin-left: 4px; }
 }
 .source.rank-1 { border-color: rgba(240,180,41,.5); }
 
+.slot-note { margin: -6px 0 14px; font-size: 12.5px; color: var(--muted); }
+
+/* 正版渠道推荐位（第 4/5 位）：与直链卡片视觉上明确区分 */
+.offer-card { border-style: dashed; }
+.offer-type {
+  font-size: 12.5px; font-weight: 600; color: var(--accent);
+  padding: 2px 10px; border-radius: 999px; background: rgba(240,180,41,.14);
+}
+.offer-body { display: flex; gap: 12px; align-items: flex-start; margin: 12px 0 10px; }
+.offer-logo { width: 40px; height: 40px; border-radius: 8px; flex-shrink: 0; }
+.offer-desc { margin: 0; font-size: 13px; color: #a9b6c5; line-height: 1.6; }
+.offer-card a.play { text-decoration: none; display: inline-block; }
+
 .source-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .rank {
   width: 30px; height: 30px; flex-shrink: 0;

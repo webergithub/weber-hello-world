@@ -8,7 +8,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { searchAll, dedupeSources } from '../src/core/pipeline.js';
+import { searchAll, dedupeSources, buildRecommendations } from '../src/core/pipeline.js';
 import { createFixtureFetch, createFixtureProbe } from '../src/core/fixtureFetch.js';
 
 const offline = () => ({
@@ -142,4 +142,103 @@ test('检索统计如实反映漏斗各级数量', async () => {
   assert.equal(r.stats.rawCandidates, r.stats.afterDedupe);
   assert.equal(r.stats.blocked, r.alternatives.length);
   assert.ok(r.stats.playable >= r.top.length);
+});
+
+/* ── 推荐位：前 3 直连、第 4/5 正版订阅付费 ───────────────────── */
+
+test('配置正版渠道后，推荐位为 3 条直连 + 2 条订阅/付费', async (t) => {
+  const prev = process.env.TMDB_API_KEY;
+  process.env.TMDB_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (prev === undefined) delete process.env.TMDB_API_KEY;
+    else process.env.TMDB_API_KEY = prev;
+  });
+
+  const r = await searchAll('Night of the Living Dead', offline());
+
+  assert.equal(r.recommendations.length, 5);
+  assert.deepEqual(r.recommendations.map((x) => x.rank), [1, 2, 3, 4, 5]);
+  assert.deepEqual(r.recommendations.map((x) => x.kind),
+    ['direct', 'direct', 'direct', 'offer', 'offer']);
+  assert.equal(r.stats.recommendedDirect, 3);
+  assert.equal(r.stats.recommendedOffers, 2);
+
+  // 前三位必须带可播直链
+  for (const rec of r.recommendations.slice(0, 3)) {
+    assert.ok(rec.source?.url, '直连推荐位必须有播放地址');
+    assert.equal(rec.source.blocked, false);
+  }
+  // 第 4/5 位是渠道，没有也不应该有文件地址
+  for (const rec of r.recommendations.slice(3)) {
+    assert.ok(rec.offer?.providerName);
+    assert.equal(rec.source, undefined);
+    assert.ok(!/\.(mp4|mkv|webm|m3u8)(\?|$)/i.test(rec.offer.link || ''));
+  }
+});
+
+test('推荐位 4/5 优先给订阅，而不是免费广告渠道', async (t) => {
+  const prev = process.env.TMDB_API_KEY;
+  process.env.TMDB_API_KEY = 'fixture-key';
+  t.after(() => {
+    if (prev === undefined) delete process.env.TMDB_API_KEY;
+    else process.env.TMDB_API_KEY = prev;
+  });
+
+  const r = await searchAll('Night of the Living Dead', offline());
+  const offerTypes = r.recommendations.filter((x) => x.kind === 'offer').map((x) => x.access);
+  assert.deepEqual(offerTypes, ['flatrate', 'flatrate']);
+});
+
+test('没有正版渠道时，推荐位用更多直连片源补满', async () => {
+  const r = await searchAll('Night of the Living Dead', offline());
+
+  assert.equal(r.recommendations.length, 5);
+  assert.ok(r.recommendations.every((x) => x.kind === 'direct'));
+  assert.equal(r.stats.recommendedOffers, 0);
+  assert.ok(r.notes.some((n) => n.includes('推荐位 4-5 已用可直接播放的片源补齐')));
+});
+
+test('推荐位内的直连片源按清晰度降序', async () => {
+  const r = await searchAll('Night of the Living Dead', offline());
+  const heights = r.recommendations
+    .filter((x) => x.kind === 'direct')
+    .map((x) => x.source.height);
+  assert.deepEqual([...heights].sort((a, b) => b - a), heights, `实际次序：${heights.join(', ')}`);
+});
+
+test('推荐位第一条是分辨率最高的可播片源', async () => {
+  const r = await searchAll('Night of the Living Dead', offline());
+  assert.equal(r.recommendations[0].source.height, 1080);
+  assert.equal(r.recommendations[0].source.container, 'mp4');
+});
+
+test('buildRecommendations 在直连不足 3 条时让正版渠道往前顶', () => {
+  const recs = buildRecommendations(
+    [{ id: 'only', url: 'https://x/a.mp4' }],
+    [
+      { type: 'flatrate', typeLabel: '订阅可看', providerName: 'A' },
+      { type: 'rent', typeLabel: '租赁', providerName: 'B' },
+      { type: 'buy', typeLabel: '购买', providerName: 'C' },
+      { type: 'free', typeLabel: '免费可看', providerName: 'D' },
+      { type: 'ads', typeLabel: '广告免费', providerName: 'E' },
+    ],
+  );
+  assert.equal(recs.length, 5);
+  assert.deepEqual(recs.map((r) => r.kind), ['direct', 'offer', 'offer', 'offer', 'offer']);
+  // 订阅 → 租赁 → 购买 → 广告 → 免费
+  assert.deepEqual(recs.slice(1).map((r) => r.offer.providerName), ['A', 'B', 'C', 'E']);
+});
+
+test('buildRecommendations 按平台去重，保留优先级最高的那条', () => {
+  const recs = buildRecommendations([], [
+    { type: 'buy', typeLabel: '购买', providerName: 'Apple TV' },
+    { type: 'flatrate', typeLabel: '订阅可看', providerName: 'Apple TV' },
+  ]);
+  assert.equal(recs.length, 1);
+  assert.equal(recs[0].access, 'flatrate');
+  assert.equal(recs[0].offer.providerName, 'Apple TV');
+});
+
+test('两边都空时推荐位为空，而不是抛错', () => {
+  assert.deepEqual(buildRecommendations([], []), []);
 });

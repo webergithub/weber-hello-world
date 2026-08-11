@@ -42,7 +42,7 @@ function fmtSize(bytes) {
 
 /** 把一次检索结果打印成人类可读的报告。 */
 function printReport(result) {
-  const { query, title, top, alternatives, offers, providers, stats, notes, elapsedMs } = result;
+  const { query, title, recommendations, top, alternatives, offers, providers, stats, notes, elapsedMs } = result;
 
   console.log(`\n🎬  ${title.name}${title.year ? ` (${title.year})` : ''}`);
   if (title.runtimeSec) {
@@ -59,15 +59,24 @@ function printReport(result) {
   }
   console.log(`    候选 ${stats.rawCandidates} → 去重 ${stats.afterDedupe} → 探测 ${stats.probed} → 可播 ${stats.playable} / 受阻 ${stats.blocked}`);
 
-  console.log(`\n🏆  Top${top.length} 可直接播放的片源`);
-  if (top.length === 0) console.log('    （无）');
-  for (const s of top) {
-    console.log(`\n  #${s.rank}  ${s.score} 分   ${s.providerLabel}`);
-    console.log(`      ${s.filename}`);
-    console.log(`      ${s.container.toUpperCase()} · ${s.height ? `${s.height}p` : '分辨率未知'} · ${fmtDuration(s.durationSec)} · ${fmtSize(s.bytes)}`);
-    console.log(`      ▶ ${s.url}`);
-    for (const d of s.breakdown) {
-      console.log(`        ${d.label.padEnd(6)} ${String(d.score).padStart(5)}/${String(d.max).padEnd(3)} ${d.reason}`);
+  console.log(`\n🏆  Top${recommendations.length} 推荐（前 ${stats.recommendedDirect} 位可直接播放 · 后 ${stats.recommendedOffers} 位正版订阅/付费）`);
+  if (recommendations.length === 0) console.log('    （无）');
+
+  for (const rec of recommendations) {
+    if (rec.kind === 'direct') {
+      const s = rec.source;
+      console.log(`\n  #${rec.rank}  ▶ 直接播放   ${s.score} 分   ${s.providerLabel}`);
+      console.log(`      ${s.filename}`);
+      console.log(`      ${s.container.toUpperCase()} · ${s.height ? `${s.height}p` : '分辨率未知'} · ${fmtDuration(s.durationSec)} · ${fmtSize(s.bytes)}`);
+      console.log(`      ${s.url}`);
+      for (const d of s.breakdown) {
+        console.log(`        ${d.label.padEnd(6)} ${String(d.score).padStart(5)}/${String(d.max).padEnd(3)} ${d.reason}`);
+      }
+    } else {
+      const o = rec.offer;
+      console.log(`\n  #${rec.rank}  🎟️  ${o.typeLabel}   ${o.providerName}`);
+      console.log(`      需在该平台订阅或付费后观看（${o.region} 区）`);
+      if (o.link) console.log(`      ${o.link}`);
     }
   }
 
