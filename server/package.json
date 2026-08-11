@@ -1,0 +1,12 @@
+{
+  "name": "citytwin-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CityTwin backend: anonymous identity, match stats, leaderboards, Google 3D Tiles proxy with quota breaker",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings src/index.js",
+    "test": "node --no-warnings test/smoke.mjs"
+  }
+}

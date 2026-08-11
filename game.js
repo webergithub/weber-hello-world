@@ -4503,8 +4503,24 @@ function endGame(allFound) {
     st.wins = (st.wins || 0) + (allFound ? 1 : 0);
     st.caps = (st.caps || 0) + G.captures;
     localStorage.setItem('ct_stats', JSON.stringify(st));
-    html += `<div style="font-size:12.5px;color:#9fb0c8;margin-top:6px">${t('career', st.games, st.wins, st.caps)}</div>`;
+    html += `<div style="font-size:12.5px;color:#9fb0c8;margin-top:6px" id="careerEnd">${t('career', st.games, st.wins, st.caps)}</div>`;
   } catch (e) { /* 本地存储不可用则跳过 */ }
+  // 战绩上报（后端不可用时静默跳过，不影响结算界面）
+  if (window.CTNet) {
+    CTNet.submitMatch({
+      city: G.citySel, seed: G.seed, mode: G.mode, difficulty: $('difficulty').value,
+      totalTime: G.totalTime, timeLeft: Math.round(G.timeLeft),
+      nHiders: G.nHiders, mSeekers: G.mSeekers, won: !!allFound,
+      captures: G.captures, credits: G.credits, earned: G.earned, spent: G.spent,
+      finalScore, dist: Math.round(S.dist || 0), rides: S.rides || 0, loot: S.loot || 0,
+      airdrop: !!S.airdrop, chaseCaps: S.chaseCaps || 0,
+      poi: (G.city.poiVisited && G.city.poiVisited.size) || 0, achievements: ach,
+    }).then((r) => {
+      if (!r || !r.stats) return;
+      const el = $('careerEnd');
+      if (el) el.textContent = t('career', r.stats.games, r.stats.wins, r.stats.caps) + ' ☁';
+    });
+  }
   $('endStats').innerHTML = html;
   $('endScreen').classList.remove('hidden');
   if (allFound) AudioSys.capture();
@@ -4965,6 +4981,14 @@ function updateCareerLine() {
     const st = JSON.parse(localStorage.getItem('ct_stats') || 'null');
     el.textContent = st && st.games ? t('career', st.games, st.wins || 0, st.caps || 0) : '';
   } catch (e) { el.textContent = ''; }
+  // 云端战绩可用时以它为准（跨设备一致），带 ☁ 标记
+  if (window.CTNet) {
+    CTNet.stats().then((s) => {
+      if (s && s.games && $('careerLine')) {
+        $('careerLine').textContent = t('career', s.games, s.wins || 0, s.caps || 0) + (CTNet.online ? ' ☁' : '');
+      }
+    });
+  }
 }
 
 /* ---- 启动 ---- */

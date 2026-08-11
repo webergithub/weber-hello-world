@@ -1,0 +1,56 @@
+# CityTwin 后端 systemd 单元
+# 安装：
+#   sudo mkdir -p /opt/citytwin /var/lib/citytwin
+#   sudo rsync -a server/ /opt/citytwin/
+#   sudo cp deploy/systemd/citytwin-api.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now citytwin-api
+# 配置 Google key（不入仓库）：
+#   sudo systemctl edit citytwin-api   → [Service] Environment="GOOGLE_MAPS_KEY=xxx"
+[Unit]
+Description=CityTwin backend (identity, match stats, leaderboards, 3D Tiles proxy)
+Documentation=https://github.com/webergithub/weber-hello-world
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/citytwin
+Environment="NODE_ENV=production"
+Environment="HOST=127.0.0.1"
+Environment="PORT=8787"
+Environment="CITYTWIN_DATA_DIR=/var/lib/citytwin"
+# GOOGLE_MAPS_KEY 通过 systemctl edit 注入，避免 key 进仓库
+ExecStart=/usr/bin/node --no-warnings /opt/citytwin/src/index.js
+
+Restart=always
+RestartSec=3
+# 崩溃风暴保护：5 分钟内重启超过 5 次则停下，避免拖垮同机其他站点
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# 内存硬上限（Always Free 机型已从 24G 腰斩到 12G，须关住爆炸半径）
+MemoryMax=300M
+MemoryHigh=240M
+
+# 优雅退出：先停新连接，20 秒后强杀
+KillSignal=SIGTERM
+TimeoutStopSec=25
+
+# 安全加固
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/lib/citytwin
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=citytwin
+
+[Install]
+WantedBy=multi-user.target
