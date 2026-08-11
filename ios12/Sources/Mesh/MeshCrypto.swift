@@ -75,6 +75,16 @@ enum MeshCrypto {
         return out
     }
 
+    // 中继房间哈希（BR-1.2）：SHA256("trailmate-room-v1|" + 队伍码)。
+    // 与加密派生盐 trailmate-mesh-v1 不同做域分离；上网的只有它，队伍码绝不上传。
+    // 与 Android MeshCrypto.roomId / 夹具 meshcrypto.mjs 一致。
+    static func roomId(_ team: String) -> String {
+        let input = Array("trailmate-room-v1|\(team)".utf8)
+        var out = [UInt8](repeating: 0, count: Int(CC_SHA256_DIGEST_LENGTH))
+        CC_SHA256(input, CC_LONG(input.count), &out)
+        return out.map { String(format: "%02x", $0) }.joined()
+    }
+
     private static func constEq(_ a: [UInt8], _ b: [UInt8]) -> Bool {
         guard a.count == b.count else { return false }
         var r: UInt8 = 0
