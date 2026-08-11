@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CineRoute 影路</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <div>
+        <h1>CineRoute <span class="cn">影路</span></h1>
+        <p class="tagline">一次输入 · 多源并发 · 深度解析真实片源 · Top5 点开即播</p>
+      </div>
+    </div>
+    <div id="modeBadge" class="badge hidden"></div>
+  </header>
+
+  <form id="searchForm" class="search">
+    <input id="q" type="search" placeholder="输入电影或电视剧名称，可带年份，如：Night of the Living Dead 1968"
+           autocomplete="off" spellcheck="false" required>
+    <button type="submit" id="searchBtn">检索片源</button>
+  </form>
+
+  <p class="scope-note">
+    检索范围限于 <strong>公有领域</strong>、<strong>自由许可（CC / PD）</strong> 与 <strong>你自己的媒体库</strong>；
+    受版权保护的作品只给出正版观看渠道，不解析播放地址。
+  </p>
+
+  <section id="status" class="status hidden"></section>
+
+  <main id="results" class="results hidden">
+    <section id="titleCard" class="title-card"></section>
+
+    <section class="panel">
+      <h2>🏆 Top5 可直接播放的片源</h2>
+      <div id="topList" class="source-list"></div>
+      <div id="batchBar" class="batch-bar hidden">
+        <span id="batchCount">已选 0 个</span>
+        <button id="batchDownload" type="button">批量离线下载</button>
+      </div>
+    </section>
+
+    <section id="playerPanel" class="panel hidden">
+      <h2>▶ 正在播放</h2>
+      <p id="nowPlaying" class="now-playing"></p>
+      <video id="player" controls preload="metadata" playsinline></video>
+      <p id="playerHint" class="hint"></p>
+    </section>
+
+    <section id="altPanel" class="panel hidden">
+      <h2>📦 备选片源（浏览器放不了，可下载后本地播放）</h2>
+      <div id="altList" class="source-list compact"></div>
+    </section>
+
+    <section id="offersPanel" class="panel hidden">
+      <h2>🎟️ 正版观看渠道</h2>
+      <div id="offersList" class="offers"></div>
+      <p class="attribution">观看渠道数据来源 <strong>JustWatch</strong>（经 TMDB 提供）</p>
+    </section>
+
+    <section class="panel">
+      <h2>📡 数据源与检索统计</h2>
+      <div id="providerList" class="providers"></div>
+      <p id="statsLine" class="stats"></p>
+      <ul id="notes" class="notes"></ul>
+    </section>
+  </main>
+
+  <section id="downloadPanel" class="panel downloads hidden">
+    <h2>⬇ 离线下载队列</h2>
+    <div id="downloadList"></div>
+  </section>
+
+  <footer class="foot">
+    <p>片源均来自公开归档站的自由许可内容；下载完成后会用上游提供的 md5/sha1 自动校验完整性。</p>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

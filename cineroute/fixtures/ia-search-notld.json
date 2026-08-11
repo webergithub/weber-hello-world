@@ -1,0 +1,47 @@
+{
+  "responseHeader": {
+    "status": 0,
+    "QTime": 18,
+    "params": {
+      "q": "title:(\"Night of the Living Dead\") AND mediatype:(movies)",
+      "rows": "24",
+      "wt": "json"
+    }
+  },
+  "response": {
+    "numFound": 3,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "night_of_the_living_dead",
+        "title": "Night of the Living Dead",
+        "year": "1968",
+        "downloads": 1284531,
+        "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+        "collection": ["feature_films", "sci-fi_horror", "moviesandfilms"],
+        "avg_rating": "4.53",
+        "description": "George A. Romero's 1968 independent horror film. The film entered the public domain because the original theatrical distributor omitted the copyright notice when it changed the title."
+      },
+      {
+        "identifier": "notld_1968_restored_4k",
+        "title": "Night of the Living Dead (1968) — Restored Transfer",
+        "year": "1968",
+        "downloads": 412907,
+        "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+        "collection": ["feature_films", "moviesandfilms"],
+        "avg_rating": "4.71",
+        "description": "A restored high-definition transfer of the public domain 1968 feature."
+      },
+      {
+        "identifier": "notld_behind_the_scenes",
+        "title": "Night of the Living Dead - Behind the Scenes Featurette",
+        "year": "1969",
+        "downloads": 9822,
+        "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+        "collection": ["moviesandfilms"],
+        "avg_rating": "3.90",
+        "description": "Short featurette about the production."
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "name": "cineroute",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "CineRoute 影路 —— 一次输入片名，多源并发检索、深度解析真实片源直链、可解释打分排 Top5，点开即播 / 勾选离线下载（仅面向公有领域、自由许可与自有媒体库等可合法直取的片源）",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "start": "node index.js --serve",
+    "search": "node index.js",
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}
