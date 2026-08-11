@@ -21,6 +21,8 @@
 //   队伍码绝不上传：它是 PBKDF2 派生密钥的唯一输入，上传即等于交出密钥。
 
 import { WebSocketServer } from 'ws'
+import { createServer } from 'node:http'
+import { randomUUID } from 'node:crypto'
 
 const PORT = Number(process.env.PORT || 8787)
 const TOKEN = process.env.SIGNAL_TOKEN || ''
@@ -29,14 +31,44 @@ const RATE_WINDOW_MS = 10_000
 const RATE_MAX = 80
 const MAX_CONN_PER_IP = 32
 
-const wss = new WebSocketServer({ port: PORT })
+const POLL_HOLD_MS = Number(process.env.POLL_HOLD_MS || 25_000)   // 长轮询挂起时长（iOS 12 侧；测试可调短）
+const POLL_IDLE_MS = 60_000        // 会话空闲回收
+const POLL_QUEUE_MAX = 64          // 单会话待投队列上限
+
+const httpServer = createServer((req, res) => handleHttp(req, res))
+const wss = new WebSocketServer({ server: httpServer })
 
 /** room -> Map<peerId, ws> */
 const rooms = new Map()
 
-/** 中继房间：roomHash -> Set<ws>（BR-1.2）。roomHash 由客户端算，服务端不知队伍码。 */
+/**
+ * 中继房间：roomHash -> Set<member>（BR-1.2）。roomHash 由客户端算，服务端不知队伍码。
+ * member 是「投递器」抽象：WebSocket 成员（Android）与长轮询会话（iOS 12）同房互通——
+ * 两端传输不同，但落在同一个房间集合里，故 Android ↔ iOS 可跨传输互见。
+ */
 const relayRooms = new Map()
 const ROOM_RE = /^[0-9a-f]{64}$/   // SHA256 十六进制
+/** sid -> 长轮询会话 */
+const pollSessions = new Map()
+
+function roomAdd(room, member) {
+  if (!relayRooms.has(room)) relayRooms.set(room, new Set())
+  relayRooms.get(room).add(member)
+}
+
+function roomRemove(room, member) {
+  const s = relayRooms.get(room)
+  if (!s) return
+  s.delete(member)
+  if (s.size === 0) relayRooms.delete(room)
+}
+
+/** 向房间内除 from 外的全部成员投递密文帧 */
+function roomBroadcast(room, from, kind, body) {
+  const s = relayRooms.get(room)
+  if (!s) return
+  for (const m of s) if (m !== from) m.deliver(kind, body)
+}
 /** ip -> 并发连接数 */
 const ipConns = new Map()
 
@@ -55,13 +87,10 @@ function leave(ws) {
 }
 
 function leaveRelay(ws) {
-  const r = ws.relayRoom
-  if (!r) return
-  const peers = relayRooms.get(r)
-  if (!peers) return
-  peers.delete(ws)
-  if (peers.size === 0) relayRooms.delete(r)
+  if (!ws.relayRoom || !ws.relayMember) return
+  roomRemove(ws.relayRoom, ws.relayMember)
   ws.relayRoom = null
+  ws.relayMember = null
 }
 
 wss.on('connection', (ws, req) => {
@@ -127,12 +156,8 @@ wss.on('connection', (ws, req) => {
       if (typeof body !== 'string' || body.length > MAX_MSG_BYTES) return
       // 必须已通过 relay-join（含 token 校验）且只能发往自己所在房间——
       // 否则任何知道房间哈希的连接都能无凭据注入帧。
-      if (ws.relayRoom !== room) return
-      const peers = relayRooms.get(room)
-      if (!peers || !peers.has(ws)) return
-      for (const other of peers) {
-        if (other !== ws) send(other, { type: 'relay', kind, body })
-      }
+      if (ws.relayRoom !== room || !ws.relayMember) return
+      roomBroadcast(room, ws.relayMember, kind, body)
       return
     }
 
@@ -146,8 +171,8 @@ wss.on('connection', (ws, req) => {
       }
       leaveRelay(ws)
       ws.relayRoom = room
-      if (!relayRooms.has(room)) relayRooms.set(room, new Set())
-      relayRooms.get(room).add(ws)
+      ws.relayMember = { deliver: (k, b) => send(ws, { type: 'relay', kind: k, body: b }) }
+      roomAdd(room, ws.relayMember)
       send(ws, { type: 'relay-joined', peers: relayRooms.get(room).size - 1 })
       return
     }
@@ -175,7 +200,128 @@ wss.on('connection', (ws, req) => {
   ws.on('error', cleanup)
 })
 
+// MARK: - HTTP 长轮询中继（BR-1.1，iOS 12 侧）
+// iOS 12 无原生 WebSocket API（URLSessionWebSocketTask 需 iOS 13+），坚持"零第三方依赖"
+// 故 iOS 走长轮询：位置本就 3 秒一报，不需要真正的长连接。
+//   POST /relay/join  {room, token}      -> {sid}
+//   POST /relay/send  {sid, kind, body}  -> 204
+//   GET  /relay/poll?sid=..              -> {frames:[{kind,body}]}（最多挂起 POLL_HOLD_MS）
+// 与 WebSocket 成员同房互通：Android(WS) ↔ iOS(长轮询) 可跨传输互见。
+
+function jsonRes(res, code, obj) {
+  const buf = Buffer.from(JSON.stringify(obj))
+  res.writeHead(code, { 'content-type': 'application/json', 'content-length': buf.length })
+  res.end(buf)
+}
+
+function readBody(req) {
+  return new Promise((resolve) => {
+    let n = 0
+    const chunks = []
+    req.on('data', (c) => {
+      n += c.length
+      if (n > MAX_MSG_BYTES) { req.destroy(); resolve(null); return }
+      chunks.push(c)
+    })
+    req.on('end', () => {
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString() || '{}')) } catch { resolve(null) }
+    })
+    req.on('error', () => resolve(null))
+  })
+}
+
+function flushPoll(sess) {
+  if (!sess.waiter || sess.queue.length === 0) return
+  const { res, timer } = sess.waiter
+  clearTimeout(timer)
+  sess.waiter = null
+  const frames = sess.queue.splice(0, sess.queue.length)
+  jsonRes(res, 200, { frames })
+}
+
+function dropSession(sid) {
+  const sess = pollSessions.get(sid)
+  if (!sess) return
+  if (sess.waiter) { clearTimeout(sess.waiter.timer); try { jsonRes(sess.waiter.res, 200, { frames: [] }) } catch {} }
+  roomRemove(sess.room, sess.member)
+  pollSessions.delete(sid)
+}
+
+// 空闲会话回收：长时间不再 poll 的（App 被杀/断网）自动退房
+setInterval(() => {
+  const now = Date.now()
+  for (const [sid, s] of pollSessions) if (now - s.lastSeen > POLL_IDLE_MS) dropSession(sid)
+}, 15_000).unref?.()
+
+async function handleHttp(req, res) {
+  const url = new URL(req.url, 'http://x')
+  try {
+    if (req.method === 'POST' && url.pathname === '/relay/join') {
+      const body = await readBody(req)
+      if (!body) return jsonRes(res, 400, { error: 'bad body' })
+      if (typeof body.room !== 'string' || !ROOM_RE.test(body.room)) return jsonRes(res, 400, { error: 'bad room' })
+      if (TOKEN && body.token !== TOKEN) return jsonRes(res, 403, { error: 'bad token' })
+      const sid = randomUUID()
+      const sess = { room: body.room, queue: [], waiter: null, lastSeen: Date.now() }
+      // 投递器：入队并唤醒挂起的 poll（与 WS 成员在同一房间集合里）
+      sess.member = {
+        deliver: (kind, b) => {
+          sess.queue.push({ kind, body: b })
+          if (sess.queue.length > POLL_QUEUE_MAX) sess.queue.shift()   // 溢出丢最旧
+          flushPoll(sess)
+        },
+      }
+      pollSessions.set(sid, sess)
+      roomAdd(sess.room, sess.member)
+      return jsonRes(res, 200, { sid, peers: relayRooms.get(sess.room).size - 1 })
+    }
+
+    if (req.method === 'POST' && url.pathname === '/relay/send') {
+      const body = await readBody(req)
+      if (!body) return jsonRes(res, 400, { error: 'bad body' })
+      const sess = pollSessions.get(body.sid)
+      // 必须持有 join 换来的 sid（join 已校验 token），否则无凭据注入
+      if (!sess) return jsonRes(res, 403, { error: 'no session' })
+      if (!Number.isInteger(body.kind) || body.kind < 0 || body.kind > 255) return jsonRes(res, 400, { error: 'bad kind' })
+      if (typeof body.body !== 'string') return jsonRes(res, 400, { error: 'bad frame' })
+      sess.lastSeen = Date.now()
+      roomBroadcast(sess.room, sess.member, body.kind, body.body)
+      res.writeHead(204); res.end()
+      return
+    }
+
+    if (req.method === 'GET' && url.pathname === '/relay/poll') {
+      const sid = url.searchParams.get('sid') || ''
+      const sess = pollSessions.get(sid)
+      if (!sess) return jsonRes(res, 403, { error: 'no session' })
+      sess.lastSeen = Date.now()
+      if (sess.queue.length > 0) {
+        const frames = sess.queue.splice(0, sess.queue.length)
+        return jsonRes(res, 200, { frames })
+      }
+      if (sess.waiter) { clearTimeout(sess.waiter.timer); try { jsonRes(sess.waiter.res, 200, { frames: [] }) } catch {} }
+      const timer = setTimeout(() => { sess.waiter = null; jsonRes(res, 200, { frames: [] }) }, POLL_HOLD_MS)
+      sess.waiter = { res, timer }
+      res.on('close', () => { if (sess.waiter && sess.waiter.res === res) { clearTimeout(timer); sess.waiter = null } })
+      return
+    }
+
+    if (req.method === 'POST' && url.pathname === '/relay/leave') {
+      const body = await readBody(req)
+      if (body && typeof body.sid === 'string') dropSession(body.sid)
+      res.writeHead(204); res.end()
+      return
+    }
+
+    res.writeHead(404); res.end()
+  } catch {
+    try { jsonRes(res, 500, { error: 'server' }) } catch {}
+  }
+}
+
+httpServer.listen(PORT)
+
 console.log(
-  `[TrailMate] 信令服务器已启动: ws://0.0.0.0:${PORT}` +
+  `[TrailMate] 信令服务器已启动: ws://0.0.0.0:${PORT}（含 HTTP 长轮询 /relay/*）` +
     (TOKEN ? ' （已启用 token 鉴权）' : ' （未设 SIGNAL_TOKEN，任意连接可加入——仅限内网/开发）'),
 )

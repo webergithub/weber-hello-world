@@ -12,14 +12,17 @@ final class MeshBus: BleMeshDelegate {
     static let kindAck: UInt8 = 4     // 送达回执（G-CM-2）：json{mid,by}，收到聊天/语音后回发
 
     private let mesh = BleMesh()
+    private var net: NetTransport?
     private var started = false
     // 每类型单 handler：后注册者替换前者。VC 重建时新实例自动顶替旧实例，
     // 避免向单例累积闭包造成旧 VC 泄漏与消息重复处理（与 Android MeshBus.kt 行为一致）。
     private var handlers: [UInt8: (Data) -> Void] = [:]
     private var peerHandlers: [String: (Int) -> Void] = [:]
     private var stateHandlers: [String: (Bool) -> Void] = [:]
+    private var cloudHandlers: [String: (Int) -> Void] = [:]
     private(set) var peerCount = 0
     private(set) var btAvailable = true
+    private(set) var cloudCount = 0   // 云端在线数（BR-1.5：与蓝牙邻居分开，不混淆）
 
     private init() { mesh.delegate = self }
 
@@ -27,6 +30,28 @@ final class MeshBus: BleMeshDelegate {
         if started { return }
         started = true
         mesh.start()
+        startNet()   // 网络中继与 BLE 并行（BR-1.1）；relayUrl 为空则空转
+    }
+
+    // 启动/重启网络通道。队伍码变化或首次配置 URL 时调用。
+    func startNet() {
+        net?.stop()
+        net = nil
+        cloudCount = 0
+        let url = Identity.relayUrl
+        if url.isEmpty { cloudHandlers.values.forEach { $0(0) }; return }
+        let t = NetTransport(
+            baseUrl: url,
+            room: MeshCrypto.roomId(Identity.team),
+            token: Identity.relayToken,
+            onFrame: { [weak self] kind, sealed in self?.dispatchSealed(kind, sealed) },
+            onCloud: { [weak self] n in
+                guard let self = self else { return }
+                self.cloudCount = n
+                self.cloudHandlers.values.forEach { $0(n) }
+            })
+        net = t
+        t.start()
     }
 
     func send(_ kind: UInt8, _ payload: Data) {
@@ -38,6 +63,8 @@ final class MeshBus: BleMeshDelegate {
         d.append(contentsOf: team)
         d.append(sealed)
         mesh.send(d)
+        // 网络通道：只发 roomId + kind + 密文，**队伍码不上网**（BR-1.2）
+        net?.relay(kind, sealed)
     }
 
     // 订阅某类型消息（负载已去掉类型字节）。同类型重复订阅时新 handler 顶替旧的。
@@ -57,6 +84,20 @@ final class MeshBus: BleMeshDelegate {
         handler(btAvailable)
     }
 
+    // 云端在线数观察（BR-1.5，立即回调一次当前值）；同 tag 顶替
+    func onCloud(_ tag: String = "default", _ handler: @escaping (Int) -> Void) {
+        cloudHandlers[tag] = handler
+        handler(cloudCount)
+    }
+
+    // 解密并分发（两条通道共用）。BR-1.3 双通道去重：业务层已幂等——
+    // 聊天/语音按 mid appendIfNew、位置按设备 id 覆盖、回执用 Set，故同帧双至无害，无需额外去重层。
+    private func dispatchSealed(_ kind: UInt8, _ sealed: Data) {
+        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃（网络侧亦借此天然处理房间哈希碰撞）
+        guard let body = MeshCrypto.decrypt(team: Identity.team, sealed) else { return }
+        handlers[kind]?(body)
+    }
+
     // MARK: - BleMeshDelegate（主线程）
     func bleMesh(_ mesh: BleMesh, didReceive payload: Data) {
         // 解析 [kind][teamLen][team][body] 并按当前队伍码过滤
@@ -66,11 +107,8 @@ final class MeshBus: BleMeshDelegate {
         let tlen = Int(bytes[1])
         guard payload.count >= 2 + tlen else { return }
         let team = String(bytes: bytes[2..<(2 + tlen)], encoding: .utf8) ?? ""
-        if team != Identity.team { return }
-        let sealed = payload.subdata(in: (2 + tlen)..<payload.count)
-        // 解密并验 MAC（G-CM-3）：错队伍码/被篡改/旧版明文一律丢弃
-        guard let body = MeshCrypto.decrypt(team: team, sealed) else { return }
-        handlers[kind]?(body)
+        if team != Identity.team { return }   // BLE 侧队伍过滤（明文 team）
+        dispatchSealed(kind, payload.subdata(in: (2 + tlen)..<payload.count))
     }
 
     func bleMeshDidUpdatePeers(_ count: Int) {

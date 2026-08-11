@@ -430,5 +430,99 @@ console.log('[12] 服务端业务帧中继（哑中继）')
   srv.kill()
 }
 
+// ---------- 13. 长轮询中继 + 跨传输互通（BR-1.1，iOS12 ↔ Android） ----------
+console.log('[13] HTTP 长轮询中继（iOS 12 路径）与 WS 跨传输互通')
+{
+  const { spawn } = await import('node:child_process')
+  const { WebSocket } = await import('ws')
+  const mc = await import('./meshcrypto.mjs')
+  const PORT = 18901, TOKEN = 'poll-secret', TEAM = 'K7Q9ZP'
+  const BASE = `http://127.0.0.1:${PORT}`
+
+  const srv = spawn('node', [join(ROOT, 'server/signaling.js')], {
+    // 挂起调短到 1.5s：让"挂起超时返回空"这条路径可被快速且确定地验证
+    env: { ...process.env, PORT: String(PORT), SIGNAL_TOKEN: TOKEN, POLL_HOLD_MS: '1500' }, stdio: 'pipe',
+  })
+  await new Promise((res, rej) => {
+    const t = setTimeout(() => rej(new Error('server start timeout')), 5000)
+    srv.stdout.on('data', d => { if (String(d).includes('已启动')) { clearTimeout(t); res() } })
+  })
+
+  const postJson = async (path, body) => {
+    const r = await fetch(BASE + path, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    })
+    if (r.status === 204) return { status: 204 }
+    return { status: r.status, json: await r.json().catch(() => null) }
+  }
+
+  // iOS 侧：长轮询入房
+  const joined = await postJson('/relay/join', { room: mc.roomId(TEAM), token: TOKEN })
+  const sid = joined.json?.sid
+  check('长轮询 /relay/join 拿到 sid', typeof sid === 'string' && sid.length > 0)
+
+  const badJoin = await postJson('/relay/join', { room: mc.roomId(TEAM), token: 'wrong' })
+  check('长轮询错 token 被拒（403）', badJoin.status === 403, `status=${badJoin.status}`)
+
+  const noSess = await postJson('/relay/send', { sid: 'not-a-session', kind: 2, body: 'AAAA' })
+  check('无 sid 不能注入（403）', noSess.status === 403, `status=${noSess.status}`)
+
+  // Android 侧：WebSocket 入同一房间
+  const wsc = await new Promise((res, rej) => {
+    const c = new WebSocket(BASE.replace('http', 'ws'))
+    c.on('open', () => res(c)); c.on('error', rej)
+  })
+  const wsNext = (c, ms = 3000) => new Promise((res) => {
+    const t = setTimeout(() => res(null), ms)
+    c.once('message', d => { clearTimeout(t); res(JSON.parse(String(d))) })
+  })
+  wsc.send(JSON.stringify({ type: 'relay-join', room: mc.roomId(TEAM), token: TOKEN }))
+  await wsNext(wsc)
+
+  // 跨传输 A：长轮询(iOS) 发 → WebSocket(Android) 收
+  const plainIos = Buffer.from(JSON.stringify({ id: 'ios', n: 'iPhone', lat: 30.25, lng: 120.1, ts: 1 }))
+  const cipherIos = mc.encrypt(TEAM, plainIos)
+  const wsRecv = wsNext(wsc)
+  await postJson('/relay/send', { sid, kind: 2, body: cipherIos.toString('base64') })
+  const gotWs = await wsRecv
+  check('iOS(长轮询) → Android(WS)：收到且解密一致',
+    gotWs?.type === 'relay' && mc.decrypt(TEAM, Buffer.from(gotWs.body, 'base64'))?.equals(plainIos) === true)
+
+  // 跨传输 B：WebSocket(Android) 发 → 长轮询(iOS) 收
+  const plainAnd = Buffer.from(JSON.stringify({ id: 'and', n: '安卓', lat: 31.0, lng: 121.0, ts: 2 }))
+  const cipherAnd = mc.encrypt(TEAM, plainAnd)
+  const pollPromise = fetch(`${BASE}/relay/poll?sid=${sid}`).then(r => r.json())
+  await new Promise(r => setTimeout(r, 150))   // 确保 poll 已挂起
+  wsc.send(JSON.stringify({ type: 'relay', room: mc.roomId(TEAM), kind: 2, body: cipherAnd.toString('base64') }))
+  const polled = await pollPromise
+  const f0 = polled?.frames?.[0]
+  check('Android(WS) → iOS(长轮询)：挂起的 poll 被唤醒且解密一致',
+    f0 && f0.kind === 2 && mc.decrypt(TEAM, Buffer.from(f0.body, 'base64'))?.equals(plainAnd) === true,
+    JSON.stringify(polled))
+
+  // 异队伍隔离：另一队伍的长轮询会话收不到
+  const other = await postJson('/relay/join', { room: mc.roomId('OTHER99'), token: TOKEN })
+  wsc.send(JSON.stringify({ type: 'relay', room: mc.roomId(TEAM), kind: 2, body: cipherAnd.toString('base64') }))
+  await new Promise(r => setTimeout(r, 300))
+  const otherPoll = await fetch(`${BASE}/relay/poll?sid=${other.json.sid}`).then(r => r.json()).catch(() => null)
+  // 该 poll 会挂起到超时，用 race 快速判定队列为空
+  check('异队伍长轮询会话收不到别队帧（挂起超时返回空）',
+    otherPoll !== null && Array.isArray(otherPoll.frames) && otherPoll.frames.length === 0, JSON.stringify(otherPoll))
+
+  // 队伍码明文零出现（长轮询路径）
+  check('长轮询上行报文不含队伍码明文',
+    !JSON.stringify({ sid, room: mc.roomId(TEAM), body: cipherIos.toString('base64') }).includes(TEAM))
+
+  // iOS 源码防漂移
+  const iosCrypto = readFileSync(join(ROOT, 'ios12/Sources/Mesh/MeshCrypto.swift'), 'utf8')
+  const iosNet = readFileSync(join(ROOT, 'ios12/Sources/Mesh/NetTransport.swift'), 'utf8')
+  check('iOS roomId 用同一域分离串', iosCrypto.includes('trailmate-room-v1|'))
+  check('iOS NetTransport 走 URLSession 长轮询（无第三方依赖）',
+    iosNet.includes('URLSession') && iosNet.includes('/relay/poll') && !iosNet.includes('import Starscream'))
+
+  try { wsc.close() } catch {}
+  srv.kill()
+}
+
 console.log(failures === 0 ? '\n全部通过 ✅' : `\n失败 ${failures} 项 ❌`)
 process.exit(failures ? 1 : 0)

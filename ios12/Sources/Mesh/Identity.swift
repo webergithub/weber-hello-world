@@ -31,6 +31,17 @@ enum Identity {
         set { UserDefaults.standard.set(newValue, forKey: "trailmate.ghost") }
     }
 
+    // 网络中继（BR-1.1）：relayUrl 为空 = 只用蓝牙（默认，等同今日行为）。token 对应服务端 SIGNAL_TOKEN。
+    static var relayUrl: String {
+        get { UserDefaults.standard.string(forKey: "trailmate.relayUrl") ?? "" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespaces), forKey: "trailmate.relayUrl") }
+    }
+
+    static var relayToken: String {
+        get { UserDefaults.standard.string(forKey: "trailmate.relayToken") ?? "" }
+        set { UserDefaults.standard.set(newValue.trimmingCharacters(in: .whitespaces), forKey: "trailmate.relayToken") }
+    }
+
     static func newTeamCode() -> String {
         let chars = Array("ABCDEFGHJKLMNPQRSTUVWXYZ23456789")   // 去掉易混字符
         var s = ""
