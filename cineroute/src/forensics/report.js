@@ -18,8 +18,14 @@ import { bitrateProfile, keyframeProfile, medianOf } from './profile.js';
 import { detectInsertedSegments } from './anomaly.js';
 import { analyzeProvenance } from './provenance.js';
 import { compareWithReference, pickVideoTrack } from './compare.js';
+import { mergeFragmentsIntoTracks } from './fragments.js';
 
-export const TOOL_VERSION = 'cineroute-forensics/0.1';
+export const TOOL_VERSION = 'cineroute-forensics/0.2';
+
+/** 分片文件的 moof 数量上限。一部 2h 的 6s 分片影片约 1200 个，留足余量。 */
+const MAX_FRAGMENTS = 20000;
+/** 顶层盒数量上限。分片文件是 moof/mdat 交替，所以要按分片数的两倍留。 */
+const MAX_TOP_LEVEL_BOXES = 50000;
 
 /**
  * 只读取 ftyp 与 moov，同时记录真实的顶层盒顺序。
@@ -33,6 +39,8 @@ export async function readContainerHeads(filePath) {
     const topLevel = [];
     let ftypBuf = null;
     let moovBuf = null;
+    /** @type {Buffer[]} 分片 MP4 的样本表在这些 moof 里，必须全部读出来。 */
+    const moofBufs = [];
     let offset = 0;
 
     while (offset + 8 <= fileSize) {
@@ -59,14 +67,20 @@ export async function readContainerHeads(filePath) {
         const b = Buffer.alloc(size);
         await fh.read(b, 0, size, offset);
         if (type === 'ftyp') ftypBuf = b; else moovBuf = b;
+      } else if (type === 'moof' && moofBufs.length < MAX_FRAGMENTS) {
+        // 单个 moof 通常只有几 KB；成千上万个加起来也远小于 mdat。
+        const b = Buffer.alloc(size);
+        await fh.read(b, 0, size, offset);
+        moofBufs.push(b);
       }
 
       offset += size;
-      // 顶层盒不该有成千上万个，异常文件早停。
-      if (topLevel.length > 5000) break;
+      // 分片文件的顶层盒本来就是 moof/mdat 交替、数量很大，
+      // 所以上限要按分片场景放宽，不能沿用非分片文件的经验值。
+      if (topLevel.length > MAX_TOP_LEVEL_BOXES) break;
     }
 
-    return { topLevel, ftypBuf, moovBuf, fileSize };
+    return { topLevel, ftypBuf, moovBuf, moofBufs, fileSize };
   } finally {
     await fh.close();
   }
@@ -92,7 +106,7 @@ export function hashFile(filePath) {
  * @param {string} filePath
  */
 export async function parseFile(filePath) {
-  const { topLevel, ftypBuf, moovBuf, fileSize } = await readContainerHeads(filePath);
+  const { topLevel, ftypBuf, moovBuf, moofBufs, fileSize } = await readContainerHeads(filePath);
   if (!moovBuf) {
     return {
       ok: false,
@@ -108,6 +122,13 @@ export async function parseFile(filePath) {
   const container = parseContainer(synthetic);
   container.topLevel = topLevel;
   container.fileSize = fileSize;
+
+  // 分片 MP4：moov 里的 stbl 是空的，真正的样本表在各个 moof 里。
+  // 合并之后 track 的形状与非分片文件完全一致，下游分析无需区分。
+  if (moofBufs.length > 0) {
+    mergeFragmentsIntoTracks(container, moovBuf, moofBufs);
+  }
+
   return container;
 }
 
@@ -161,7 +182,9 @@ export async function analyze(suspectPath, opts = {}) {
     ok: true,
     ftyp: container.ftyp,
     durationSec: container.movie ? container.movie.duration / container.movie.timescale : null,
-    hasFragments: container.hasFragments,
+    hasFragments: container.hasFragments || Boolean(container.fragmented),
+    fragmented: Boolean(container.fragmented),
+    fragmentCount: container.fragmentCount ?? 0,
     tracks: container.tracks.map((t) => ({
       trackId: t.trackId,
       type: t.handlerType,
@@ -180,8 +203,31 @@ export async function analyze(suspectPath, opts = {}) {
   if (video) {
     const detection = detectInsertedSegments(video, { binSec: opts.binSec ?? 1 });
     const kf = detection.keyframes;
+
+    // 分片时间轴断点：tfdt 声明的分片起点与按样本时长累加出来的不一致，
+    // 说明分片序列被增删或重排过。这是"直接在 m3u8 里插广告分片再整体封装"
+    // 这种做法留下的直接痕迹，与码率/GOP 是彼此独立的证据。
+    const timescale = video.media?.timescale || 1;
+    const fragFindings = (video.fragmentDiscontinuities || []).map((d) => ({
+      type: 'fragment-discontinuity',
+      // 漂移可正可负（分片被插入或被删除），区间首尾要归一化，
+      // 否则负漂移会产生 end < start 的非法区间。
+      startSec: Number((Math.min(d.expectedTime, d.declaredTime) / timescale).toFixed(2)),
+      endSec: Number((Math.max(d.expectedTime, d.declaredTime) / timescale).toFixed(2)),
+      durationSec: Number((Math.abs(d.driftTicks) / timescale).toFixed(2)),
+      confidence: 0.75,
+      level: 'high',
+      evidence: [
+        `第 ${d.fragmentIndex} 个分片声明起点 ${(d.declaredTime / timescale).toFixed(2)}s，`
+        + `按前序样本时长累加应为 ${(d.expectedTime / timescale).toFixed(2)}s，`
+        + `偏差 ${(d.driftTicks / timescale).toFixed(2)}s——分片序列被增删或重排过`,
+      ],
+      metrics: { ...d },
+    }));
+
     report.tamper = {
-      findings: detection.findings,
+      findings: [...fragFindings, ...detection.findings]
+        .sort((a, b) => b.confidence - a.confidence || a.startSec - b.startSec),
       profileSummary: {
         binSec: detection.profile.binSec,
         durationSec: Number(detection.profile.durationSec.toFixed(2)),
@@ -244,6 +290,17 @@ export function buildVerdict(report) {
     level = 'tampered';
   } else if (medium.length && level === 'clean') {
     reasons.push(`存在 ${medium.length} 处中等置信的异常段`);
+    level = 'suspicious';
+  }
+
+  const fragHits = report.tamper.findings.filter((f) => f.type === 'fragment-discontinuity');
+  if (fragHits.length) {
+    reasons.push(`分片时间轴断点 ${fragHits.length} 处——分片序列被增删或重排过`);
+    level = 'tampered';
+  }
+
+  if (report.container?.fragmented && level === 'clean') {
+    reasons.push(`封装为分片 MP4（${report.container.fragmentCount} 个分片），通常来自 HLS/DASH 流的重新封装`);
     level = 'suspicious';
   }
 
@@ -314,6 +371,10 @@ export function renderText(report) {
   L.push('─── 容器结构 ' + '─'.repeat(58));
   L.push(`封装品牌：${report.container.ftyp ? `${report.container.ftyp.majorBrand} [${report.container.ftyp.compatibleBrands.join(' ')}]` : '未知'}`);
   L.push(`总时长：${report.container.durationSec ? ts(report.container.durationSec) : '未知'}`);
+  if (report.container.fragmented) {
+    L.push(`封装形态：分片 MP4（fMP4），共 ${report.container.fragmentCount} 个分片`
+      + ' —— 常见于从 HLS/DASH 流重新封装的副本');
+  }
   for (const t of report.container.tracks) {
     const dims = t.width && t.height ? `${Math.round(t.width)}×${Math.round(t.height)}` : '—';
     L.push(`  轨 ${t.trackId} [${t.type}] ${t.codecs.join('/') || '?'} ${dims} · ${t.sampleCount} 样本`

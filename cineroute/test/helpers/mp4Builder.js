@@ -248,6 +248,155 @@ export function buildMp4(spec) {
     : Buffer.concat([ftyp, mdat, moov]);
 }
 
+/* ─────────────────── 分片 MP4（fMP4）构造 ─────────────────── */
+
+const u64 = (v) => {
+  const b = Buffer.alloc(8);
+  b.writeBigUInt64BE(BigInt(Math.round(v)), 0);
+  return b;
+};
+
+/** sample_flags 里的"非同步样本"位。关键帧此位为 0。 */
+const SAMPLE_IS_NON_SYNC = 0x00010000;
+
+/**
+ * 组装一个分片 MP4。
+ *
+ * 与 buildMp4 的关键差别：moov 里的 stbl 是**空的**，样本信息全在
+ * 一串 moof/mdat 里——这正是从 HLS/DASH 重新封装出来的副本的形态，
+ * 也是"只读 moov 就会得到 0 个样本"这个陷阱的来源。
+ *
+ * @param {{
+ *   video: {sizes:number[], deltas:number[], syncSamples:Set<number>, timescale:number},
+ *   fragmentSec?: number,
+ *   width?: number, height?: number, codec?: string, handlerName?: string,
+ *   encoderTag?: string|null,
+ *   discontinuity?: {atFragment:number, driftTicks:number}|null,
+ * }} spec
+ */
+export function buildFragmentedMp4(spec) {
+  const {
+    video,
+    fragmentSec = 6,
+    width = 1920, height = 1080, codec = 'avc1',
+    handlerName = 'VideoHandler',
+    encoderTag = null,
+    discontinuity = null,
+  } = spec;
+
+  const trackId = 1;
+  const movieTimescale = 1000;
+  const totalTicks = video.deltas.reduce((a, b) => a + b, 0);
+
+  const ftyp = box('ftyp',
+    Buffer.from('iso5', 'latin1'), u32(512),
+    ...['iso5', 'iso6', 'mp41', 'dash', 'cmfc'].map((b) => Buffer.from(b, 'latin1')));
+
+  // 分片文件的 mvhd duration 常为 0（时长要靠遍历分片才知道）
+  const mvhd = fullBox('mvhd', 0, 0,
+    u32(0), u32(0), u32(movieTimescale), u32(0),
+    u32(0x00010000), u16(0x0100), zeros(10), UNITY_MATRIX, zeros(24), u32(2));
+
+  const tkhd = fullBox('tkhd', 0, 3,
+    u32(0), u32(0), u32(trackId), u32(0), u32(0),
+    zeros(8), u16(0), u16(0), u16(0), u16(0), UNITY_MATRIX,
+    fixed1616(width), fixed1616(height));
+
+  const mdhd = fullBox('mdhd', 0, 0,
+    u32(0), u32(0), u32(video.timescale), u32(0), u16(0x55c4), u16(0));
+
+  // 空 stbl：所有计数为 0，样本信息在 moof 里
+  const stbl = box('stbl',
+    buildStsdPublic(codec),
+    fullBox('stts', 0, 0, u32(0)),
+    fullBox('stsc', 0, 0, u32(0)),
+    fullBox('stsz', 0, 0, u32(0), u32(0)),
+    fullBox('stco', 0, 0, u32(0)));
+
+  const minf = box('minf', box('vmhd', zeros(12)), stbl);
+  const mdia = box('mdia', mdhd, buildHdlrPublic('vide', handlerName), minf);
+  const trak = box('trak', tkhd, mdia);
+
+  // mvex/trex：样本默认值。这里全填 0，强制每个样本在 trun 里显式给出。
+  const trex = fullBox('trex', 0, 0, u32(trackId), u32(1), u32(0), u32(0), u32(0));
+  const mvex = box('mvex', trex);
+
+  const moovParts = [mvhd, trak, mvex];
+  if (encoderTag) {
+    const dataBox = box('data', u32(1), u32(0), Buffer.from(encoderTag, 'utf8'));
+    const ilst = box('ilst', box('\xa9too', dataBox));
+    moovParts.push(box('udta', box('meta', Buffer.concat([
+      Buffer.from([0, 0, 0, 0]), buildHdlrPublic('mdir', ''), ilst,
+    ]))));
+  }
+  const moov = box('moov', ...moovParts);
+
+  // 按时长切分片
+  const samplesPerFragment = Math.max(1, Math.round(fragmentSec * video.timescale
+    / (video.deltas[0] || video.timescale)));
+
+  const parts = [ftyp, moov];
+  let sampleIndex = 0;
+  let baseTime = 0;
+  let fragmentIndex = 0;
+  let sequence = 1;
+
+  while (sampleIndex < video.sizes.length) {
+    const count = Math.min(samplesPerFragment, video.sizes.length - sampleIndex);
+
+    // 漂移从 atFragment 起**持续生效**：插入或删除分片会把后续所有分片
+    // 整体推移，只改一个分片的 tfdt 会造出"跳出去又跳回来"的两个断点，
+    // 那不是真实形态。
+    let declaredBase = baseTime;
+    if (discontinuity && fragmentIndex >= discontinuity.atFragment) {
+      declaredBase = baseTime + discontinuity.driftTicks;
+    }
+
+    const mfhd = fullBox('mfhd', 0, 0, u32(sequence));
+    // tfhd flags=0：不带任何默认值，全部回落到 trex（此处为 0），
+    // 因此每个样本的时长/大小/标志都必须由 trun 显式给出。
+    const tfhd = fullBox('tfhd', 0, 0, u32(trackId));
+    const tfdt = fullBox('tfdt', 1, 0, u64(declaredBase));
+
+    // trun flags: data-offset(0x1) | duration(0x100) | size(0x200) | flags(0x400)
+    const perSample = [];
+    for (let i = 0; i < count; i += 1) {
+      const n = sampleIndex + i;
+      const isKey = video.syncSamples.has(n + 1);
+      perSample.push(u32(video.deltas[n]), u32(video.sizes[n]),
+        u32(isKey ? 0 : SAMPLE_IS_NON_SYNC));
+    }
+    const trun = fullBox('trun', 0, 0x000701, u32(count), u32(0), ...perSample);
+
+    const traf = box('traf', tfhd, tfdt, trun);
+    const moof = box('moof', mfhd, traf);
+
+    const mdatBytes = video.sizes.slice(sampleIndex, sampleIndex + count)
+      .reduce((a, b) => a + b, 0);
+    // mdat 只放占位数据：分析全程不读媒体数据，放真实大小会让测试文件变成 GB 级。
+    const mdat = box('mdat', Buffer.alloc(Math.min(mdatBytes, 256), 0x11));
+
+    parts.push(moof, mdat);
+
+    for (let i = 0; i < count; i += 1) baseTime += video.deltas[sampleIndex + i];
+    sampleIndex += count;
+    fragmentIndex += 1;
+    sequence += 1;
+  }
+
+  return { buffer: Buffer.concat(parts), fragmentCount: fragmentIndex, totalTicks };
+}
+
+/* buildMp4 内部用的两个构造器，分片版本也要用，这里导出。 */
+function buildStsdPublic(format) {
+  return fullBox('stsd', 0, 0, u32(1), box(format, zeros(78)));
+}
+function buildHdlrPublic(handlerType, name) {
+  return fullBox('hdlr', 0, 0,
+    u32(0), Buffer.from(handlerType, 'latin1'), zeros(12),
+    Buffer.from(`${name}\0`, 'utf8'));
+}
+
 /**
  * 造一条确定性但**非周期**的码率曲线，模拟真实影片。
  *

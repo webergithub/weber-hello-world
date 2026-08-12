@@ -19,7 +19,9 @@ import { analyzeProvenance, parseEncoderOptions } from '../src/forensics/provena
 import { compareWithReference, alignProfiles, correlate, normalizeProfile } from '../src/forensics/compare.js';
 import { pHash, hammingDistance, detectStaticOverlays, temporalVariance, dct2d } from '../src/forensics/frames.js';
 import { analyze, renderText, parseFile } from '../src/forensics/report.js';
-import { buildMp4, makeVideoSamples, deterministicVariation } from './helpers/mp4Builder.js';
+import {
+  buildMp4, buildFragmentedMp4, makeVideoSamples, deterministicVariation,
+} from './helpers/mp4Builder.js';
 
 const X264_TAG = 'x264 - core 164 r3095 baee400 - H.264/MPEG-4 AVC codec - '
   + 'Copyleft 2003-2023 - options: cabac=1 ref=3 deblock=1:0:0 me=hex subme=7 '
@@ -457,4 +459,97 @@ test('非 MP4 文件给出可操作的提示而不是崩溃', async (t) => {
   assert.equal(report.container.ok, false);
   assert.match(report.container.reason, /MKV|ffprobe|moov/);
   assert.equal(report.verdict.level, 'unknown');
+});
+
+/* ────────────────── 分片 MP4（fMP4） ────────────────── */
+
+test('fMP4：样本表从 moof 还原，与非分片版本逐值一致', async (t) => {
+  const video = cleanMovie(1);
+  const frag = buildFragmentedMp4({ video, fragmentSec: 6 });
+  const { file, dir } = await writeTemp(frag.buffer, 'frag.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const c = await parseFile(file);
+  assert.equal(c.ok, true);
+  assert.equal(c.fragmented, true);
+  assert.equal(c.fragmentCount, frag.fragmentCount);
+
+  const v = c.tracks[0];
+  assert.equal(v.sampleCount, video.sizes.length, '样本数应与源一致');
+  assert.equal(v.syncSamples.size, video.syncSamples.size, '关键帧数应与源一致');
+  assert.deepEqual(v.sizes.slice(0, 50), video.sizes.slice(0, 50));
+  assert.deepEqual(v.deltas.slice(0, 50), video.deltas.slice(0, 50));
+});
+
+test('fMP4：mvhd 时长为 0 时由分片推导出总时长', async (t) => {
+  const video = cleanMovie(1);
+  const { file, dir } = await writeTemp(buildFragmentedMp4({ video }).buffer, 'frag.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.ok(Math.abs(report.container.durationSec - 1200) < 2,
+    `总时长 ${report.container.durationSec}，期望约 1200`);
+});
+
+test('fMP4：GOP 与码率剖面可用，插入段检出结果与非分片版本一致', async (t) => {
+  const video = movieWithAd(1);
+  const { file, dir } = await writeTemp(buildFragmentedMp4({ video }).buffer, 'frag-ad.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.equal(report.verdict.level, 'tampered');
+
+  const hit = report.tamper.findings.find(
+    (f) => f.type === 'suspected-insert' && f.startSec <= 605 && f.endSec >= 615);
+  assert.ok(hit, `未检出插入段，实得 ${JSON.stringify(report.tamper.findings.map((f) => [f.type, f.startSec, f.endSec]))}`);
+  assert.equal(hit.level, 'high');
+  assert.equal(report.tamper.profileSummary.gopMedianSec, 2);
+});
+
+test('fMP4：tfdt 时间轴断点被检出并定位', async (t) => {
+  const video = cleanMovie(1);
+  // 第 50 个分片起整体前移 3 秒（90000 ticks/s × 3）
+  const built = buildFragmentedMp4({
+    video, fragmentSec: 6,
+    discontinuity: { atFragment: 50, driftTicks: 3 * 90000 },
+  });
+  const { file, dir } = await writeTemp(built.buffer, 'frag-disc.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  const hits = report.tamper.findings.filter((f) => f.type === 'fragment-discontinuity');
+
+  assert.equal(hits.length, 1, `应恰好检出 1 处断点，实得 ${hits.length}`);
+  assert.equal(hits[0].level, 'high');
+  assert.ok(Math.abs(hits[0].durationSec - 3) < 0.1, `偏差应为 3s，实得 ${hits[0].durationSec}`);
+  // 第 50 个分片 × 6 秒 = 300 秒处
+  assert.ok(Math.abs(hits[0].startSec - 300) < 7, `断点位置 ${hits[0].startSec}，期望约 300`);
+  assert.ok(hits[0].endSec >= hits[0].startSec, '区间首尾不能颠倒');
+  assert.equal(report.verdict.level, 'tampered');
+  assert.ok(report.verdict.reasons.some((r) => r.includes('分片时间轴断点')));
+});
+
+test('fMP4：干净的分片文件无断点，但如实标注为 HLS 重封装形态', async (t) => {
+  const { file, dir } = await writeTemp(buildFragmentedMp4({ video: cleanMovie(1) }).buffer, 'clean-frag.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.equal(report.tamper.findings.filter((f) => f.type === 'fragment-discontinuity').length, 0);
+  assert.equal(report.container.fragmented, true);
+  // 分片形态本身只是"可疑"，不能据此判定被加工
+  assert.equal(report.verdict.level, 'suspicious');
+  assert.ok(report.verdict.reasons.some((r) => r.includes('分片 MP4')));
+
+  const text = renderText(report);
+  assert.match(text, /分片 MP4（fMP4）/);
+});
+
+test('fMP4：非分片文件不受影响（回归）', async (t) => {
+  const { file, dir } = await writeTemp(
+    buildMp4({ video: cleanMovie(1), faststart: false }), 'plain.mp4');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const c = await parseFile(file);
+  assert.equal(c.fragmented, undefined);
+  assert.equal(c.tracks[0].sampleCount, 1200 * 25);
 });
