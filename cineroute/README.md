@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 67 个用例，全部离线
+npm test                                              # 103 个用例，全部离线
 ```
 
 ---
@@ -141,9 +141,44 @@ cineroute/
     downloader.js           分块并发 + 断点续传 + 校验
   src/web/                  前端（原生 JS，无框架）
   fixtures/                 真实形状的上游响应夹具
-  test/                     67 个用例，全部离线可跑
+  forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
+  src/forensics/            容器解析 · 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
+  test/                     103 个用例，全部离线可跑
   docs/01-调研洞察.md        市场与技术调研、可行性判定、架构决策
 ```
+
+---
+
+## 视频取证（独立模块）
+
+面向权利方委托的盗版调查：拿到一个副本后，判定**是不是这部作品**、**被动过什么手脚**。
+
+```bash
+node forensics.js <嫌疑副本>                     # 单文件分析
+node forensics.js <嫌疑副本> --reference <母版>  # 与母版比对，精确定位插入/缺失段
+node forensics.js <嫌疑副本> --overlay           # 烧录水印/台标检测（需本机 ffmpeg）
+```
+
+只分析你已取得的本地文件，不负责获取——取证分析本就不该与样本获取耦合。
+
+核心思路是**不解码任何一帧**：MP4 的 `stsz`/`stts`/`stss` 三张样本表拼起来，
+就能还原逐秒码率剖面与 GOP 节奏。插播广告是另一次编码的产物，两条曲线必然同时突变；
+而打斗戏码率飙高只影响码率、不影响 GOP——**要求双信号同时命中**挡掉了大部分误报。
+解析 2GB 的片子只读几 MB（跳过 `mdat`，只读 `ftyp` + `moov`）。
+
+有参考母版时可做序列对齐，把插入段定位到秒：
+
+```
+🚩 00:10:00 – 00:10:20（20s）  置信度 100%  suspected-insert
+      该段码率中位 6794 kbps，全片基线 1875 kbps（3.62×，稳健 z=19.9）
+      同一时段关键帧间隔为 0.52s，全片为 2s——该段使用了不同的编码参数
+      起止点均落在关键帧上，符合拼接特征
+```
+
+还包括编码溯源（x264 参数串、muxer 指纹、faststart、keyint 交叉校验）与证据固化
+（sha256/md5 流式计算、时间戳、工具版本）。详见 [`docs/02-视频取证.md`](docs/02-视频取证.md)。
+
+---
 
 ## 测试
 

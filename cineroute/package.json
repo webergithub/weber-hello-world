@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node index.js --serve",
     "search": "node index.js",
+    "forensics": "node forensics.js",
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {},
