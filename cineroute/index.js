@@ -148,12 +148,16 @@ async function printSources() {
   console.log(`\n🔎  检索来源  （配置文件：${CONFIG_PATH}）`);
   console.log(`    全局默认取数：${config.defaults.limit}\n`);
 
-  const planned = new Map(buildAdapters(config).map((p) => [p.adapter.id, p]));
+  // 全部按启用装配一遍，只为拿到名称——关掉的源也要显示成人话，而不是内部 id。
+  const named = new Map(
+    buildAdapters({ ...config, sources: config.sources.map((s) => ({ ...s, enabled: true })) })
+      .map((p) => [p.adapter.id, p.adapter]),
+  );
   for (const s of config.sources) {
-    const p = planned.get(s.id);
-    const av = p ? adapterAvailability(p.adapter) : { available: false, reason: '未启用' };
+    const adapter = named.get(s.id);
+    const av = adapter ? adapterAvailability(adapter) : { available: true, reason: null };
     const box = s.enabled ? '[x]' : '[ ]';
-    const label = p ? p.adapter.label : s.id;
+    const label = adapter?.label || s.id;
     const pages = s.type === 'engine' && ENGINE_PAGE_SIZE[s.engine]
       ? `（单页 ${ENGINE_PAGE_SIZE[s.engine]} 条，需翻 ${Math.ceil(s.limit / ENGINE_PAGE_SIZE[s.engine])} 页）`
       : '';
