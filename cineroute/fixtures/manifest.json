@@ -1,6 +1,18 @@
 [
   {
-    "_comment": "顺序即优先级：更具体的 identifier 必须排在更宽泛的前面，否则会被前缀误匹配。",
+    "_comment": "顺序即优先级：更具体的匹配必须排在更宽泛的前面，否则会被误匹配。引擎结果排最前——引擎的查询串里带着 site:xxx 限定条件，域名子串会误撞下面那些按域名匹配的条目。",
+    "when": ["serp.fixture", "engine=google", "Night of the Living Dead"],
+    "file": "serp-google-notld.json"
+  },
+  {
+    "when": ["serp.fixture", "engine=baidu", "Night of the Living Dead"],
+    "file": "serp-baidu-notld.json"
+  },
+  {
+    "when": ["serp.fixture"],
+    "file": "serp-empty.json"
+  },
+  {
     "when": ["/metadata/notld_1968_restored_4k"],
     "file": "ia-metadata-notld-restored.json"
   },
@@ -29,11 +41,12 @@
     "file": "ia-search-empty.json"
   },
   {
-    "when": ["commons.wikimedia.org", "Metropolis"],
+    "_comment": "按 /w/api.php 匹配，不要只写域名——引擎查询串里也含这个域名。",
+    "when": ["commons.wikimedia.org/w/api.php", "Metropolis"],
     "file": "commons-search-metropolis.json"
   },
   {
-    "when": ["commons.wikimedia.org"],
+    "when": ["commons.wikimedia.org/w/api.php"],
     "file": "commons-search-empty.json"
   },
   {

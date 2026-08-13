@@ -8,6 +8,14 @@
 
 const $ = (id) => document.getElementById(id);
 
+/** 图片加载失败就隐藏，不留破图占位（第三方图床可能不可达）。 */
+function img(props) {
+  const node = document.createElement('img');
+  node.addEventListener('error', () => node.classList.add('broken'), { once: true });
+  for (const [k, v] of Object.entries(props)) if (v != null) node.setAttribute(k, v);
+  return node;
+}
+
 /** 安全的元素构造器：children 传字符串时走 textContent。 */
 function el(tag, props = {}, ...children) {
   const node = document.createElement(tag);
@@ -142,7 +150,7 @@ function offerCard(rec) {
       el('span', { class: 'chip warn' }, '需订阅/付费'),
     ),
     el('div', { class: 'offer-body' },
-      o.logo ? el('img', { class: 'offer-logo', src: o.logo, alt: '' }) : null,
+      o.logo ? img({ class: 'offer-logo', src: o.logo, alt: '' }) : null,
       el('p', { class: 'offer-desc' },
         `在 ${o.providerName} 上${o.typeLabel}（${o.region} 区）。正版平台的播放地址受 DRM 与一次性签名保护，只能跳转到官方页面观看。`),
     ),
@@ -188,6 +196,7 @@ function play(s) {
 async function startDownload(s, btn) {
   if (btn) { btn.disabled = true; btn.textContent = '已加入队列'; }
   $('downloadPanel').classList.remove('hidden');
+  ensureEvents();
   try {
     const res = await fetch('/api/download', {
       method: 'POST',
@@ -209,6 +218,32 @@ async function startDownload(s, btn) {
 }
 
 const jobNodes = new Map();
+const TERMINAL = new Set(['done', 'failed', 'canceled']);
+
+/* ── SSE 按需连接 ──────────────────────────────────────────────
+ * 不在页面加载时就连：一条常开的 SSE 会让页面永远到不了"加载完成"，
+ * 无头浏览器的截图、预渲染、爬虫都会卡在那里等；服务端也要为每个
+ * 闲置页面留一个连接。改成有下载任务才连，任务全部结束就断开。
+ */
+let eventSource = null;
+
+function ensureEvents() {
+  if (eventSource) return;
+  eventSource = new EventSource('/api/events');
+  eventSource.addEventListener('download', (e) => {
+    $('downloadPanel').classList.remove('hidden');
+    upsertJob(JSON.parse(e.data));
+  });
+}
+
+function closeEventsIfIdle() {
+  if (!eventSource) return;
+  const anyActive = [...jobNodes.values()].some((n) => n.dataset.active === '1');
+  if (!anyActive) {
+    eventSource.close();
+    eventSource = null;
+  }
+}
 
 function upsertJob(job) {
   let node = jobNodes.get(job.id);
@@ -217,6 +252,7 @@ function upsertJob(job) {
     jobNodes.set(job.id, node);
     $('downloadList').prepend(node);
   }
+  node.dataset.active = TERMINAL.has(job.status) ? '0' : '1';
   node.replaceChildren(
     el('div', { class: 'job-head' },
       el('span', { class: 'job-name' }, job.filename),
@@ -243,6 +279,8 @@ function upsertJob(job) {
       job.error ? el('span', {}, `错误：${job.error}`) : null,
     ),
   );
+
+  if (TERMINAL.has(job.status)) closeEventsIfIdle();
 }
 
 /* ---------------- 渲染：整页 ---------------- */
@@ -264,7 +302,7 @@ function renderResult(data) {
     t.overview ? el('p', { class: 'overview' }, t.overview) : null,
   );
   card.replaceChildren(
-    t.poster ? el('img', { src: t.poster, alt: '' }) : null,
+    t.poster ? img({ src: t.poster, alt: '' }) : null,
     info,
   );
 
@@ -310,29 +348,245 @@ function renderResult(data) {
     );
   }
 
+  // 引擎发现但没有解析器的页面
+  const leads = data.leads || [];
+  const leadsPanel = $('leadsPanel');
+  const leadsList = $('leadsList');
+  leadsList.replaceChildren();
+  leadsPanel.classList.toggle('hidden', leads.length === 0);
+  for (const l of leads) {
+    leadsList.append(
+      el('div', { class: 'lead' },
+        el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.title || l.url),
+        el('p', { class: 'lead-url' }, l.url),
+        el('p', { class: 'lead-note' },
+          `${l.discoveredBy || '引擎'} 第 ${l.rank ?? '?'} 条 · ${l.reason || ''}`),
+      ),
+    );
+  }
+
   // 数据源
   const provList = $('providerList');
   provList.replaceChildren();
   for (const p of data.providers) {
+    const detail = p.status === 'ok'
+      ? [
+          `${p.count} 条`,
+          p.stats ? `引擎返回 ${p.stats.returned} / 解析 ${p.stats.resolved}` : null,
+          p.limit ? `上限 ${p.limit}` : null,
+          `${p.elapsedMs}ms`,
+        ].filter(Boolean).join(' · ')
+      : (p.reason || p.status);
     provList.append(
       el('div', { class: 'prov' },
         el('span', { class: `dot ${p.status}` }),
         el('span', {}, p.label),
-        el('span', { class: 'detail' },
-          p.status === 'ok' ? `${p.count} 条 · ${p.elapsedMs}ms` : (p.reason || p.status)),
+        el('span', { class: 'detail' }, detail),
       ),
     );
   }
 
   const st = data.stats;
   $('statsLine').textContent =
-    `候选 ${st.rawCandidates} → 去重 ${st.afterDedupe} → 实测探测 ${st.probed} → 可播 ${st.playable} / 受阻 ${st.blocked}`;
+    `候选 ${st.rawCandidates} → 去重 ${st.afterDedupe} → 实测探测 ${st.probed} → 可播 ${st.playable} / 受阻 ${st.blocked}`
+    + (st.leads ? ` · 另有 ${st.leads} 个未解析页面` : '');
 
   const notes = $('notes');
   notes.replaceChildren();
   for (const n of data.notes || []) notes.append(el('li', {}, n));
 
   $('results').classList.remove('hidden');
+}
+
+/* ---------------- 检索来源配置 ---------------- */
+
+/**
+ * 来源面板。这里是"哪些源参与检索、每个取多少条"的唯一入口——
+ * 代码里没有写死的源列表，全部读自 /api/sources。
+ */
+let SOURCES = { config: null, catalog: null };
+
+const ENGINE_LABELS = { google: 'Google', baidu: '百度', bing: 'Bing', duckduckgo: 'DuckDuckGo' };
+const engineLabel = (engine) => ENGINE_LABELS[engine]
+  || (engine ? engine[0].toUpperCase() + engine.slice(1) : engine);
+/** 中文名后不加空格（「百度搜索」），西文名后加（「Google 搜索」）。 */
+const engineTitle = (engine) => {
+  const n = engineLabel(engine);
+  return `${n}${/[一-龥]$/.test(n) ? '' : ' '}搜索`;
+};
+
+/** 一行来源：勾选框 + 名称 + 取数输入框。 */
+function sourceRow(src, { title, note, removable }) {
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = src.enabled !== false;
+  cb.addEventListener('change', () => { src.enabled = cb.checked; markDirty(); });
+
+  const num = el('input', { type: 'number', min: '1', max: '1000', class: 'limit-input' });
+  num.value = String(src.limit ?? SOURCES.config.defaults.limit);
+  num.addEventListener('change', () => {
+    const v = Math.max(1, Math.min(1000, Math.round(Number(num.value) || 0)));
+    num.value = String(v);
+    src.limit = v;
+    markDirty();
+  });
+
+  return el('div', { class: 'source-row' },
+    el('label', { class: 'row-pick' }, cb, el('span', { class: 'row-title' }, title)),
+    note ? el('span', { class: 'row-note' }, note) : null,
+    el('span', { class: 'spacer' }),
+    el('label', { class: 'row-limit' }, '取前', num, '条'),
+    removable
+      ? el('button', {
+          class: 'toggle', type: 'button', title: '移除这个来源',
+          onclick: () => {
+            SOURCES.config.sources = SOURCES.config.sources.filter((s) => s.id !== src.id);
+            renderSources();
+            markDirty();
+          },
+        }, '移除')
+      : null,
+  );
+}
+
+function markDirty() {
+  $('sourceSaveState').textContent = '有未保存的改动';
+  renderSourceSummary();
+}
+
+function renderSourceSummary() {
+  const cfg = SOURCES.config;
+  if (!cfg) return;
+  const on = cfg.sources.filter((s) => s.enabled);
+  const engines = on.filter((s) => s.type === 'engine');
+  const parts = [`已选 ${on.length} 个来源`];
+  if (engines.length) {
+    parts.push(engines.map((s) => `${engineLabel(s.engine)} 前 ${s.limit}`).join(' · '));
+  }
+  $('sourceSummary').textContent = parts.join('｜');
+}
+
+function renderSources() {
+  const cfg = SOURCES.config;
+  const catalog = SOURCES.catalog || {};
+  $('defaultLimit').value = String(cfg.defaults.limit);
+
+  // 引擎行：出厂四个 + 用户自己加的
+  const engineBox = $('engineList');
+  engineBox.replaceChildren();
+  const engineSources = cfg.sources.filter((s) => s.type === 'engine');
+  if (engineSources.length === 0) {
+    engineBox.append(el('p', { class: 'field-note' }, '没有启用任何搜索引擎来源。'));
+  }
+  const known = new Set((catalog.engines || []).map((e) => e.engine));
+  for (const s of engineSources) {
+    const pageSize = (catalog.engines || []).find((e) => e.engine === s.engine)?.pageSize;
+    const pages = pageSize ? Math.ceil((s.limit || 0) / pageSize) : null;
+    engineBox.append(sourceRow(s, {
+      title: engineTitle(s.engine),
+      note: pages ? `单页 ${pageSize} 条，需翻 ${pages} 页` : '自定义引擎，经 SERP 服务转发',
+      removable: !known.has(s.engine) || engineSources.length > 1,
+    }));
+  }
+
+  // 专用源行
+  const builtinBox = $('builtinList');
+  builtinBox.replaceChildren();
+  for (const b of catalog.builtins || []) {
+    let src = cfg.sources.find((s) => s.id === b.id);
+    if (!src) {
+      // 配置里没有这条（用户删过），补一条禁用的占位，让它还能被勾回来
+      src = { id: b.id, type: 'builtin', enabled: false, limit: cfg.defaults.limit };
+      cfg.sources.push(src);
+    }
+    builtinBox.append(sourceRow(src, {
+      title: b.label,
+      note: b.available ? (b.kind === 'metadata' ? '只出元数据与正版渠道' : null) : `未配置：${b.reason}`,
+      removable: false,
+    }));
+  }
+
+  // 引擎下拉：出厂支持的几个
+  const sel = $('addEngineSelect');
+  sel.replaceChildren(
+    el('option', { value: '' }, '选择引擎…'),
+    ...(catalog.engines || []).map((e) => el('option', { value: e.engine }, engineLabel(e.engine))),
+  );
+
+  $('siteScope').value = (cfg.siteScope || []).join('\n');
+
+  const serp = $('serpState');
+  serp.textContent = catalog.serpConfigured
+    ? ''
+    : '⚠ 尚未配置 SERP 服务，引擎来源会被跳过（四大引擎都没有可直接用的免费官方 API，需设 CINEROUTE_SERP_PROVIDER / CINEROUTE_SERP_KEY）';
+  serp.classList.toggle('warn-text', !catalog.serpConfigured);
+
+  renderSourceSummary();
+}
+
+function addEngine() {
+  const cfg = SOURCES.config;
+  const engine = ($('addEngineName').value.trim() || $('addEngineSelect').value).toLowerCase();
+  if (!engine) { alert('先选一个引擎，或填引擎名。'); return; }
+  const id = `engine:${engine}`;
+  if (cfg.sources.some((s) => s.id === id)) { alert(`${engineLabel(engine)} 已经在来源里了。`); return; }
+  cfg.sources.push({
+    id, type: 'engine', engine, enabled: true,
+    limit: Math.max(1, Math.min(1000, Number($('addEngineLimit').value) || cfg.defaults.limit)),
+  });
+  $('addEngineName').value = '';
+  $('addEngineSelect').value = '';
+  renderSources();
+  markDirty();
+}
+
+async function saveSources(payload) {
+  const state = $('sourceSaveState');
+  state.textContent = '保存中…';
+  try {
+    const res = await fetch('/api/sources', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    SOURCES = { config: data.config, catalog: data.catalog };
+    renderSources();
+    state.textContent = data.warning || '已保存，下次检索按新配置跑';
+  } catch (err) {
+    state.textContent = `保存失败：${err.message}`;
+  }
+}
+
+function bindSourcePanel() {
+  $('sourceToggle').addEventListener('click', (e) => {
+    const body = $('sourceBody');
+    const open = body.classList.toggle('hidden') === false;
+    e.currentTarget.textContent = open ? '收起设置' : '展开设置';
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+  });
+
+  $('defaultLimit').addEventListener('change', (e) => {
+    const v = Math.max(1, Math.min(1000, Math.round(Number(e.target.value) || 0)));
+    e.target.value = String(v);
+    SOURCES.config.defaults.limit = v;
+    markDirty();
+  });
+
+  $('addEngineBtn').addEventListener('click', addEngine);
+
+  $('siteScope').addEventListener('change', (e) => {
+    SOURCES.config.siteScope = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean);
+    markDirty();
+  });
+
+  $('sourceSave').addEventListener('click', () => {
+    // 提交前把文本框里的最新内容也带上（用户可能没触发 change 就点了保存）
+    SOURCES.config.siteScope = $('siteScope').value.split('\n').map((s) => s.trim()).filter(Boolean);
+    saveSources({ config: SOURCES.config });
+  });
+
+  $('sourceReset').addEventListener('click', () => saveSources({ reset: true }));
 }
 
 /* ---------------- 事件绑定 ---------------- */
@@ -387,6 +641,14 @@ $('batchDownload').addEventListener('click', () => {
     badge.classList.remove('hidden');
   }
 
+  bindSourcePanel();
+  try {
+    SOURCES = await (await fetch('/api/sources')).json();
+    renderSources();
+  } catch {
+    $('sourceSummary').textContent = '来源配置读取失败，本次按出厂默认检索';
+  }
+
   // 地址栏带 ?q= 时直接开检索（可分享的检索链接）。
   const initialQ = new URLSearchParams(location.search).get('q')
     || (CONFIG.offline ? 'Night of the Living Dead' : '');
@@ -400,13 +662,8 @@ $('batchDownload').addEventListener('click', () => {
     if (jobs.length) {
       $('downloadPanel').classList.remove('hidden');
       for (const j of jobs) upsertJob(j);
+      // 有未完成的任务才需要实时进度
+      if (jobs.some((j) => !TERMINAL.has(j.status))) ensureEvents();
     }
   } catch { /* 队列为空或服务未就绪 */ }
-
-  // SSE 实时进度。断线后浏览器会自动重连。
-  const es = new EventSource('/api/events');
-  es.addEventListener('download', (e) => {
-    $('downloadPanel').classList.remove('hidden');
-    upsertJob(JSON.parse(e.data));
-  });
 })();

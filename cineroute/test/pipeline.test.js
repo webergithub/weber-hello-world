@@ -242,3 +242,119 @@ test('buildRecommendations 按平台去重，保留优先级最高的那条', ()
 test('两边都空时推荐位为空，而不是抛错', () => {
   assert.deepEqual(buildRecommendations([], []), []);
 });
+
+/* ── 配置驱动的来源范围 ───────────────────────────────────── */
+
+import { normalizeConfig, defaultConfig } from '../src/core/sourceConfig.js';
+import { FIXTURE_SERP_ENV } from '../src/core/fixtureFetch.js';
+
+/** 在夹具 SERP 环境下跑一段代码，跑完把 env 还原。 */
+async function withFixtureSerp(fn) {
+  const prev = { ...process.env };
+  Object.assign(process.env, FIXTURE_SERP_ENV);
+  try {
+    return await fn();
+  } finally {
+    for (const k of Object.keys(FIXTURE_SERP_ENV)) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  }
+}
+
+test('关掉的来源不参与检索，勾上的才跑', async () => {
+  const config = normalizeConfig({
+    sources: [
+      { id: 'internet-archive', type: 'builtin', enabled: true, limit: 8 },
+      { id: 'wikimedia-commons', type: 'builtin', enabled: false, limit: 20 },
+      { id: 'tmdb', type: 'builtin', enabled: false, limit: 1 },
+    ],
+  });
+  const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+
+  assert.deepEqual(r.providers.map((p) => p.id), ['internet-archive']);
+  assert.ok(r.top.length > 0, '关掉其他源不影响剩下那个源出结果');
+});
+
+test('每个来源按自己配置的数量取，数量写在结果里可核对', async () => {
+  const config = normalizeConfig({
+    sources: [
+      { id: 'internet-archive', type: 'builtin', enabled: true, limit: 2 },
+      { id: 'wikimedia-commons', type: 'builtin', enabled: true, limit: 5 },
+    ],
+  });
+  const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+
+  const ia = r.providers.find((p) => p.id === 'internet-archive');
+  const commons = r.providers.find((p) => p.id === 'wikimedia-commons');
+  assert.equal(ia.limit, 2);
+  assert.equal(commons.limit, 5);
+});
+
+test('引擎来源产出的片源与专用源同台竞争，重复的会被合并', async () => {
+  await withFixtureSerp(async () => {
+    const config = normalizeConfig({
+      sources: [
+        { id: 'internet-archive', type: 'builtin', enabled: true, limit: 8 },
+        { id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 100 },
+        { id: 'engine:baidu', type: 'engine', engine: 'baidu', enabled: true, limit: 100 },
+      ],
+    });
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+
+    const google = r.providers.find((p) => p.id === 'engine:google');
+    assert.equal(google.status, 'ok');
+    assert.ok(google.count > 0, 'Google 应解析出片源');
+    assert.equal(google.limit, 100);
+
+    // 三个源报出的候选远多于去重后的数量 —— 说明跨源去重真的在起作用
+    assert.ok(r.stats.rawCandidates > r.stats.afterDedupe);
+    assert.equal(r.top[0].filename, 'notld_restored_1080p.mp4', '接入引擎后排序结论不变');
+  });
+});
+
+test('引擎按配置的数量翻页，改小数量就少要几条', async () => {
+  await withFixtureSerp(async () => {
+    const config = normalizeConfig({
+      sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 3 }],
+    });
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+    const google = r.providers.find((p) => p.id === 'engine:google');
+    assert.equal(google.stats.limit, 3);
+    assert.equal(google.stats.returned, 3, '只取前 3 条');
+  });
+});
+
+test('引擎搜到但没有解析器的域名，只作为线索列出，不产出可播地址', async () => {
+  await withFixtureSerp(async () => {
+    const config = normalizeConfig({
+      sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 100 }],
+    });
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+
+    assert.ok(r.leads.length > 0, '应如实列出未解析的页面');
+    const leadUrls = new Set(r.leads.map((l) => l.url));
+    // 线索里的地址绝不能同时出现在可播/备选列表里
+    for (const s of [...r.top, ...r.alternatives]) {
+      assert.ok(!leadUrls.has(s.url), `线索地址 ${s.url} 不该进入片源列表`);
+    }
+    assert.ok(r.notes.some((n) => n.includes('没有对应的解析器')));
+  });
+});
+
+test('未配置 SERP 服务时引擎被跳过，其余来源照常出结果', async () => {
+  const prev = process.env.CINEROUTE_SERP_PROVIDER;
+  delete process.env.CINEROUTE_SERP_PROVIDER;
+  try {
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config: defaultConfig() });
+    const engines = r.providers.filter((p) => p.id.startsWith('engine:'));
+    assert.equal(engines.length, 4, '四个引擎都应出现在数据源列表里');
+    for (const e of engines) {
+      assert.equal(e.status, 'skipped');
+      assert.match(e.reason, /SERP/);
+    }
+    assert.ok(r.top.length > 0, '引擎不可用不影响其他来源');
+  } finally {
+    if (prev !== undefined) process.env.CINEROUTE_SERP_PROVIDER = prev;
+  }
+});

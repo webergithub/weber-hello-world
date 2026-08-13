@@ -30,6 +30,56 @@
     受版权保护的作品只给出正版观看渠道，不解析播放地址。
   </p>
 
+  <section class="panel sources">
+    <div class="sources-head">
+      <h2>🔎 检索来源</h2>
+      <span id="sourceSummary" class="sources-summary"></span>
+      <button id="sourceToggle" class="toggle" type="button" aria-expanded="false">展开设置</button>
+    </div>
+
+    <div id="sourceBody" class="sources-body hidden">
+      <div class="global-row">
+        <label class="field">
+          <span>全局默认取数</span>
+          <input id="defaultLimit" type="number" min="1" max="1000" step="10">
+        </label>
+        <span class="field-note">没有单独设数量的来源用这个值。</span>
+        <span class="spacer"></span>
+        <button id="sourceReset" class="toggle" type="button">恢复出厂</button>
+      </div>
+
+      <h3>搜索引擎</h3>
+      <p class="field-note">
+        勾选后按下面的数量取该引擎的前 N 条结果，每个引擎可单独设。
+        <span id="serpState" class="serp-state"></span>
+      </p>
+      <div id="engineList" class="source-rows"></div>
+
+      <div class="add-row">
+        <select id="addEngineSelect" aria-label="要添加的搜索引擎"></select>
+        <input id="addEngineName" type="text" placeholder="或填其他引擎名，如 yandex" spellcheck="false">
+        <input id="addEngineLimit" type="number" min="1" max="1000" placeholder="数量" value="100">
+        <button id="addEngineBtn" class="toggle" type="button">+ 添加引擎</button>
+      </div>
+
+      <h3>专用数据源</h3>
+      <p class="field-note">有专门的解析器，直接产出结构化片源，不依赖搜索引擎。</p>
+      <div id="builtinList" class="source-rows"></div>
+
+      <h3>站点范围</h3>
+      <p class="field-note">
+        引擎检索会被限定在这些域名内（拼成 <code>site:</code> 条件）。
+        一行一个域名，可以自己增删。
+      </p>
+      <textarea id="siteScope" rows="6" spellcheck="false"></textarea>
+
+      <div class="save-row">
+        <button id="sourceSave" type="button">保存并生效</button>
+        <span id="sourceSaveState" class="field-note"></span>
+      </div>
+    </div>
+  </section>
+
   <section id="status" class="status hidden"></section>
 
   <main id="results" class="results hidden">
@@ -61,6 +111,14 @@
       <h2>🎟️ 正版观看渠道</h2>
       <div id="offersList" class="offers"></div>
       <p class="attribution">观看渠道数据来源 <strong>JustWatch</strong>（经 TMDB 提供）</p>
+    </section>
+
+    <section id="leadsPanel" class="panel hidden">
+      <h2>🧭 引擎发现但未解析的页面</h2>
+      <p class="slot-note">
+        这些域名没有对应的解析器，所以只列出地址，不去猜页面里有没有视频、更不抓取。
+      </p>
+      <div id="leadsList" class="leads"></div>
     </section>
 
     <section class="panel">

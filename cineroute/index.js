@@ -9,7 +9,7 @@
  */
 
 import { searchAll } from './src/core/pipeline.js';
-import { createFixtureFetch, createFixtureProbe } from './src/core/fixtureFetch.js';
+import { createFixtureFetch, createFixtureProbe, applyFixtureSerpEnv } from './src/core/fixtureFetch.js';
 
 const HELP = `
 CineRoute 影路 — 公有领域 / 自由许可 / 自有媒体库的影视片源聚合检索
@@ -17,14 +17,27 @@ CineRoute 影路 — 公有领域 / 自由许可 / 自有媒体库的影视片�
 用法：
   node index.js <片名>              联网检索并输出 Top5 播放地址
   node index.js --offline <片名>    使用本地夹具（无需联网与 API key）
+  node index.js --sources           列出当前的检索来源与各自取数
   node index.js --serve             启动 Web 服务（默认 http://localhost:8787）
   node index.js --serve --offline   离线演示模式启动 Web 服务
+
+检索来源不写死在代码里：勾选哪些、每个取前多少条，都存在 config/sources.json，
+Web 界面的「🔎 检索来源」面板可直接改，也可以手改文件。默认勾选
+Google / 百度 / Bing / DuckDuckGo 各前 100 条，外加四个专用数据源。
 
 可选环境变量：
   TMDB_API_KEY        启用权威元数据与正版观看渠道（数据来源 JustWatch）
   JELLYFIN_URL/_API_KEY  接入你自己的媒体库
+  CINEROUTE_SERP_PROVIDER  引擎检索的 SERP 后端：serper / brave / custom
+  CINEROUTE_SERP_KEY       上述服务的 API key
+  CINEROUTE_SERP_URL       provider=custom 时的 URL 模板
+  CINEROUTE_DEFAULT_LIMIT  全局默认取数，默认 100
+  CINEROUTE_CONFIG    配置文件路径，默认 config/sources.json
   CINEROUTE_PORT      Web 服务端口，默认 8787
   CINEROUTE_REGION    正版渠道地区，默认 US
+
+注：Google / Bing / DuckDuckGo / 百度 都没有可直接调用的免费官方搜索 API，
+所以引擎来源需要接一个 SERP 服务；没配就会在结果里如实标为「已跳过」。
 `.trim();
 
 function fmtDuration(sec) {
@@ -51,10 +64,17 @@ function printReport(result) {
   }
   console.log(`    查询「${query.raw}」· 耗时 ${elapsedMs}ms`);
 
-  console.log('\n📡  数据源');
+  console.log('\n📡  数据源（勾选与取数由配置决定，见 --sources）');
   for (const p of providers) {
     const icon = p.status === 'ok' ? '✅' : p.status === 'skipped' ? '⏭️ ' : '⚠️ ';
-    const detail = p.status === 'ok' ? `${p.count} 条 · ${p.elapsedMs}ms` : (p.reason || '');
+    const detail = p.status === 'ok'
+      ? [
+          `${p.count} 条`,
+          p.stats ? `引擎返回 ${p.stats.returned}` : null,
+          p.limit ? `上限 ${p.limit}` : null,
+          `${p.elapsedMs}ms`,
+        ].filter(Boolean).join(' · ')
+      : (p.reason || '');
     console.log(`    ${icon} ${p.label.padEnd(46)} ${detail}`);
   }
   console.log(`    候选 ${stats.rawCandidates} → 去重 ${stats.afterDedupe} → 探测 ${stats.probed} → 可播 ${stats.playable} / 受阻 ${stats.blocked}`);
@@ -102,10 +122,48 @@ function printReport(result) {
     if (link) console.log(`    观看页：${link}`);
   }
 
+  if (result.leads?.length > 0) {
+    console.log(`\n🧭  引擎发现但未解析的页面（这些域名没有解析器，只列出，不抓取）`);
+    for (const l of result.leads.slice(0, 6)) {
+      console.log(`    · ${l.title || '(无标题)'}`);
+      console.log(`      ${l.url}`);
+      console.log(`      ${l.discoveredBy} 第 ${l.rank} 条 · ${l.reason}`);
+    }
+    if (result.leads.length > 6) console.log(`    …… 另有 ${result.leads.length - 6} 条`);
+  }
+
   if (notes.length > 0) {
     console.log('\n📝  说明');
     for (const n of notes) console.log(`    · ${n}`);
   }
+  console.log('');
+}
+
+/** 打印当前生效的检索来源配置。 */
+async function printSources() {
+  const { loadConfig, CONFIG_PATH, ENGINE_PAGE_SIZE } = await import('./src/core/sourceConfig.js');
+  const { buildAdapters, adapterAvailability } = await import('./src/adapters/registry.js');
+  const config = await loadConfig();
+
+  console.log(`\n🔎  检索来源  （配置文件：${CONFIG_PATH}）`);
+  console.log(`    全局默认取数：${config.defaults.limit}\n`);
+
+  const planned = new Map(buildAdapters(config).map((p) => [p.adapter.id, p]));
+  for (const s of config.sources) {
+    const p = planned.get(s.id);
+    const av = p ? adapterAvailability(p.adapter) : { available: false, reason: '未启用' };
+    const box = s.enabled ? '[x]' : '[ ]';
+    const label = p ? p.adapter.label : s.id;
+    const pages = s.type === 'engine' && ENGINE_PAGE_SIZE[s.engine]
+      ? `（单页 ${ENGINE_PAGE_SIZE[s.engine]} 条，需翻 ${Math.ceil(s.limit / ENGINE_PAGE_SIZE[s.engine])} 页）`
+      : '';
+    console.log(`    ${box} ${label}`);
+    console.log(`        取前 ${s.limit} 条${pages}`);
+    if (s.enabled && !av.available) console.log(`        ⏭️  ${av.reason}`);
+  }
+
+  console.log(`\n🌐  引擎检索的站点范围（拼成 site: 条件，只在这些域名内搜）`);
+  for (const d of config.siteScope) console.log(`    · ${d}`);
   console.log('');
 }
 
@@ -119,6 +177,14 @@ async function main() {
   const offline = argv.includes('--offline');
   const serve = argv.includes('--serve');
   const positional = argv.filter((a) => !a.startsWith('--'));
+
+  if (argv.includes('--sources')) {
+    await printSources();
+    return;
+  }
+
+  // 离线模式把引擎源也接到夹具上，让 --offline 真的能跑通全链路（含搜索引擎）。
+  if (offline) applyFixtureSerpEnv();
 
   const offlineOpts = offline
     ? { fetchJson: createFixtureFetch(), probeFn: createFixtureProbe() }

@@ -1,8 +1,9 @@
 /**
  * 适配器注册表。
  *
- * 加一个新片源 = 写一个导出 `adapter` 的模块并在这里登记，
- * 无需改动编排、打分、播放、下载任何一环。
+ * 这里只登记"代码里有哪些源可用"，**具体启用哪些、每个取多少条，由配置决定**
+ * （见 core/sourceConfig.js）。加一个新片源 = 写一个导出 `adapter` 的模块并在
+ * BUILTIN_ADAPTERS 里登记，无需改动编排、打分、播放、下载任何一环。
  *
  * 两类适配器：
  *   kind: 'direct'   —— 产出可直接播放/下载的视频直链（进 Top5 竞争）
@@ -13,31 +14,98 @@ import { adapter as internetArchive } from './internetArchive.js';
 import { adapter as wikimediaCommons } from './wikimediaCommons.js';
 import { adapter as tmdb } from './tmdb.js';
 import { adapter as jellyfin } from './jellyfin.js';
+import { createEngineAdapter } from './searchEngine.js';
+import { defaultConfig } from '../core/sourceConfig.js';
 
-/** @type {object[]} */
-export const ADAPTERS = [internetArchive, wikimediaCommons, jellyfin, tmdb];
+/**
+ * 代码里自带的适配器。搜索引擎不在这里——引擎是按配置动态造出来的，
+ * 用户可以加任意多个（不同引擎、不同站点范围）。
+ * @type {object[]}
+ */
+export const BUILTIN_ADAPTERS = [internetArchive, wikimediaCommons, jellyfin, tmdb];
+
+/** 按 id 取内置适配器。 */
+export function getBuiltin(id) {
+  return BUILTIN_ADAPTERS.find((a) => a.id === id) || null;
+}
+
+/**
+ * 按配置装配这一次检索要跑的适配器。
+ *
+ * 返回的是"计划"：适配器 + 它这次该取多少条。数量来自源自己的配置，
+ * 源没配就用全局默认值。禁用的源直接不出现在计划里。
+ *
+ * @param {object} [config] 来自 sourceConfig.loadConfig()
+ * @returns {Array<{adapter: object, source: object, limit: number}>}
+ */
+export function buildAdapters(config = defaultConfig()) {
+  const fallbackLimit = config?.defaults?.limit ?? 100;
+  const plan = [];
+
+  for (const s of config?.sources ?? []) {
+    if (!s.enabled) continue;
+
+    if (s.type === 'builtin') {
+      const adapter = getBuiltin(s.id);
+      // 配置里写了代码里不存在的内置源（改过配置又换了版本）——跳过，不让检索崩掉。
+      if (!adapter) continue;
+      plan.push({ adapter, source: s, limit: s.limit ?? fallbackLimit });
+      continue;
+    }
+
+    // engine：每条配置造一个独立适配器，站点范围优先用源自己的，没有就用全局的。
+    plan.push({
+      adapter: createEngineAdapter({ ...s, siteScope: s.siteScope || config.siteScope }),
+      source: s,
+      limit: s.limit ?? fallbackLimit,
+    });
+  }
+
+  return plan;
+}
+
+/**
+ * 出厂配置下的完整适配器清单。
+ * 供 /api/config 展示与 getAdapter 查询用——它代表"系统里有哪些源"，
+ * 不代表"这次检索会跑哪些"（后者看 buildAdapters）。
+ * @type {object[]}
+ */
+export const ADAPTERS = buildAdapters(defaultConfig()).map((p) => p.adapter);
 
 export const DIRECT_ADAPTERS = ADAPTERS.filter((a) => a.kind === 'direct');
 export const METADATA_ADAPTERS = ADAPTERS.filter((a) => a.kind === 'metadata');
 
-/** 按 id 取适配器。 */
+/** 按 id 取适配器（含出厂引擎源）。 */
 export function getAdapter(id) {
   return ADAPTERS.find((a) => a.id === id) || null;
 }
 
 /**
  * 判断某适配器在当前环境下是否可用（需要的配置是否齐备）。
+ *
+ * 适配器可以自带 checkConfig() 自查（引擎适配器就是这么做的）；
+ * 没自带的走下面这几条内置判断。
+ *
  * @returns {{available: boolean, reason: string|null}}
  */
-export function adapterAvailability(adapter) {
+export function adapterAvailability(adapter, env = process.env) {
+  if (!adapter) return { available: false, reason: '未知的源' };
   if (!adapter.requiresConfig) return { available: true, reason: null };
+
+  if (typeof adapter.checkConfig === 'function') {
+    const verdict = adapter.checkConfig(env);
+    return verdict.available
+      ? { available: true, reason: null }
+      : { available: false, reason: verdict.reason || adapter.configHint };
+  }
+
   if (adapter.id === 'tmdb') {
-    return process.env.TMDB_API_KEY
+    return env.TMDB_API_KEY
       ? { available: true, reason: null }
       : { available: false, reason: adapter.configHint };
   }
   if (adapter.id === 'jellyfin') {
-    return process.env.JELLYFIN_URL && process.env.JELLYFIN_API_KEY
+    return env.JELLYFIN_URL && env.JELLYFIN_API_KEY
       ? { available: true, reason: null }
       : { available: false, reason: adapter.configHint };
   }
@@ -50,6 +118,11 @@ export function adapterAvailability(adapter) {
  * 这是安全边界：服务端的媒体代理只会转发白名单内的地址，
  * 否则 /media?url= 就成了一个开放代理，可被用来打内网（SSRF）。
  * 新增 direct 适配器时必须同步在这里登记其域名。
+ *
+ * 注意：搜索引擎源不会往这里加域名。引擎只负责"发现页面"，
+ * 页面要能被结构化解析器解析成片源才会进候选，而解析器产出的
+ * 直链本来就落在下面这几个域名里。引擎搜到的其他域名只作为线索列出，
+ * 不进播放/下载通道——所以加多少个引擎都不会扩大这道闸的口子。
  */
 export const ALLOWED_MEDIA_HOSTS = [
   /(^|\.)archive\.org$/i,

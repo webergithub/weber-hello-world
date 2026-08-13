@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 117 个用例，全部离线
+npm test                                              # 155 个用例，全部离线
 ```
 
 ---
@@ -64,16 +64,45 @@ npm test                                              # 117 个用例，全部�
 
 ---
 
-## 数据源
+## 检索来源（可配置，不写死）
 
-| 源 | 产出 | 需要配置 |
-|---|---|---|
-| **Internet Archive** | 公有领域长片的真实直链（含 md5/sha1/时长/分辨率） | 否 |
-| **Wikimedia Commons** | PD / CC 影像直链 | 否 |
-| **Jellyfin** | 你自己媒体库里的内容 | `JELLYFIN_URL` `JELLYFIN_API_KEY` |
-| **TMDB** | 权威片长与海报 + 正版观看渠道（数据来源 JustWatch） | `TMDB_API_KEY` |
+跑哪些源、每个源取前多少条，全部存在 `config/sources.json`，
+不在代码里。Web 界面的「🔎 检索来源」面板可直接勾选、改数量、加新源；
+也可以直接改文件。命令行看当前配置：`node index.js --sources`。
 
-未配置的源自动跳过，不影响其余源。加新源只需写一个导出 `adapter` 的模块并在注册表登记。
+**出厂默认**（全部勾选）：
+
+| 来源 | 默认取数 | 产出 | 需要配置 |
+|---|---|---|---|
+| **Google 搜索** | 前 100 条 | 站点范围内的页面 → 交给解析器 | SERP 服务 |
+| **百度搜索** | 前 100 条 | 同上 | SERP 服务 |
+| **Bing 搜索** | 前 100 条 | 同上 | SERP 服务 |
+| **DuckDuckGo 搜索** | 前 100 条 | 同上 | SERP 服务 |
+| **Internet Archive** | 前 8 个条目 | 公有领域长片的真实直链（含 md5/sha1/时长/分辨率） | 否 |
+| **Wikimedia Commons** | 前 20 条 | PD / CC 影像直链 | 否 |
+| **Jellyfin** | 前 20 条 | 你自己媒体库里的内容 | `JELLYFIN_URL` `JELLYFIN_API_KEY` |
+| **TMDB** | 1 条 | 权威片长与海报 + 正版观看渠道（数据来源 JustWatch） | `TMDB_API_KEY` |
+
+数量是**逐源**的：可以 Google 前 100、百度前 30、Bing 前 50；没单独设的走全局默认
+（`CINEROUTE_DEFAULT_LIMIT`，默认 100）。未配置的源自动跳过并说明缺什么，不影响其余源。
+加新的专用源只需写一个导出 `adapter` 的模块并在 `BUILTIN_ADAPTERS` 登记；
+加新引擎在界面上填个名字就行。
+
+### 引擎来源的两件事要先说清楚
+
+**一、四个引擎都没有能直接用的免费官方 API。** Google 的 Web Search API 早已停用，
+Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度的不对外。
+所以引擎来源做成可插拔的 SERP 后端（`serper` / `brave` / `custom` 模板），需要配 key；
+没配就在结果里如实标为「已跳过」，而不是假装搜过。
+
+**二、引擎检索限定在站点范围内。** 不限定域名地搜片名再抓视频地址，搜出来的绝大部分是盗版站，
+这不是本项目要做的事。默认范围是归档站域名列表（archive.org、Commons、国会图书馆、
+Europeana、荷兰开放影像……），作用是补上还没写专用适配器的那些站。范围可以自己增删。
+
+引擎只负责**发现页面**，把页面变成播放地址交给结构化解析器：
+`archive.org/details/{id}` 走 IA metadata API，Commons 文件页走 imageinfo。
+域名对不上解析器的，只列进「引擎发现但未解析的页面」，**不抓取、不猜**。
+所以加多少个引擎、站点范围里写什么，都不会扩大播放/下载的域名白名单。
 
 ---
 
@@ -111,6 +140,11 @@ Range 分块并发（默认 8MB × 4 并发）+ 断点续传 + 完成后用上�
 
 | 变量 | 默认 | 说明 |
 |---|---|---|
+| `CINEROUTE_CONFIG` | `./config/sources.json` | 检索来源配置文件路径 |
+| `CINEROUTE_DEFAULT_LIMIT` | `100` | 全局默认取数（源没单独设时用） |
+| `CINEROUTE_SERP_PROVIDER` | 无 | 引擎检索的 SERP 后端：`serper` / `brave` / `custom` |
+| `CINEROUTE_SERP_KEY` | 无 | 上述服务的 API key |
+| `CINEROUTE_SERP_URL` | 无 | `provider=custom` 时的 URL 模板，占位符 `{query}` `{engine}` `{limit}` `{page}` `{key}` |
 | `CINEROUTE_PORT` | `8787` | Web 服务端口 |
 | `CINEROUTE_DOWNLOAD_DIR` | `./downloads` | 下载目录 |
 | `CINEROUTE_REGION` | `US` | 正版渠道地区 |
@@ -134,8 +168,12 @@ cineroute/
     probe.js                真实可播性探测
     match.js                片名归一化与相似度（准入门槛）
     http.js                 超时 / 重试 / 全局并发闸
+    sourceConfig.js         检索来源配置：勾选 / 逐源取数 / 站点范围
     fixtureFetch.js         夹具驱动的 fetch 替身（离线演示与测试）
-  src/adapters/             可插拔数据源 + 域名白名单
+  src/adapters/
+    registry.js             按配置装配适配器 + 播放/下载域名白名单
+    searchEngine.js         引擎适配器工厂（SERP 后端 + 页面 → 片源解析）
+    internetArchive.js / wikimediaCommons.js / jellyfin.js / tmdb.js
   src/server/
     server.js               检索 API / 媒体代理 / SSE 进度
     downloader.js           分块并发 + 断点续传 + 校验
@@ -143,7 +181,7 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     117 个用例，全部离线可跑
+  test/                     155 个用例，全部离线可跑
   docs/01-调研洞察.md        市场与技术调研、可行性判定、架构决策
 ```
 

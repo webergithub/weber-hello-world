@@ -19,6 +19,26 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_FIXTURE_DIR = path.resolve(HERE, '../../fixtures');
 
 /**
+ * 离线模式下的 SERP 配置。
+ *
+ * 走 custom 模板是有意的：它把 engine 与查询词放进 URL，夹具才能按引擎分别匹配，
+ * 离线演示里 Google 与百度就能返回不同的结果页。顺带也把 custom 这条
+ * "自己接别的 SERP 服务"的路径跑了一遍。
+ *
+ * 只在用户没配真 SERP 服务时才套用——已经配了就别覆盖人家的。
+ */
+export const FIXTURE_SERP_ENV = {
+  CINEROUTE_SERP_PROVIDER: 'custom',
+  CINEROUTE_SERP_URL: 'https://serp.fixture/search?engine={engine}&q={query}&page={page}',
+};
+
+export function applyFixtureSerpEnv(env = process.env) {
+  if (env.CINEROUTE_SERP_PROVIDER) return false;
+  Object.assign(env, FIXTURE_SERP_ENV);
+  return true;
+}
+
+/**
  * 创建一个签名与 httpJson 兼容的函数。
  * @param {string} [dir]
  * @returns {(url: string, opts?: object) => Promise<any>}

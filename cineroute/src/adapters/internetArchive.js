@@ -118,13 +118,14 @@ export function extractSourcesFromMetadata(meta, doc = {}) {
  * 搜索并解析片源。
  *
  * @param {{title: string, year: number|null}} query
- * @param {{limitItems?: number, minSimilarity?: number, signal?: AbortSignal,
+ * @param {{limit?: number, limitItems?: number, minSimilarity?: number, signal?: AbortSignal,
  *          fetchJson?: typeof httpJson}} [opts]
  * @returns {Promise<{provider: string, items: object[], sources: object[], error?: string}>}
  */
 export async function search(query, opts = {}) {
   const {
-    limitItems = 8,
+    // 所有适配器统一接受 limit；limitItems 是这个适配器早先的参数名，保留为别名。
+    limitItems = opts.limit ?? 8,
     minSimilarity = 0.55,
     signal,
     fetchJson = httpJson,

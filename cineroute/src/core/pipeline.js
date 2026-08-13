@@ -11,34 +11,38 @@
 import { parseQuery } from './match.js';
 import { rankSources, estimateReferenceRuntime, computeMaxDuration } from './score.js';
 import { probeAll } from './probe.js';
-import { DIRECT_ADAPTERS, METADATA_ADAPTERS, adapterAvailability } from '../adapters/registry.js';
+import { buildAdapters, adapterAvailability } from '../adapters/registry.js';
+import { defaultConfig } from './sourceConfig.js';
 
-/** 给单个适配器套超时与错误隔离，返回统一的状态记录。 */
-async function runAdapter(adapter, query, opts) {
+/**
+ * 给单个适配器套超时与错误隔离，返回统一的状态记录。
+ * `limit` 是这一次该取多少条——来自配置，不是写死的。
+ */
+async function runAdapter({ adapter, limit }, query, opts) {
   const started = Date.now();
   const availability = adapterAvailability(adapter);
+  const base = { id: adapter.id, label: adapter.label, kind: adapter.kind, limit: limit ?? null };
+
   if (!availability.available) {
-    return {
-      id: adapter.id, label: adapter.label, kind: adapter.kind,
-      status: 'skipped', reason: availability.reason,
-      count: 0, elapsedMs: 0, result: null,
-    };
+    return { ...base, status: 'skipped', reason: availability.reason, count: 0, elapsedMs: 0, result: null };
   }
 
   try {
-    const result = await adapter.search(query, opts);
+    const result = await adapter.search(query, limit == null ? opts : { ...opts, limit });
     const count = (result?.sources?.length ?? 0) || (result?.offers?.length ?? 0);
     return {
-      id: adapter.id, label: adapter.label, kind: adapter.kind,
+      ...base,
       status: result?.error ? 'error' : 'ok',
       reason: result?.error ?? null,
       count,
+      // 引擎源额外报告"搜到多少页 / 解析出多少 / 多少条没有解析器"
+      stats: result?.stats ?? null,
       elapsedMs: Date.now() - started,
       result,
     };
   } catch (err) {
     return {
-      id: adapter.id, label: adapter.label, kind: adapter.kind,
+      ...base,
       status: 'error', reason: String(err?.message || err),
       count: 0, elapsedMs: Date.now() - started, result: null,
     };
@@ -142,9 +146,13 @@ export function buildRecommendations(playable, offers, opts = {}) {
 /**
  * 主入口。
  *
+ * 跑哪些源、每个源取多少条，全部来自 `opts.config`（配置驱动，不写死）。
+ * 不传就用出厂配置。
+ *
  * @param {string} rawQuery 用户输入，可含年份，如 "Metropolis 1927"
  * @param {{limit?: number, probeLimit?: number, signal?: AbortSignal,
- *          fetchJson?: Function, probeFn?: Function, adapters?: object[]}} [opts]
+ *          fetchJson?: Function, probeFn?: Function,
+ *          config?: object, adapters?: object[]}} [opts]
  */
 export async function searchAll(rawQuery, opts = {}) {
   const started = Date.now();
@@ -152,8 +160,10 @@ export async function searchAll(rawQuery, opts = {}) {
   const limit = opts.limit ?? 5;
   const probeLimit = opts.probeLimit ?? 12;
 
-  const directAdapters = opts.adapters ?? DIRECT_ADAPTERS;
-  const metadataAdapters = opts.adapters ? [] : METADATA_ADAPTERS;
+  // opts.adapters 是测试用的直接注入口；正常路径一律走配置。
+  const plan = opts.adapters
+    ? opts.adapters.map((adapter) => ({ adapter, source: null, limit: null }))
+    : buildAdapters(opts.config ?? defaultConfig());
 
   const adapterOpts = {
     signal: opts.signal,
@@ -161,15 +171,15 @@ export async function searchAll(rawQuery, opts = {}) {
   };
 
   // 1) 所有源并发跑，互不阻塞。
-  const runs = await Promise.all(
-    [...directAdapters, ...metadataAdapters].map((a) => runAdapter(a, query, adapterOpts)),
-  );
+  const runs = await Promise.all(plan.map((p) => runAdapter(p, query, adapterOpts)));
 
   // 2) 汇总直链候选与权威元数据。
   const rawSources = runs.flatMap((r) => r.result?.sources ?? []);
   const metaRun = runs.find((r) => r.kind === 'metadata' && r.result?.titleInfo);
   const titleInfo = metaRun?.result?.titleInfo ?? null;
   const offers = runs.flatMap((r) => r.result?.offers ?? []);
+  // 引擎搜到但没有对应解析器的页面：如实列出来，不去猜里面有没有视频。
+  const leads = runs.flatMap((r) => r.result?.leads ?? []);
 
   const sources = dedupeSources(rawSources);
 
@@ -227,6 +237,13 @@ export async function searchAll(rawQuery, opts = {}) {
   if (offers.length > 0) {
     notes.push('正版观看渠道数据来源 JustWatch（经 TMDB 提供）');
   }
+  const skippedEngines = runs.filter((r) => r.id.startsWith('engine:') && r.status === 'skipped');
+  if (skippedEngines.length > 0) {
+    notes.push(`${skippedEngines.length} 个搜索引擎源未启用：${skippedEngines[0].reason}`);
+  }
+  if (leads.length > 0) {
+    notes.push(`引擎另搜到 ${leads.length} 个页面，但这些域名没有对应的解析器，只列出不解析`);
+  }
 
   return {
     query: { raw: rawQuery, ...query },
@@ -247,9 +264,12 @@ export async function searchAll(rawQuery, opts = {}) {
     top: final.top,
     alternatives: final.alternatives.slice(0, 10),
     offers,
+    // 引擎发现但无法解析的页面（只给线索，不猜内容）
+    leads: leads.slice(0, 30),
     providers: runs.map(({ result, ...rest }) => rest),
     stats: {
       rawCandidates: rawSources.length,
+      leads: leads.length,
       afterDedupe: sources.length,
       probed: opts.skipProbe ? 0 : Math.min(probeLimit, preOrdered.length),
       playable: final.top.length + final.overflow.length,

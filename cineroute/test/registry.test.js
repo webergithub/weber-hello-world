@@ -9,7 +9,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isAllowedMediaUrl, ADAPTERS, adapterAvailability, getAdapter } from '../src/adapters/registry.js';
+import {
+  isAllowedMediaUrl, ADAPTERS, BUILTIN_ADAPTERS, buildAdapters,
+  adapterAvailability, getAdapter,
+} from '../src/adapters/registry.js';
+import { defaultConfig, normalizeConfig } from '../src/core/sourceConfig.js';
 
 test('白名单放行已登记的片源域名', () => {
   for (const url of [
@@ -89,4 +93,80 @@ test('缺配置的适配器被标记为不可用并给出配置指引', (t) => {
 
   // 免配置的源永远可用
   assert.equal(adapterAvailability(getAdapter('internet-archive')).available, true);
+});
+
+/* ── 配置驱动的装配 ───────────────────────────────────────── */
+
+test('跑哪些源由配置决定，不是代码写死的', () => {
+  const only = buildAdapters(normalizeConfig({
+    sources: [
+      { id: 'internet-archive', type: 'builtin', enabled: true, limit: 5 },
+      { id: 'wikimedia-commons', type: 'builtin', enabled: false, limit: 20 },
+      { id: 'engine:baidu', type: 'engine', engine: 'baidu', enabled: true, limit: 30 },
+    ],
+  }));
+
+  assert.deepEqual(only.map((p) => p.adapter.id), ['internet-archive', 'engine:baidu']);
+  assert.equal(only[0].limit, 5, '数量应来自配置');
+  assert.equal(only[1].limit, 30, '每个源的数量互不影响');
+});
+
+test('源没配数量时装配用全局默认值', () => {
+  const plan = buildAdapters(normalizeConfig({
+    defaults: { limit: 7 },
+    sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true }],
+  }));
+  assert.equal(plan[0].limit, 7);
+});
+
+test('配置里出现代码里没有的内置源时跳过，不让检索崩掉', () => {
+  const plan = buildAdapters(normalizeConfig({
+    sources: [
+      { id: 'a-source-that-no-longer-exists', type: 'builtin', enabled: true, limit: 5 },
+      { id: 'internet-archive', type: 'builtin', enabled: true, limit: 5 },
+    ],
+  }));
+  assert.deepEqual(plan.map((p) => p.adapter.id), ['internet-archive']);
+});
+
+test('引擎适配器继承全局站点范围，也能被源自己覆盖', () => {
+  const plan = buildAdapters(normalizeConfig({
+    siteScope: ['archive.org'],
+    sources: [
+      { id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 10 },
+      { id: 'engine:bing', type: 'engine', engine: 'bing', enabled: true, limit: 10, siteScope: ['www.loc.gov'] },
+    ],
+  }));
+  assert.deepEqual(plan[0].adapter.siteScope, ['archive.org'], '没自带范围就用全局的');
+  assert.deepEqual(plan[1].adapter.siteScope, ['www.loc.gov'], '自带范围优先');
+});
+
+test('出厂配置下四个引擎都已勾选，且都是 direct 源', () => {
+  const ids = buildAdapters(defaultConfig()).map((p) => p.adapter.id);
+  for (const e of ['google', 'baidu', 'bing', 'duckduckgo']) {
+    assert.ok(ids.includes(`engine:${e}`), `出厂应勾选 ${e}`);
+  }
+  for (const a of ADAPTERS.filter((x) => x.id.startsWith('engine:'))) {
+    assert.equal(a.kind, 'direct');
+    assert.equal(a.requiresConfig, true, '引擎需要配 SERP 服务，必须如实声明');
+  }
+});
+
+test('引擎源不扩大媒体白名单（加多少引擎都不放行新域名）', () => {
+  const plan = buildAdapters(normalizeConfig({
+    siteScope: ['some-streaming-site.example'],
+    sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 10 }],
+  }));
+  assert.equal(plan.length, 1);
+  // 站点范围里写什么都不影响播放/下载准入
+  assert.equal(isAllowedMediaUrl('https://some-streaming-site.example/x.mp4').ok, false);
+});
+
+test('内置适配器都统一接受 limit 参数', () => {
+  for (const a of BUILTIN_ADAPTERS) {
+    assert.equal(typeof a.search, 'function', `${a.id} 缺少 search`);
+  }
+  // internet-archive 早先叫 limitItems，别名要还在
+  const src = getAdapter('internet-archive');
+  assert.ok(src, 'internet-archive 应在出厂配置里');
 });

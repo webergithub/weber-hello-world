@@ -10,7 +10,14 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { searchAll } from '../core/pipeline.js';
 import { httpRequest } from '../core/http.js';
-import { isAllowedMediaUrl, ADAPTERS, adapterAvailability } from '../adapters/registry.js';
+import {
+  isAllowedMediaUrl, BUILTIN_ADAPTERS, buildAdapters, adapterAvailability,
+} from '../adapters/registry.js';
+import {
+  loadConfig, saveConfig, normalizeConfig, defaultConfig,
+  ENGINE_PAGE_SIZE, DEFAULT_SITE_SCOPE, CONFIG_PATH,
+} from '../core/sourceConfig.js';
+import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
 import { DownloadManager } from './downloader.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -137,6 +144,34 @@ export async function startServer(options = {}) {
   /** @type {Set<import('node:http').ServerResponse>} */
   const sseClients = new Set();
 
+  // 数据源配置：进程启动时读一次，PUT /api/sources 之后就地更新。
+  // 配置文件不存在也能跑——loadConfig 会回落到出厂默认。
+  let sourceConfig = await loadConfig();
+
+  /** 把"系统里有哪些源可选"告诉前端，用来渲染勾选面板。 */
+  function sourceCatalog() {
+    const enabledIds = new Set(sourceConfig.sources.map((s) => s.id));
+    return {
+      builtins: BUILTIN_ADAPTERS.map((a) => {
+        const av = adapterAvailability(a);
+        return {
+          id: a.id, label: a.label, kind: a.kind,
+          available: av.available, reason: av.reason,
+          configHint: a.configHint || null,
+          inConfig: enabledIds.has(a.id),
+        };
+      }),
+      // 出厂支持的引擎；用户也能填别的名字，走 custom 模板转发
+      engines: Object.entries(ENGINE_PAGE_SIZE).map(([engine, pageSize]) => ({
+        engine, pageSize, id: `engine:${engine}`, inConfig: enabledIds.has(`engine:${engine}`),
+      })),
+      serpProviders: SERP_PROVIDERS,
+      serpConfigured: Boolean(process.env.CINEROUTE_SERP_PROVIDER),
+      defaultSiteScope: DEFAULT_SITE_SCOPE,
+      configPath: CONFIG_PATH,
+    };
+  }
+
   downloads.on('update', (job) => {
     const frame = `event: download\ndata: ${JSON.stringify(job)}\n\n`;
     for (const client of sseClients) client.write(frame);
@@ -151,18 +186,56 @@ export async function startServer(options = {}) {
         sendJson(res, 200, {
           offline,
           downloadDir,
-          adapters: ADAPTERS.map((a) => {
-            const av = adapterAvailability(a);
-            return { id: a.id, label: a.label, kind: a.kind, available: av.available, reason: av.reason };
+          // 这次配置下真正会跑的源
+          adapters: buildAdapters(sourceConfig).map(({ adapter, limit }) => {
+            const av = adapterAvailability(adapter);
+            return {
+              id: adapter.id, label: adapter.label, kind: adapter.kind, limit,
+              available: av.available, reason: av.reason,
+            };
           }),
         });
+        return;
+      }
+
+      // 数据源配置：读 / 改。改完立即生效，下一次检索就按新配置跑。
+      if (pathname === '/api/sources' && req.method === 'GET') {
+        sendJson(res, 200, { config: sourceConfig, catalog: sourceCatalog() });
+        return;
+      }
+
+      if (pathname === '/api/sources' && (req.method === 'PUT' || req.method === 'POST')) {
+        let incoming;
+        try {
+          incoming = JSON.parse(await readBody(req));
+        } catch (err) {
+          sendJson(res, 400, { error: `配置解析失败：${String(err?.message || err)}` });
+          return;
+        }
+        // reset:true 用来一键恢复出厂设置
+        const next = incoming?.reset ? defaultConfig() : (incoming?.config ?? incoming);
+        try {
+          sourceConfig = await saveConfig(next);
+        } catch (err) {
+          // 磁盘不可写时不该让配置面板整个失灵：内存里先生效，同时如实说明没落盘。
+          sourceConfig = normalizeConfig(next);
+          sendJson(res, 200, {
+            config: sourceConfig, catalog: sourceCatalog(),
+            warning: `配置已在本次运行中生效，但写入 ${CONFIG_PATH} 失败（重启后会丢）：${String(err?.message || err)}`,
+          });
+          return;
+        }
+        sendJson(res, 200, { config: sourceConfig, catalog: sourceCatalog() });
         return;
       }
 
       if (pathname === '/api/search') {
         const q = (url.searchParams.get('q') || '').trim();
         if (!q) { sendJson(res, 400, { error: '缺少查询参数 q' }); return; }
-        const result = await searchAll(q, offline ? offlineOpts : {});
+        const result = await searchAll(q, {
+          ...(offline ? offlineOpts : {}),
+          config: sourceConfig,
+        });
         sendJson(res, 200, result);
         return;
       }
