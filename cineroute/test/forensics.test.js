@@ -22,6 +22,7 @@ import { analyze, renderText, parseFile } from '../src/forensics/report.js';
 import {
   buildMp4, buildFragmentedMp4, makeVideoSamples, deterministicVariation,
 } from './helpers/mp4Builder.js';
+import { buildMkv, vintSize } from './helpers/mkvBuilder.js';
 
 const X264_TAG = 'x264 - core 164 r3095 baee400 - H.264/MPEG-4 AVC codec - '
   + 'Copyleft 2003-2023 - options: cabac=1 ref=3 deblock=1:0:0 me=hex subme=7 '
@@ -552,4 +553,140 @@ test('fMP4：非分片文件不受影响（回归）', async (t) => {
   const c = await parseFile(file);
   assert.equal(c.fragmented, undefined);
   assert.equal(c.tracks[0].sampleCount, 1200 * 25);
+});
+
+/* ────────────────────── Matroska / MKV ────────────────────── */
+
+/** MKV 的块长度就是真实帧字节数，没法塞占位符，所以测试片子要小。 */
+function smallMovie(seed = 1) {
+  return makeVideoSamples({
+    durationSec: 300, fps: 25, gopSec: 2, baseKbps: 120,
+    variation: deterministicVariation(seed),
+  });
+}
+function smallMovieWithAd(seed = 1) {
+  return makeVideoSamples({
+    durationSec: 320, fps: 25, gopSec: 2, baseKbps: 120,
+    variation: deterministicVariation(seed),
+    inserts: [{ atSec: 150, durationSec: 20, kbpsFactor: 3, gopSec: 0.5,
+                variation: deterministicVariation(4242) }],
+  });
+}
+
+test('MKV：识别 EBML 魔数并走 Matroska 解析器', async (t) => {
+  const v = smallMovie();
+  const { file, dir } = await writeTemp(buildMkv({ sizes: v.sizes, syncSamples: v.syncSamples }).buffer, 'a.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const c = await parseFile(file);
+  assert.equal(c.ok, true);
+  assert.equal(c.format, 'matroska');
+});
+
+test('MKV：逐帧大小、关键帧、时长与源一致', async (t) => {
+  const v = smallMovie();
+  const built = buildMkv({ sizes: v.sizes, syncSamples: v.syncSamples, fps: 25 });
+  const { file, dir } = await writeTemp(built.buffer, 'a.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const c = await parseFile(file);
+  const track = c.tracks[0];
+
+  assert.equal(track.handlerType, 'vide');
+  assert.deepEqual(track.codecs, ['V_MPEG4/ISO/AVC']);
+  assert.equal(track.width, 1920);
+  assert.equal(track.height, 1080);
+  assert.equal(track.sampleCount, v.sizes.length);
+  assert.equal(track.syncSamples.size, v.syncSamples.size);
+  assert.deepEqual(track.sizes.slice(0, 100), v.sizes.slice(0, 100));
+  // TimestampScale 是 1ms，25fps 每帧 40 刻度
+  assert.equal(track.media.timescale, 1000);
+  assert.ok(track.deltas.slice(0, 50).every((d) => d === 40), 'deltas 应全为 40ms');
+});
+
+test('MKV：码率剖面与 GOP 可用，插入段照样检出', async (t) => {
+  const v = smallMovieWithAd();
+  const { file, dir } = await writeTemp(
+    buildMkv({ sizes: v.sizes, syncSamples: v.syncSamples }).buffer, 'ad.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.equal(report.verdict.level, 'tampered');
+  assert.equal(report.tamper.profileSummary.gopMedianSec, 2);
+
+  const hit = report.tamper.findings.find(
+    (f) => f.type === 'suspected-insert' && f.startSec <= 155 && f.endSec >= 165);
+  assert.ok(hit, `未检出 150–170s 的插入段，实得 ${JSON.stringify(report.tamper.findings.map((f) => [f.startSec, f.endSec]))}`);
+  assert.equal(hit.level, 'high');
+});
+
+test('MKV：与母版比对可定位插入段', async (t) => {
+  const a = await writeTemp(buildMkv({ sizes: smallMovie().sizes, syncSamples: smallMovie().syncSamples }).buffer, 'master.mkv');
+  const withAd = smallMovieWithAd();
+  const b = await writeTemp(buildMkv({ sizes: withAd.sizes, syncSamples: withAd.syncSamples }).buffer, 'suspect.mkv');
+  t.after(async () => {
+    await fs.rm(a.dir, { recursive: true, force: true });
+    await fs.rm(b.dir, { recursive: true, force: true });
+  });
+
+  const report = await analyze(b.file, { referencePath: a.file, skipHash: true });
+  assert.equal(report.comparison.ok, true);
+  assert.equal(report.comparison.identity.verdict, 'same-work');
+  assert.equal(report.comparison.durations.deltaSec, 20);
+
+  const ins = report.comparison.findings.filter((f) => f.type === 'inserted-content');
+  const total = ins.reduce((x, f) => x + f.durationSec, 0);
+  assert.ok(total >= 14 && total <= 28, `插入总时长 ${total}s，期望约 20s`);
+  assert.ok(ins.some((f) => Math.abs(f.startSec - 150) <= 12), `插入起点 ${ins.map((f) => f.startSec)}`);
+});
+
+test('MKV：从 WritingApp / MuxingApp 识别压制与封装工具', async (t) => {
+  const v = smallMovie();
+  const { file, dir } = await writeTemp(buildMkv({
+    sizes: v.sizes, syncSamples: v.syncSamples,
+    writingApp: 'HandBrake 1.6.1 2023022300',
+  }).buffer, 'hb.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.ok(report.provenance.tools.some((x) => x.tool === 'HandBrake'));
+  assert.ok(report.provenance.tools.some((x) => x.tool === 'libmatroska'));
+  assert.equal(report.provenance.reprocessed, true, 'HandBrake 属于转码工具，应判定为经过处理');
+
+  // 同一个工具不应因为既是编码器标签又在标签表里而被报两次
+  const handbrake = report.provenance.tools.filter((x) => x.tool === 'HandBrake');
+  assert.equal(handbrake.length, 1, `HandBrake 报了 ${handbrake.length} 次`);
+});
+
+test('MKV：mkvmerge 封装被识别为重新封装（但不算转码）', async (t) => {
+  const v = smallMovie();
+  const { file, dir } = await writeTemp(buildMkv({
+    sizes: v.sizes, syncSamples: v.syncSamples,
+    writingApp: "mkvmerge v70.0.0 ('Go Away')",
+  }).buffer, 'mm.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  const mm = report.provenance.tools.find((x) => x.tool === 'mkvmerge');
+  assert.ok(mm);
+  assert.equal(mm.kind, 'muxer');
+});
+
+test('MKV：损坏或非 EBML 文件不会被误认', async (t) => {
+  const { file, dir } = await writeTemp(Buffer.from('这不是视频'), 'x.mkv');
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+
+  const report = await analyze(file, { skipHash: true });
+  assert.equal(report.container.ok, false);
+  assert.equal(report.verdict.level, 'unknown');
+});
+
+test('vintSize 编码符合 EBML 规范', () => {
+  // 1 字节可表示 0..126（127 是"长度未知"的保留值）
+  assert.deepEqual([...vintSize(0)], [0x80]);
+  assert.deepEqual([...vintSize(1)], [0x81]);
+  assert.deepEqual([...vintSize(126)], [0xfe]);
+  // 127 要进位到 2 字节，避免撞上保留值
+  assert.equal(vintSize(127).length, 2);
+  assert.deepEqual([...vintSize(127)], [0x40, 0x7f]);
 });

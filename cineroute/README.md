@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 109 个用例，全部离线
+npm test                                              # 117 个用例，全部离线
 ```
 
 ---
@@ -142,8 +142,8 @@ cineroute/
   src/web/                  前端（原生 JS，无框架）
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
-  src/forensics/            容器解析（含 fMP4）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     109 个用例，全部离线可跑
+  src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
+  test/                     117 个用例，全部离线可跑
   docs/01-调研洞察.md        市场与技术调研、可行性判定、架构决策
 ```
 
@@ -162,10 +162,14 @@ node forensics.js <嫌疑副本> --overlay           # 烧录水印/台标检测
 只分析你已取得的本地文件，不负责获取——取证分析本就不该与样本获取耦合。
 
 核心思路是**不解码任何一帧**：MP4 的 `stsz`/`stts`/`stss` 三张样本表拼起来，
-就能还原逐秒码率剖面与 GOP 节奏。插播广告是另一次编码的产物，两条曲线必然同时突变；
-而打斗戏码率飙高只影响码率、不影响 GOP——**要求双信号同时命中**挡掉了大部分误报。
-解析 2GB 的片子只读几 MB（跳过 `mdat`，只读 `ftyp` + `moov` + 各 `moof`）。
-分片 MP4（从 HLS/DASH 重封装的副本）同样支持，并额外检测 `tfdt` 时间轴断点。
+就能还原逐秒码率剖面与 GOP 节奏；MKV 则从每个 `SimpleBlock` 的头里拿同样的信息。
+
+插播广告是另一次编码的产物，这两条曲线必然同时突变；而打斗戏码率飙高只影响码率、
+不影响 GOP——**要求双信号同时命中**挡掉了大部分误报。
+
+支持的容器：MP4 / MOV / M4V、分片 MP4（从 HLS/DASH 重封装的副本，额外检测 `tfdt`
+时间轴断点）、MKV / WebM。MP4 解析 2GB 的片子只读几 MB（跳过 `mdat`）；
+MKV 没有集中索引，需要整文件扫描。
 
 有参考母版时可做序列对齐，把插入段定位到秒：
 

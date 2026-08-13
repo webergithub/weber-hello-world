@@ -18,6 +18,9 @@
 /** 已知的编码器 / 封装器签名。 */
 const SIGNATURES = [
   { re: /x264[\s-]+core\s+(\d+)/i, tool: 'x264', kind: 'encoder', note: 'x264 命令行/库压制' },
+  { re: /mkvmerge\s*v?([\d.]+)?/i, tool: 'mkvmerge', kind: 'muxer', note: 'MKVToolNix 封装，常见于重新封装的发布版' },
+  { re: /libmakemkv|MakeMKV/i, tool: 'MakeMKV', kind: 'transcoder', note: '光盘抓取工具——来源是实体碟或蓝光镜像' },
+  { re: /libmatroska|libebml/i, tool: 'libmatroska', kind: 'muxer', note: 'Matroska 官方库封装' },
   { re: /x265[\s-]+(?:core\s+)?(\d+)/i, tool: 'x265', kind: 'encoder', note: 'x265（HEVC）压制' },
   { re: /HandBrake\s*([\d.]+)?/i, tool: 'HandBrake', kind: 'transcoder', note: '桌面转码工具，常见于二次压制' },
   { re: /Lavf([\d.]+)/i, tool: 'FFmpeg (libavformat)', kind: 'muxer', note: 'ffmpeg 封装' },
@@ -67,11 +70,16 @@ export function analyzeProvenance(container, ctx = {}) {
     }
   };
 
-  // 1) 标签（©too 最关键）
-  const encoderTag = container.tags?.['©too'] || container.tags?.['©too'] || container.tags?.encoder || null;
-  scan(encoderTag, '©too 编码器标签');
+  // 1) 标签。MP4 看 ©too，MKV 看 WritingApp / MuxingApp——都是压制/封装工具写的自述。
+  const encoderTag = container.tags?.['©too']
+    || container.tags?.encoder
+    || container.tags?.WritingApp
+    || container.tags?.MuxingApp
+    || null;
+  scan(encoderTag, '编码器标签');
   for (const [k, v] of Object.entries(container.tags || {})) {
-    if (k !== '©too') scan(v, `标签 ${k}`);
+    // 已经当作编码器标签扫过的那一条不要再扫一遍，否则同一个工具会报两次。
+    if (v !== encoderTag) scan(v, `标签 ${k}`);
   }
 
   // 2) hdlr handler name

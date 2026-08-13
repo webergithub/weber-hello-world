@@ -19,6 +19,7 @@ import { detectInsertedSegments } from './anomaly.js';
 import { analyzeProvenance } from './provenance.js';
 import { compareWithReference, pickVideoTrack } from './compare.js';
 import { mergeFragmentsIntoTracks } from './fragments.js';
+import { parseMatroska, isMatroska } from './matroska.js';
 
 export const TOOL_VERSION = 'cineroute-forensics/0.2';
 
@@ -106,6 +107,12 @@ export function hashFile(filePath) {
  * @param {string} filePath
  */
 export async function parseFile(filePath) {
+  // MKV / WebM 的结构与 MP4 完全不同，走独立解析器；
+  // 但它产出的 track 结构与 MP4 一致，所以下游分析共用同一套代码。
+  if (await isMatroska(filePath)) {
+    return parseMatroska(filePath);
+  }
+
   const { topLevel, ftypBuf, moovBuf, moofBufs, fileSize } = await readContainerHeads(filePath);
   if (!moovBuf) {
     return {
@@ -180,6 +187,8 @@ export async function analyze(suspectPath, opts = {}) {
 
   report.container = {
     ok: true,
+    format: container.format || 'isobmff',
+    matroska: container.matroska ?? null,
     ftyp: container.ftyp,
     durationSec: container.movie ? container.movie.duration / container.movie.timescale : null,
     hasFragments: container.hasFragments || Boolean(container.fragmented),
@@ -369,7 +378,15 @@ export function renderText(report) {
 
   L.push('');
   L.push('─── 容器结构 ' + '─'.repeat(58));
-  L.push(`封装品牌：${report.container.ftyp ? `${report.container.ftyp.majorBrand} [${report.container.ftyp.compatibleBrands.join(' ')}]` : '未知'}`);
+  if (report.container.format === 'matroska') {
+    const mk = report.container.matroska;
+    L.push(`容器：Matroska / WebM${mk ? `（${mk.clusterCount} 个 Cluster · ${mk.blockCount} 个块）` : ''}`);
+  } else {
+    // ftyp 是 MP4 特有的，MKV 没有这个概念，不要在那里显示"未知"
+    L.push(`封装品牌：${report.container.ftyp
+      ? `${report.container.ftyp.majorBrand} [${report.container.ftyp.compatibleBrands.join(' ')}]`
+      : '未知'}`);
+  }
   L.push(`总时长：${report.container.durationSec ? ts(report.container.durationSec) : '未知'}`);
   if (report.container.fragmented) {
     L.push(`封装形态：分片 MP4（fMP4），共 ${report.container.fragmentCount} 个分片`
