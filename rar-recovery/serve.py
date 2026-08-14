@@ -222,11 +222,12 @@ def main():
     port = _find_port(args.port)
     httpd = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     url = f"http://127.0.0.1:{port}"
-    print("=" * 56)
-    print("  压缩包密码恢复 · 本地应用已启动")
-    print(f"  请在浏览器打开： {url}")
-    print("  按 Ctrl+C 停止")
-    print("=" * 56)
+    # flush=True 很重要：输出走管道时若不刷新，Electron 外壳读不到 URL 行
+    print("=" * 56, flush=True)
+    print("  压缩包密码恢复 · 本地应用已启动", flush=True)
+    print(f"  请在浏览器打开： {url}", flush=True)
+    print("  按 Ctrl+C 停止", flush=True)
+    print("=" * 56, flush=True)
     if not args.no_browser:
         try:
             webbrowser.open(url)

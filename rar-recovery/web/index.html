@@ -18,10 +18,11 @@
       <h2><span class="step">1</span> 选择压缩包</h2>
       <div class="row">
         <input id="path" type="text" placeholder="粘贴本机压缩包完整路径，例如 /Users/你/Downloads/secret.rar" />
+        <button id="pickBtn" class="ghost">📁 选择文件</button>
         <button id="scanBtn" class="primary">扫描</button>
       </div>
       <div id="drop" class="drop">
-        或把压缩包 <b>拖到这里</b> 上传　<label class="filebtn">选择文件<input id="file" type="file" hidden /></label>
+        或把压缩包 <b id="dropVerb">拖到这里</b>　<label class="filebtn" id="fileLabel">浏览<input id="file" type="file" hidden /></label>
       </div>
       <div id="archiveInfo" class="info hidden"></div>
     </section>

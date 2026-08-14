@@ -157,6 +157,8 @@ function escapeHtml(s) {
 }
 
 // ---------------------------------------------------------------- 事件绑定
+const IN_ELECTRON = !!(window.electronAPI && window.electronAPI.isElectron);
+
 $("scanBtn").onclick = () => {
   const p = $("path").value.trim();
   if (p) scanPath(p);
@@ -169,6 +171,17 @@ $("cancelBtn").onclick = async () => {
     body: JSON.stringify({ id: jobId }),
   }).catch(() => {});
 };
+
+// 「选择文件」按钮：Electron 用系统原生对话框（拿到真实路径，免上传）；
+// 普通浏览器则退回到 <input type=file> 上传。
+$("pickBtn").onclick = async () => {
+  if (IN_ELECTRON) {
+    const p = await window.electronAPI.pickFile();
+    if (p) { $("path").value = p; scanPath(p); }
+  } else {
+    $("file").click();
+  }
+};
 $("file").onchange = (e) => { if (e.target.files[0]) uploadFile(e.target.files[0]); };
 
 const drop = $("drop");
@@ -178,5 +191,14 @@ const drop = $("drop");
   drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("hot"); }));
 drop.addEventListener("drop", (e) => {
   const f = e.dataTransfer.files[0];
-  if (f) uploadFile(f);
+  if (!f) return;
+  // Electron 里拖进来的文件带有真实磁盘路径 f.path，直接扫描即可，无需上传。
+  if (f.path) { $("path").value = f.path; scanPath(f.path); }
+  else uploadFile(f);
 });
+
+// Electron 环境下微调文案（拖拽=读取路径，不是上传）
+if (IN_ELECTRON) {
+  const label = $("fileLabel");
+  if (label) label.childNodes[0].nodeValue = "浏览…";
+}
