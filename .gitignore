@@ -4,3 +4,8 @@ npm-debug.log*
 .DS_Store
 .env
 data/
+
+# Generated native shells. Regenerate with `npm run mobile:add:ios|:android`,
+# which also applies LinkTalk's permissions via scripts/patch-native.mjs.
+ios/
+android/

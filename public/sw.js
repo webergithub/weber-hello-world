@@ -10,7 +10,7 @@
 //
 // Bump CACHE when the shell changes to retire the old one on activate.
 
-const CACHE = 'linktalk-v1';
+const CACHE = 'linktalk-v2';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -18,6 +18,9 @@ const APP_SHELL = [
   '/css/style.css',
   '/js/langs.js',
   '/js/room.js',
+  '/js/join.js',
+  '/js/platform.js',
+  '/js/scan.js',
   '/manifest.webmanifest',
   '/icon.svg',
 ];

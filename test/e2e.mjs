@@ -69,6 +69,21 @@ async function main() {
   });
   ok(trEmpty.status === 400, 'empty audio rejected with 400');
 
+  // --- 4-digit face-to-face pairing ---
+  const mint = await (await fetch(`${BASE}/api/rooms/${CODE}/pin`, { method: 'POST' })).json();
+  ok(/^\d{4}$/.test(mint.pin), `room mints a 4-digit PIN (${mint.pin})`);
+  const again = await (await fetch(`${BASE}/api/rooms/${CODE}/pin`, { method: 'POST' })).json();
+  ok(again.pin === mint.pin, 'minting again reuses the live PIN (no churn while typing)');
+
+  const resolved = await (await fetch(`${BASE}/api/pair/${mint.pin}`)).json();
+  ok(resolved.room === CODE, 'PIN resolves back to its room');
+
+  // Find a PIN that is definitely not live and confirm it 404s.
+  const deadPin = String((Number(mint.pin) + 1) % 10000).padStart(4, '0');
+  ok((await fetch(`${BASE}/api/pair/${deadPin}`)).status === 404, 'unknown PIN returns 404');
+  ok((await fetch(`${BASE}/api/rooms/ZZZZZZ/pin`, { method: 'POST' })).status === 404,
+    'cannot mint a PIN for a room that does not exist');
+
   // --- WebSocket relay: two clients in the same room ---
   await relayTest(CODE);
 

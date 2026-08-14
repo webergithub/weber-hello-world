@@ -296,6 +296,38 @@ input:focus, select:focus { border-color: var(--brand); }
 }
 .toast.show { opacity: 1; }
 
+/* ---------- Face-to-face PIN ---------- */
+.pin-box {
+  border: 1px solid var(--line); border-radius: 14px;
+  background: var(--bg-soft); padding: 16px; text-align: center;
+}
+.pin {
+  font-size: 44px; font-weight: 800; letter-spacing: 14px;
+  font-variant-numeric: tabular-nums; text-indent: 14px; /* offset trailing letter-spacing */
+  background: linear-gradient(135deg, var(--brand), var(--accent));
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.pin-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; margin-top: 10px;
+}
+
+/* ---------- QR scanner overlay ---------- */
+.scan-overlay {
+  position: fixed; inset: 0; z-index: 80; background: #000;
+  display: flex; align-items: center; justify-content: center;
+}
+.scan-overlay video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame {
+  position: absolute; width: 62vw; height: 62vw; max-width: 300px; max-height: 300px;
+  border: 3px solid var(--accent); border-radius: 18px;
+  box-shadow: 0 0 0 100vmax rgba(0, 0, 0, 0.45);
+}
+.scan-cancel {
+  position: absolute; bottom: calc(28px + env(safe-area-inset-bottom));
+  width: auto; padding: 12px 28px; margin: 0;
+}
+
 /* ---------- Admin console ---------- */
 .admin-wrap { max-width: 860px; }
 .stat-grid {

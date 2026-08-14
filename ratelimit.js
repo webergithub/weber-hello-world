@@ -65,4 +65,7 @@ export const LIMITS = {
   translate: Number(process.env.RATE_TRANSLATE_PER_MIN || 240),
   transcribe: Number(process.env.RATE_TRANSCRIBE_PER_MIN || 60),
   rooms: Number(process.env.RATE_ROOMS_PER_MIN || 60),
+  // Deliberately tight: a 4-digit PIN is the only guessable value in the API,
+  // so brute force must run out of budget long before it runs out of digits.
+  pair: Number(process.env.RATE_PAIR_PER_MIN || 20),
 };

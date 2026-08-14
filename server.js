@@ -154,11 +154,62 @@ function sweepRooms() {
   for (const room of rooms.values()) {
     if (room.members.size === 0 && now - room.lastActivity > ROOM_TTL_MS) {
       rooms.delete(room.code);
+      retirePinsFor(room.code);
       metrics.rooms.pruned++;
       changed = true;
     }
   }
   if (changed) scheduleSave();
+}
+
+// ---------------------------------------------------------------------------
+// Face-to-face pairing PINs.
+//
+// A 6-character room code is fine on a QR or a link, but clumsy to read aloud
+// across a table. So a room can also mint a short 4-digit PIN that maps to it.
+//
+// 4 digits is only 10,000 values, so the safety comes from scarcity and time,
+// not from the code itself:
+//   • PINs live for PIN_TTL_MS (5 min) and are swept.
+//   • Only a handful are ever active at once, so guesses land in empty space.
+//   • Lookups are rate limited per IP (see /api/pair below).
+//   • A PIN is retired as soon as its room is closed.
+// This is the same trade-off AirDrop-style numeric handshakes make: good for
+// people standing next to each other, never a substitute for the room link.
+// ---------------------------------------------------------------------------
+
+const PIN_TTL_MS = Number(process.env.PIN_TTL_MS || 5 * 60 * 1000);
+/** @type {Map<string, {room: string, expiresAt: number}>} */
+const pins = new Map();
+
+function sweepPins(now = Date.now()) {
+  for (const [pin, rec] of pins) if (rec.expiresAt <= now) pins.delete(pin);
+}
+
+function pinForRoom(code) {
+  const now = Date.now();
+  sweepPins(now);
+
+  // Reuse a live PIN so the host screen doesn't churn while people are typing.
+  for (const [pin, rec] of pins) {
+    if (rec.room === code) return { pin, expiresAt: rec.expiresAt };
+  }
+
+  // 10k space minus whatever is live; pick randomly among the free values.
+  if (pins.size >= 9000) return null; // absurd in practice; fail loudly instead of looping
+  let pin;
+  do {
+    pin = String(Math.floor(Math.random() * 10000)).padStart(4, '0');
+  } while (pins.has(pin));
+
+  const expiresAt = now + PIN_TTL_MS;
+  pins.set(pin, { room: code, expiresAt });
+  metrics.pins.minted++;
+  return { pin, expiresAt };
+}
+
+function retirePinsFor(code) {
+  for (const [pin, rec] of pins) if (rec.room === code) pins.delete(pin);
 }
 
 // Build the absolute base URL a phone should use to reach this server. We
@@ -216,6 +267,34 @@ app.get('/api/rooms/:code', (req, res) => {
   const room = rooms.get(code);
   if (!room) return res.status(404).json({ error: 'room_not_found' });
   res.json({ code, members: room.members.size });
+});
+
+// Mint (or re-use) a 4-digit face-to-face PIN for a room. Cross-platform join
+// path: the other person types these 4 digits, no camera or NFC needed.
+app.post('/api/rooms/:code/pin', rateLimit('rooms', LIMITS.rooms), (req, res) => {
+  const code = String(req.params.code || '').toUpperCase();
+  if (!rooms.has(code)) return res.status(404).json({ error: 'room_not_found' });
+  const minted = pinForRoom(code);
+  if (!minted) return res.status(503).json({ error: 'pin_space_exhausted' });
+  res.json({
+    pin: minted.pin,
+    expiresAt: minted.expiresAt,
+    ttlSec: Math.round((minted.expiresAt - Date.now()) / 1000),
+  });
+});
+
+// Resolve a PIN to its room. Rate limited hard: this is the only guessable
+// surface in the app, so a burst of wrong PINs should stop making progress.
+app.get('/api/pair/:pin', rateLimit('pair', LIMITS.pair), (req, res) => {
+  const pin = String(req.params.pin || '').trim();
+  sweepPins();
+  const rec = pins.get(pin);
+  if (!rec || !rooms.has(rec.room)) {
+    metrics.pins.missed++;
+    return res.status(404).json({ error: 'pin_not_found' });
+  }
+  metrics.pins.resolved++;
+  res.json({ room: rec.room, expiresAt: rec.expiresAt });
 });
 
 // Render an invite QR code as a PNG data URL for a given room.
@@ -505,6 +584,7 @@ app.delete('/api/admin/rooms/:code', requireAdmin, (req, res) => {
     try { m.socket.close(); } catch { /* already gone */ }
   }
   rooms.delete(code);
+  retirePinsFor(code);
   metrics.rooms.closedByAdmin++;
   scheduleSave();
   res.json({ closed: code, disconnected: members });

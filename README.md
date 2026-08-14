@@ -25,7 +25,8 @@ on a flaky connection.
 | 多台手机连接，一台为主机 (multiple phones, one host) | A host taps **Create room**; the server mints a 6‑char room code. Everyone else joins that room over WebSocket. |
 | 生成邀请二维码或链接 (invite QR code / link) | The host screen shows a **QR code** and a copyable **invite link** (`/room.html?room=CODE`). Scanning or opening either lands the guest straight in the room. |
 | 扫码或添加链接加入 (join by scan or link) | Open the link / scan the QR → auto‑join. Or type the 6‑character code on the home screen. |
-| AirDrop / NFC 面对面碰接加入 (face‑to‑face join) | The **Share** button uses the Web Share API — on iPhone that surfaces **AirDrop**, on Android **Nearby Share**. Android Chrome also gets a **Tap to NFC** button that writes the invite to an NFC tag for tap‑to‑join. All of them just carry the same room link. |
+| AirDrop / NFC 面对面碰接加入 (face‑to‑face join) | **Same phone type → 碰一碰 tap:** Android↔Android over NFC, iPhone↔iPhone over AirDrop/proximity. **iPhone ↔ Android → a 4‑digit face‑to‑face code** the host reads aloud (no camera, no NFC), or **scan the QR**. The room screen shows all three and says which works where. |
+| 打包成 iOS / Android 应用 (native apps) | Packaged with **Capacitor** — one shared UI, native NFC/camera/share. `npm run mobile:add:ios` / `:android` scaffolds the projects and auto‑applies the required permissions. See **[MOBILE.md](MOBILE.md)**. |
 | 一人发言同步到其他人屏幕 (one person's speech syncs to all screens) | Messages relay through a WebSocket server to every device in the room instantly. You can **type** or **speak**: tapping the mic records a clip and transcribes it with **Whisper** (see below). |
 | 接收方设定默认发言语言和接收语言 (per‑user speak + receive language) | Under **My menu → Settings**, each person sets **I speak** (one language) and **I read (primary)**. Choices are remembered on the device. |
 | 最多支持 2 个，一主一次 (max 2, one primary + one secondary) | A second **I read (secondary)** slot (optional). Every incoming message is shown in your primary language, then your secondary, with the original kept underneath. |
@@ -111,6 +112,18 @@ curl localhost:3000/api/metrics
 
 Roadmap for further backend work (moderation, pluggable storage, multi-instance
 scaling, usage accounting) is in **[BACKEND.md](BACKEND.md)**.
+
+## Native apps
+
+```bash
+LINKTALK_SERVER_URL=https://talk.example.com npm run mobile:add:android
+LINKTALK_SERVER_URL=https://talk.example.com npm run mobile:add:ios   # macOS only
+npm run mobile:sync        # after any change; re-applies permissions
+```
+
+Building the actual `.ipa` / `.apk` needs Xcode (macOS) and the Android SDK
+respectively — full walkthrough, plugin list and store checklist in
+**[MOBILE.md](MOBILE.md)**.
 
 ### Tests
 

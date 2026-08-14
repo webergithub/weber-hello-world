@@ -57,6 +57,34 @@ try {
   await host.click('#invite-sheet [data-close]');
   await host.waitForSelector('#invite-sheet', { state: 'hidden' });
 
+  // ---- Face-to-face 4-digit code is shown on the host's invite sheet ----
+  const pin = await host.waitForFunction(() => {
+    const v = document.getElementById('pin-value')?.textContent || '';
+    return /^\d{4}$/.test(v) ? v : null;
+  }, { timeout: 6000 }).then((h) => h.jsonValue()).catch(() => null);
+  ok(pin !== null, `host shows a 4-digit face-to-face code (${pin})`);
+  const expiryShown = await host.waitForFunction(() =>
+    /Expires in/.test(document.getElementById('pin-expiry')?.textContent || ''),
+    { timeout: 4000 }).then(() => true).catch(() => false);
+  ok(expiryShown, 'face-to-face code shows a countdown');
+
+  // ---- A third phone joins by typing only those 4 digits ----
+  const pinCtx = await browser.newContext();
+  const pinPhone = await pinCtx.newPage();
+  pinPhone.on('pageerror', (e) => errors.push(String(e)));
+  await pinPhone.goto(BASE);
+  await pinPhone.fill('#join-name', 'PinJoiner');
+  await pinPhone.fill('#join-code', pin);
+  await pinPhone.click('#join-btn');
+  const pinJoined = await pinPhone.waitForURL(`**/room.html?room=${roomCode}`, { timeout: 8000 })
+    .then(() => true).catch(() => false);
+  ok(pinJoined, 'typing the 4-digit code joins the right room');
+  // Let it leave again so later roster assertions see a clean two-phone room.
+  await pinCtx.close();
+  await host.waitForFunction(() =>
+    document.querySelectorAll('#members .member').length === 1, { timeout: 6000 })
+    .catch(() => {});
+
   // ---- Guest joins the same room, reading in Chinese ----
   const guestCtx = await browser.newContext();
   const guest = await guestCtx.newPage();

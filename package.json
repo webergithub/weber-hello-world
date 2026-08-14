@@ -7,7 +7,14 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node test/run.mjs"
+    "test": "node test/run.mjs",
+    "mobile:prepare": "node scripts/prepare-mobile.mjs",
+    "mobile:patch": "node scripts/patch-native.mjs",
+    "mobile:add:ios": "npm run mobile:prepare && npx cap add ios && npm run mobile:patch",
+    "mobile:add:android": "npm run mobile:prepare && npx cap add android && npm run mobile:patch",
+    "mobile:sync": "npm run mobile:prepare && npx cap sync && npm run mobile:patch",
+    "mobile:open:ios": "npx cap open ios",
+    "mobile:open:android": "npx cap open android"
   },
   "engines": {
     "node": ">=18"
@@ -19,6 +26,10 @@
   },
   "license": "MIT",
   "devDependencies": {
+    "@capacitor/android": "^6.2.1",
+    "@capacitor/cli": "^6.2.1",
+    "@capacitor/core": "^6.2.1",
+    "@capacitor/ios": "^6.2.1",
     "playwright-core": "^1.55.0"
   }
 }

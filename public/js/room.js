@@ -13,6 +13,7 @@
 // /api/transcribe endpoint, which runs it through Whisper.
 
 import { langName, speechLocale, fillLangSelect } from '/js/langs.js';
+import { capabilities, tapLabel } from '/js/platform.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -131,6 +132,44 @@ fetch(`/api/qr?room=${ROOM}`)
   .then((d) => { if (d.dataUrl) $('qr-img').src = d.dataUrl; })
   .catch(() => {});
 
+// ---- 4-digit face-to-face PIN --------------------------------------------
+// Short-lived by design, so keep a countdown on screen and re-mint when it
+// lapses while the invite sheet is still open.
+let pinExpiresAt = 0;
+let pinTicker = null;
+
+async function mintPin() {
+  try {
+    const r = await fetch(`/api/rooms/${ROOM}/pin`, { method: 'POST' });
+    if (!r.ok) throw new Error('pin');
+    const d = await r.json();
+    $('pin-value').textContent = d.pin;
+    pinExpiresAt = d.expiresAt;
+    tickPin();
+  } catch {
+    $('pin-value').textContent = '····';
+    $('pin-expiry').textContent = 'Could not get a code.';
+  }
+}
+
+function tickPin() {
+  clearInterval(pinTicker);
+  pinTicker = setInterval(() => {
+    const left = Math.round((pinExpiresAt - Date.now()) / 1000);
+    if (left <= 0) {
+      clearInterval(pinTicker);
+      $('pin-expiry').textContent = 'Expired — tap "New code".';
+      return;
+    }
+    const m = Math.floor(left / 60);
+    const s = String(left % 60).padStart(2, '0');
+    $('pin-expiry').textContent = `Expires in ${m}:${s}`;
+  }, 1000);
+}
+
+$('pin-refresh').addEventListener('click', mintPin);
+mintPin();
+
 $('copy-btn').addEventListener('click', async () => {
   try {
     await navigator.clipboard.writeText(inviteUrl);
@@ -158,15 +197,39 @@ if (navigator.share) {
     'Native share (AirDrop / Nearby Share) is available when opened from a phone browser.';
 }
 
-// Web NFC — Android Chrome can write the invite to a tag for tap-to-join.
-if ('NDEFReader' in window) {
+// 碰一碰 / tap — only offered on platforms that can actually do it, and only
+// ever between two phones of the same kind. Cross-platform pairs use the
+// 4-digit code or the QR above.
+const caps = capabilities();
+const tap = tapLabel();
+$('tap-hint').textContent = tap
+  ? `${tap} — for iPhone ↔ Android use the 4-digit code or QR above.`
+  : 'Tap-to-connect needs two phones of the same type (Android NFC, or iPhone-to-iPhone). Use the 4-digit code or QR above instead.';
+
+if (caps.nfc) {
+  $('nfc-btn').textContent = '碰一碰 (NFC)';
   $('nfc-btn').addEventListener('click', async () => {
     try {
-      const ndef = new window.NDEFReader();
-      await ndef.write({ records: [{ recordType: 'url', data: inviteUrl }] });
-      toast('Hold a phone to the NFC tag to join');
-    } catch (err) {
-      toast('NFC write failed or was cancelled');
+      // Native shell first, then Web NFC in Chrome.
+      if (window.LinkTalkNative?.nfc) {
+        await window.LinkTalkNative.nfc.share(inviteUrl);
+      } else {
+        const ndef = new window.NDEFReader();
+        await ndef.write({ records: [{ recordType: 'url', data: inviteUrl }] });
+      }
+      toast('Hold the two phones back to back');
+    } catch {
+      toast('NFC failed or was cancelled');
+    }
+  });
+} else if (caps.proximity) {
+  $('nfc-btn').textContent = '碰一碰 (iPhone)';
+  $('nfc-btn').addEventListener('click', async () => {
+    try {
+      await window.LinkTalkNative.proximity.advertise(inviteUrl);
+      toast('Hold the iPhones near each other');
+    } catch {
+      toast('Could not start proximity pairing');
     }
   });
 } else {

@@ -25,6 +25,11 @@ export const metrics = {
   },
 
   transcribe: { requests: 0, ok: 0, mock: 0, failures: 0, bytes: 0 },
+
+  // Face-to-face 4-digit pairing. `missed` counts lookups for a PIN that isn't
+  // live — a spike there is what a brute-force attempt looks like.
+  pins: { minted: 0, resolved: 0, missed: 0 },
+
   http: { rateLimited: 0 },
 };
 
@@ -47,6 +52,7 @@ export function snapshotMetrics(extra = {}) {
       cacheHitRate: served ? Number((t.cacheHits / served).toFixed(3)) : null,
     },
     transcribe: { ...metrics.transcribe },
+    pins: { ...metrics.pins },
     http: { ...metrics.http },
   };
 }

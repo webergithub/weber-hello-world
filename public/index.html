@@ -30,19 +30,23 @@
       <p class="hint">Enter the 6-character code from the host (or open their invite link / scan their QR).</p>
       <label for="join-name">Your name</label>
       <input id="join-name" type="text" placeholder="e.g. Alex" autocomplete="name" />
-      <label for="join-code">Room code</label>
-      <input id="join-code" type="text" placeholder="ABC234" maxlength="6"
+      <label for="join-code">4-digit face-to-face code, or 6-character room code</label>
+      <input id="join-code" type="text" inputmode="text" placeholder="1234  or  ABC234" maxlength="6"
              autocapitalize="characters" autocomplete="off" style="letter-spacing:4px;text-transform:uppercase" />
       <button class="btn secondary" id="join-btn">Join room →</button>
+      <button class="btn ghost hidden" id="scan-btn">📷 Scan QR code</button>
     </div>
 
     <details>
       <summary>How does joining face-to-face work?</summary>
       <p class="small">
-        When you create a room, the invite screen offers a <b>Share</b> button. On iPhone that
-        opens the system share sheet including <b>AirDrop</b>; on Android it opens
-        <b>Nearby Share</b>. Android Chrome can also write the invite to an <b>NFC</b> tag so
-        another phone joins by tapping. All of these just carry the same room link.
+        <b>Same phone type</b> — Android ↔ Android can <b>碰一碰 tap</b> over NFC; iPhone ↔ iPhone
+        can tap via AirDrop / proximity in the app.
+      </p>
+      <p class="small">
+        <b>iPhone ↔ Android</b> — use the <b>4-digit face-to-face code</b> the host reads out, or
+        <b>scan the QR</b>. Both work across platforms, with no camera or NFC required for the
+        4-digit path.
       </p>
     </details>
   </div>
@@ -59,6 +63,9 @@
 
   <script type="module">
     import { fillLangSelect } from '/js/langs.js';
+    import { resolveJoinInput, joinError } from '/js/join.js';
+    import { capabilities } from '/js/platform.js';
+    import { scanQr } from '/js/scan.js';
 
     const $ = (id) => document.getElementById(id);
     const toast = (m) => {
@@ -90,20 +97,35 @@
       }
     });
 
-    $('join-btn').addEventListener('click', async () => {
+    // Accepts a 4-digit face-to-face PIN, a 6-character room code, or a
+    // scanned invite URL — resolveJoinInput() sorts out which it is.
+    async function join(input) {
       const name = $('join-name').value.trim() || 'Guest';
-      const code = $('join-code').value.trim().toUpperCase();
-      if (code.length !== 6) return toast('Enter the 6-character room code.');
       persist(name, saved.speakLang || 'en');
-      const r = await fetch(`/api/rooms/${code}`);
-      if (!r.ok) return toast('That room was not found.');
-      location.href = `/room.html?room=${code}`;
+      const res = await resolveJoinInput(input);
+      if (!res.ok) return toast(joinError(res.reason));
+      location.href = `/room.html?room=${res.room}`;
+    }
+
+    $('join-btn').addEventListener('click', () => join($('join-code').value));
+    $('join-code').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') join($('join-code').value);
     });
 
-    // Uppercase the code as it is typed.
+    // Uppercase as typed, but leave digits alone so a PIN stays readable.
     $('join-code').addEventListener('input', (e) => {
       e.target.value = e.target.value.toUpperCase();
     });
+
+    // In-app QR scanning where the platform supports it.
+    if (capabilities().scan) {
+      $('scan-btn').classList.remove('hidden');
+      $('scan-btn').addEventListener('click', async () => {
+        const text = await scanQr().catch(() => null);
+        if (text) join(text);
+        else toast('No QR code detected.');
+      });
+    }
   </script>
 </body>
 </html>

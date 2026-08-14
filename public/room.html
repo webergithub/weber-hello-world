@@ -97,7 +97,19 @@
         <button class="icon-btn" data-close="invite-sheet" aria-label="Close">✕</button>
       </div>
       <div class="sheet-body">
-        <p class="hint">Scan the QR, open the link, or share it face-to-face.</p>
+        <!-- Cross-platform: read these 4 digits out loud. -->
+        <h3>面对面 · Face to face</h3>
+        <p class="hint">Read these 4 digits to the other person — works between iPhone and Android, no camera needed.</p>
+        <div class="pin-box">
+          <div class="pin" id="pin-value">····</div>
+          <div class="pin-meta">
+            <span id="pin-expiry" class="small">…</span>
+            <button class="icon-btn" id="pin-refresh">New code</button>
+          </div>
+        </div>
+
+        <h3 style="margin-top:22px">扫码 · Scan</h3>
+        <p class="hint">Point the other phone's camera at this.</p>
         <div class="qr-wrap">
           <img id="qr-img" alt="Join QR code" />
         </div>
@@ -105,6 +117,9 @@
           <input id="invite-url" type="text" readonly />
           <button class="icon-btn" id="copy-btn">Copy</button>
         </div>
+
+        <h3 style="margin-top:22px">碰一碰 · Tap</h3>
+        <p class="hint" id="tap-hint">Same phone type only.</p>
         <div class="share-grid">
           <button class="btn secondary" id="share-btn">Share (AirDrop / Nearby)</button>
           <button class="btn secondary" id="nfc-btn">Tap to NFC</button>

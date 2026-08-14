@@ -1,0 +1,15 @@
+{
+  "appId": "com.linktalk.app",
+  "appName": "LinkTalk",
+  "webDir": "public",
+  "server": {
+    "androidScheme": "https",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "always"
+  },
+  "android": {
+    "allowMixedContent": false
+  }
+}
