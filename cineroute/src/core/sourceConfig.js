@@ -40,6 +40,28 @@ export const DEFAULT_SITE_SCOPE = [
 ];
 
 /**
+ * 优先来源：先查这些站点上「有没有这部片子」。
+ *
+ * 产出是**证据记录**（地址 + 页面标题 + 发现时间 + 可选截图），
+ * 进线索列表，**不解析播放地址、不进播放/下载通道**。
+ * 用途是侵权调查里的「取证」环节：确认某站上出现了这部作品并留证。
+ *
+ * 预置的两个是无授权影视站，正因如此它们是调查对象——
+ * 记录它们上面有什么，与提供它们上面的东西，是两件事。
+ * 这个列表用户可以自己改。
+ */
+export const DEFAULT_PRIORITY_DOMAINS = ['yifan.tv', 'olevod.com'];
+
+export const DEFAULT_PRIORITY = {
+  enabled: true,
+  domains: DEFAULT_PRIORITY_DOMAINS,
+  limitPerDomain: 10,
+  // 是否给命中的页面截图存证。要开无头浏览器，慢一些。
+  captureScreenshots: false,
+  maxScreenshots: 5,
+};
+
+/**
  * 出厂默认源。
  *
  * builtin  —— 有专用适配器，直接解析出结构化片源
@@ -148,8 +170,9 @@ export function normalizeConfig(raw) {
   const expand = normalizeExpand(raw?.expand);
   const probeLimit = clampInt(raw?.probeLimit, DEFAULT_PROBE_LIMIT, 1, 200);
   const verify = normalizeVerify(raw?.verify);
+  const priority = normalizePriority(raw?.priority);
 
-  return { version: 1, defaults, sources, siteScope, expand, probeLimit, verify };
+  return { version: 1, defaults, priority, sources, siteScope, expand, probeLimit, verify };
 }
 
 const clampInt = (v, fallback, lo, hi) => {
@@ -157,6 +180,36 @@ const clampInt = (v, fallback, lo, hi) => {
   if (!Number.isFinite(n)) return fallback;
   return Math.max(lo, Math.min(hi, Math.round(n)));
 };
+
+/**
+ * 规范化优先来源配置。
+ *
+ * 域名要清洗：用户很可能整条 URL 粘进来（https://x.com/path），
+ * 这里统一剥成裸域名，否则拼出来的 `site:` 条件不成立。
+ */
+export function normalizePriority(raw) {
+  const cleanDomain = (v) => {
+    let d = String(v || '').trim().toLowerCase();
+    if (!d) return null;
+    d = d.replace(/^https?:\/\//, '').replace(/^www\./, '');
+    d = d.split('/')[0].split('?')[0].split('#')[0].split(':')[0];
+    // 至少要长得像个域名，别把随手输入的中文当域名去搜
+    return /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/.test(d) ? d : null;
+  };
+
+  const list = Array.isArray(raw?.domains) ? raw.domains : DEFAULT_PRIORITY_DOMAINS;
+  const seen = new Set();
+  const domains = list.map(cleanDomain).filter((d) => d && !seen.has(d) && seen.add(d)).slice(0, 50);
+
+  return {
+    enabled: raw?.enabled !== false,
+    // 全被清洗掉时不要静默变成空——那样这个模块等于没开
+    domains: domains.length ? domains : [...DEFAULT_PRIORITY_DOMAINS],
+    limitPerDomain: clampInt(raw?.limitPerDomain, DEFAULT_PRIORITY.limitPerDomain, 1, 100),
+    captureScreenshots: raw?.captureScreenshots === true,
+    maxScreenshots: clampInt(raw?.maxScreenshots, DEFAULT_PRIORITY.maxScreenshots, 1, 20),
+  };
+}
 
 /** 规范化深度验证预算。上限卡死，免得一次检索把机器打满。 */
 export function normalizeVerify(raw) {
@@ -190,6 +243,7 @@ export function defaultConfig() {
     expand: DEFAULT_EXPAND,
     probeLimit: DEFAULT_PROBE_LIMIT,
     verify: DEFAULT_VERIFY,
+    priority: DEFAULT_PRIORITY,
   });
 }
 

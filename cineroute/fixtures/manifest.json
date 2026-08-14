@@ -1,5 +1,14 @@
 [
   {
+    "_comment": "优先来源：site:yifan.tv 的查询走这个夹具。必须排在 engine=google 那条之前——那条只看引擎名和片名，会把这个查询也吃掉。",
+    "when": [
+      "serp.fixture",
+      "site:yifan.tv",
+      "Night of the Living Dead"
+    ],
+    "file": "serp-priority-yifan.json"
+  },
+  {
     "_comment": "顺序即优先级：更具体的匹配必须排在更宽泛的前面，否则会被误匹配。引擎结果排最前——引擎的查询串里带着 site:xxx 限定条件，域名子串会误撞下面那些按域名匹配的条目。",
     "when": [
       "serp.fixture",

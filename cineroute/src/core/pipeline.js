@@ -387,7 +387,11 @@ export async function searchAll(rawQuery, opts = {}) {
   const offers = runs.flatMap((r) => r.result?.offers ?? []);
   // 引擎搜到但没有对应解析器的页面：如实列出来，不去猜里面有没有视频。
   // 同一个页面会被多引擎多词反复搜到，按 URL 合并，来路累加成引用。
-  const rawLeads = runs.flatMap((r) => r.result?.leads ?? []);
+  // 优先来源（kind='evidence'）的产出单独成块——它是取证记录，不是待解析的线索
+  const priorityRun = runs.find((r) => r.kind === 'evidence');
+  const priorityHits = priorityRun?.result?.leads ?? [];
+
+  const rawLeads = runs.filter((r) => r.kind !== 'evidence').flatMap((r) => r.result?.leads ?? []);
   const leads = dedupeLeads(rawLeads);
 
   /* ── 第二步：归一去重 ──────────────────────────────────── */
@@ -492,6 +496,14 @@ export async function searchAll(rawQuery, opts = {}) {
   if (rawLeads.length > leads.length) {
     notes.push(`这 ${leads.length} 个页面被重复搜到 ${rawLeads.length} 次，已按 URL 合并（每条下方列出全部来路）`);
   }
+  if (priorityRun && priorityRun.status === 'ok') {
+    const hitDomains = (priorityRun.result?.perDomain ?? []).filter((d) => d.hits > 0);
+    notes.push(hitDomains.length > 0
+      ? `优先来源命中：${hitDomains.map((d) => `${d.domain}（${d.hits} 条）`).join('、')}——仅记录存在性，未解析播放地址`
+      : '优先来源未在配置的站点上发现匹配条目');
+  } else if (priorityRun && priorityRun.status === 'skipped') {
+    notes.push(`优先来源已跳过：${priorityRun.reason}`);
+  }
   if (round2Terms.length > 0) {
     notes.push(`用引擎返回的推荐搜索词补搜了一轮：${round2Terms.map((t) => t.term).join('、')}`);
   }
@@ -501,6 +513,20 @@ export async function searchAll(rawQuery, opts = {}) {
 
   /* 四步走的完整账目。UI 用它渲染四个 tab，也可以直接取 JSON 存证。 */
   const stages = {
+    // 第 0 步：优先来源。排在最前面，因为它先跑、结果先出。
+    priority: {
+      label: '优先来源 · 站点存在性取证',
+      enabled: Boolean(priorityRun),
+      status: priorityRun?.status ?? 'skipped',
+      reason: priorityRun?.reason ?? null,
+      domains: priorityRun?.result?.perDomain ?? [],
+      hits: priorityHits,
+      total: priorityHits.length,
+      elapsedMs: priorityRun?.elapsedMs ?? 0,
+      // 写死在返回值里，UI 直接展示，避免有人误以为这里能拿到播放地址
+      note: '这一步只记录「该站点上出现了匹配条目」并留证，不解析播放地址，'
+        + '结果不会进入播放/下载通道。',
+    },
     discovery: {
       label: '第一步 · 各引擎原始检索结果',
       terms: allTerms,
@@ -579,6 +605,8 @@ export async function searchAll(rawQuery, opts = {}) {
     top: final.top,
     alternatives: final.alternatives.slice(0, 10),
     offers,
+    // 优先来源的取证记录（只证明"出现过"，不含播放地址）
+    priorityHits: priorityHits.slice(0, 50),
     // 引擎发现但无法解析的页面（只给线索，不猜内容）
     leads: leads.slice(0, 30),
     providers: runs.map(({ result, ...rest }) => rest),

@@ -497,3 +497,47 @@ video { width: 100%; border-radius: 10px; background: #000; max-height: 60vh; }
 .dl-seg.ok { background: rgba(63,185,80,.07); }
 .dl-seg.fail { background: rgba(248,81,73,.09); color: #ffa198; }
 .seg-i { color: var(--accent-2); font-weight: 600; }
+
+/* ---------- 优先来源（固定模块） ---------- */
+.priority-panel { border-left: 3px solid var(--warn); }
+.priority-note {
+  margin: 10px 0 0; padding: 10px 12px; line-height: 1.7;
+  background: rgba(210,153,34,.08); border-radius: 8px;
+}
+.priority-note strong { color: var(--text); }
+.priority-panel textarea {
+  width: 100%; resize: vertical; line-height: 1.7;
+  background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+  border-radius: 7px; padding: 8px 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; outline: none;
+}
+.priority-panel textarea:focus { border-color: var(--accent-2); }
+.priority-panel input[type="number"] {
+  width: 72px; text-align: right; background: var(--panel-2); color: var(--text);
+  border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font-size: 13px; outline: none;
+}
+#prioritySave {
+  padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;
+  background: var(--accent); border: 0; border-radius: 8px; color: #1a1205;
+}
+
+.priority-result {
+  margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--line);
+}
+.priority-result h3 { margin: 0 0 6px; font-size: 14px; font-weight: 600; }
+.evidence {
+  background: var(--panel-2); border: 1px solid var(--line);
+  border-left: 3px solid var(--warn); border-radius: 8px;
+  padding: 10px 13px; margin-bottom: 10px;
+}
+.evidence-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.evidence-head a { color: var(--accent-2); text-decoration: none; }
+.evidence-head a:hover { text-decoration: underline; }
+.evidence-shot {
+  width: 100%; max-width: 520px; margin-top: 8px;
+  border: 1px solid var(--line); border-radius: 6px; display: block;
+}
+.evidence-note {
+  margin: 8px 0 0; font-size: 11.5px; color: var(--warn);
+  padding-top: 6px; border-top: 1px dashed var(--line);
+}

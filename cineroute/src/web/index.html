@@ -30,6 +30,39 @@
     受版权保护的作品只给出正版观看渠道，不解析播放地址。
   </p>
 
+  <!-- 固定模块：排在检索来源之前，因为它先跑 -->
+  <section class="panel priority-panel">
+    <div class="sources-head">
+      <h2>📌 优先来源</h2>
+      <span id="prioritySummary" class="sources-summary"></span>
+      <label class="pick"><input id="priorityEnabled" type="checkbox" checked> 启用</label>
+      <button id="priorityToggle" class="toggle" type="button" aria-expanded="false">展开设置</button>
+    </div>
+
+    <p class="field-note priority-note">
+      先查这些站点上<strong>有没有这部片子</strong>，命中就记一条取证记录
+      （地址 + 页面标题 + 发现时间，可选截图）。
+      <strong>只回答「在不在」，不解析播放地址</strong>——结果进线索列表，
+      不进播放/下载通道，也不会被加进媒体白名单。
+    </p>
+
+    <div id="priorityBody" class="sources-body hidden">
+      <p class="field-note">一行一个域名。整条 URL 粘进来也行，会自动剥成域名。</p>
+      <textarea id="priorityDomains" rows="4" spellcheck="false"
+                placeholder="yifan.tv&#10;olevod.com"></textarea>
+
+      <div class="global-row" style="margin-top:12px">
+        <label class="field"><span>每站取前</span>
+          <input id="priorityLimit" type="number" min="1" max="100" value="10"></label>
+        <label class="pick"><input id="priorityShots" type="checkbox"> 给命中页面截图存证</label>
+        <span class="field-note">截图要开无头浏览器，慢一些。</span>
+        <span class="spacer"></span>
+        <button id="prioritySave" type="button">保存并生效</button>
+        <span id="prioritySaveState" class="field-note"></span>
+      </div>
+    </div>
+  </section>
+
   <section class="panel sources">
     <div class="sources-head">
       <h2>🔎 检索来源</h2>
@@ -115,6 +148,12 @@
     </nav>
 
     <section id="panel-discovery" class="panel stage-panel hidden" role="tabpanel">
+      <div id="priorityResult" class="priority-result hidden">
+        <h3>📌 优先来源 · 站点存在性取证</h3>
+        <p id="priorityResultNote" class="slot-note"></p>
+        <div id="priorityHits"></div>
+      </div>
+
       <h2>① 各引擎原始检索结果</h2>
       <p class="slot-note">
         原词 + 近似词 + 引擎返回的推荐搜索词，逐个搜、分引擎列出。

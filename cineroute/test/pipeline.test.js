@@ -264,6 +264,7 @@ async function withFixtureSerp(fn) {
 
 test('关掉的来源不参与检索，勾上的才跑', async () => {
   const config = normalizeConfig({
+    priority: { enabled: false },   // 这条用例只看片源装配，把优先来源隔离掉
     sources: [
       { id: 'internet-archive', type: 'builtin', enabled: true, limit: 8 },
       { id: 'wikimedia-commons', type: 'builtin', enabled: false, limit: 20 },

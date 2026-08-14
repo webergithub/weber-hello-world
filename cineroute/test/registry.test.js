@@ -71,7 +71,7 @@ test('用户显式配置的 Jellyfin 服务器被视为已授权', (t) => {
 test('注册表里每个适配器都申明了必要字段', () => {
   for (const a of ADAPTERS) {
     assert.ok(a.id && a.label, '适配器需有 id 与 label');
-    assert.ok(['direct', 'metadata'].includes(a.kind), `${a.id} 的 kind 非法`);
+    assert.ok(['direct', 'metadata', 'evidence'].includes(a.kind), `${a.id} 的 kind 非法`);
     assert.equal(typeof a.search, 'function', `${a.id} 缺少 search`);
     if (a.requiresConfig) assert.ok(a.configHint, `${a.id} 需说明如何配置`);
   }
@@ -99,6 +99,7 @@ test('缺配置的适配器被标记为不可用并给出配置指引', (t) => {
 
 test('跑哪些源由配置决定，不是代码写死的', () => {
   const only = buildAdapters(normalizeConfig({
+    priority: { enabled: false },
     sources: [
       { id: 'internet-archive', type: 'builtin', enabled: true, limit: 5 },
       { id: 'wikimedia-commons', type: 'builtin', enabled: false, limit: 20 },
@@ -113,6 +114,7 @@ test('跑哪些源由配置决定，不是代码写死的', () => {
 
 test('源没配数量时装配用全局默认值', () => {
   const plan = buildAdapters(normalizeConfig({
+    priority: { enabled: false },
     defaults: { limit: 7 },
     sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true }],
   }));
@@ -121,6 +123,7 @@ test('源没配数量时装配用全局默认值', () => {
 
 test('配置里出现代码里没有的内置源时跳过，不让检索崩掉', () => {
   const plan = buildAdapters(normalizeConfig({
+    priority: { enabled: false },
     sources: [
       { id: 'a-source-that-no-longer-exists', type: 'builtin', enabled: true, limit: 5 },
       { id: 'internet-archive', type: 'builtin', enabled: true, limit: 5 },
@@ -131,6 +134,7 @@ test('配置里出现代码里没有的内置源时跳过，不让检索崩掉',
 
 test('引擎适配器继承全局站点范围，也能被源自己覆盖', () => {
   const plan = buildAdapters(normalizeConfig({
+    priority: { enabled: false },
     siteScope: ['archive.org'],
     sources: [
       { id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 10 },
@@ -154,6 +158,7 @@ test('出厂配置下五个引擎都已勾选，且都是 direct 源', () => {
 
 test('引擎源不扩大媒体白名单（加多少引擎都不放行新域名）', () => {
   const plan = buildAdapters(normalizeConfig({
+    priority: { enabled: false },
     siteScope: ['some-streaming-site.example'],
     sources: [{ id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 10 }],
   }));
@@ -169,4 +174,73 @@ test('内置适配器都统一接受 limit 参数', () => {
   // internet-archive 早先叫 limitItems，别名要还在
   const src = getAdapter('internet-archive');
   assert.ok(src, 'internet-archive 应在出厂配置里');
+});
+
+/* ── 优先来源 ─────────────────────────────────────────────── */
+
+test('优先来源排在装配计划的第一位——「优先」就体现在顺序上', () => {
+  const plan = buildAdapters(defaultConfig());
+  assert.equal(plan[0].adapter.id, 'priority');
+  assert.equal(plan[0].adapter.kind, 'evidence');
+});
+
+test('关掉优先来源就不装配它', () => {
+  const plan = buildAdapters(normalizeConfig({ priority: { enabled: false } }));
+  assert.ok(!plan.some((p) => p.adapter.id === 'priority'));
+});
+
+test('优先来源的产出永远不进播放/下载通道', async () => {
+  const plan = buildAdapters(defaultConfig());
+  const priority = plan[0].adapter;
+
+  // 造一个"命中了"的假检索后端
+  const fetchJson = async () => ({
+    organic: [
+      { link: 'https://yifan.tv/vod/play/12345', title: '某片 在线播放', snippet: '' },
+      { link: 'https://olevod.com/detail/999', title: '某片 全集', snippet: '' },
+    ],
+  });
+  const env = { CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' };
+  const r = await priority.search({ title: '某片', year: null }, { fetchJson, env, limit: 5 });
+
+  // 命中要如实记录
+  assert.ok(r.leads.length > 0, '应记录命中');
+  // 但绝不产出片源——sources 为空是这个模块的硬约束
+  assert.deepEqual(r.sources, [], '优先来源不得产出任何片源');
+
+  // 而且这些域名本来就不在媒体白名单里，就算有人硬塞也进不去
+  for (const l of r.leads) {
+    assert.equal(isAllowedMediaUrl(l.url).ok, false, `${l.url} 不该被放行`);
+  }
+});
+
+test('优先来源只收落在目标域名下的结果，别的站带回来也不算', async () => {
+  const plan = buildAdapters(normalizeConfig({ priority: { domains: ['yifan.tv'] } }));
+  const priority = plan[0].adapter;
+  const fetchJson = async () => ({
+    organic: [
+      { link: 'https://yifan.tv/vod/1', title: 'A', snippet: '' },
+      { link: 'https://sub.yifan.tv/vod/2', title: 'B', snippet: '' },
+      { link: 'https://other-site.example/vod/3', title: 'C', snippet: '' },
+      { link: 'https://yifan.tv.evil.example/x', title: 'D', snippet: '' },
+    ],
+  });
+  const env = { CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' };
+  const r = await priority.search({ title: 'x', year: null }, { fetchJson, env, limit: 10 });
+
+  const hosts = r.leads.map((l) => new URL(l.url).hostname);
+  assert.deepEqual(hosts.sort(), ['sub.yifan.tv', 'yifan.tv'], '只保留该域名及其子域');
+});
+
+test('每条取证记录都带时间戳与来源说明', async () => {
+  const plan = buildAdapters(normalizeConfig({ priority: { domains: ['yifan.tv'] } }));
+  const fetchJson = async () => ({ organic: [{ link: 'https://yifan.tv/a', title: 'T', snippet: 's' }] });
+  const env = { CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' };
+  const r = await plan[0].adapter.search({ title: 'T', year: null }, { fetchJson, env });
+
+  const rec = r.leads[0];
+  assert.equal(rec.kind, 'evidence');
+  assert.equal(rec.domain, 'yifan.tv');
+  assert.ok(Date.parse(rec.observedAt) > 0, '要有可解析的发现时间');
+  assert.match(rec.note, /未解析播放地址/);
 });

@@ -5,9 +5,11 @@
  * （见 core/sourceConfig.js）。加一个新片源 = 写一个导出 `adapter` 的模块并在
  * BUILTIN_ADAPTERS 里登记，无需改动编排、打分、播放、下载任何一环。
  *
- * 两类适配器：
+ * 三类适配器：
  *   kind: 'direct'   —— 产出可直接播放/下载的视频直链（进 Top5 竞争）
  *   kind: 'metadata' —— 产出权威元数据与正版观看渠道（不产出直链）
+ *   kind: 'evidence' —— 只记录「某站点上出现了这部作品」，产出证据线索。
+ *                       **永远不产出片源**，因此也永远不会进播放/下载通道。
  */
 
 import { adapter as internetArchive } from './internetArchive.js';
@@ -15,6 +17,7 @@ import { adapter as wikimediaCommons } from './wikimediaCommons.js';
 import { adapter as tmdb } from './tmdb.js';
 import { adapter as jellyfin } from './jellyfin.js';
 import { createEngineAdapter } from './searchEngine.js';
+import { createPriorityAdapter } from './prioritySource.js';
 import { defaultConfig } from '../core/sourceConfig.js';
 
 /**
@@ -41,6 +44,20 @@ export function getBuiltin(id) {
 export function buildAdapters(config = defaultConfig()) {
   const fallbackLimit = config?.defaults?.limit ?? 100;
   const plan = [];
+
+  // 优先来源排在最前面——「优先」就体现在这里：它先跑，结果先出。
+  // 它的 kind 是 evidence，产出只进线索，不会与片源混在一起。
+  const priority = config?.priority;
+  if (priority?.enabled && priority.domains?.length) {
+    plan.push({
+      adapter: createPriorityAdapter({
+        domains: priority.domains,
+        limitPerDomain: priority.limitPerDomain,
+      }),
+      source: { id: 'priority', type: 'priority', enabled: true },
+      limit: priority.limitPerDomain,
+    });
+  }
 
   for (const s of config?.sources ?? []) {
     if (!s.enabled) continue;

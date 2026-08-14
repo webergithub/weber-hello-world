@@ -710,6 +710,7 @@ function renderStages(data) {
   $('deepStatus').textContent = '点「开始验证」运行。这一步会真的打开浏览器解码，比前几步慢。';
   const s = data.stages;
   if (!s) return;
+  renderPriorityHits(s.priority);
   renderDiscovery(s.discovery);
   renderNormalize(s.normalize);
   renderVerify(s.verify);
@@ -827,6 +828,111 @@ function renderResult(data) {
   renderStages(data);
 
   $('results').classList.remove('hidden');
+}
+
+/* ---------------- 优先来源（固定模块） ---------------- */
+
+function renderPriority() {
+  const pr = SOURCES.config?.priority;
+  if (!pr) return;
+  $('priorityEnabled').checked = pr.enabled !== false;
+  $('priorityDomains').value = (pr.domains || []).join('\n');
+  $('priorityLimit').value = String(pr.limitPerDomain ?? 10);
+  $('priorityShots').checked = Boolean(pr.captureScreenshots);
+
+  const n = (pr.domains || []).length;
+  $('prioritySummary').textContent = pr.enabled === false
+    ? '已关闭'
+    : `${n} 个站点：${(pr.domains || []).join('、')}`;
+}
+
+function readPriorityForm() {
+  return {
+    enabled: $('priorityEnabled').checked,
+    domains: $('priorityDomains').value.split('\n').map((x) => x.trim()).filter(Boolean),
+    limitPerDomain: Number($('priorityLimit').value) || 10,
+    captureScreenshots: $('priorityShots').checked,
+  };
+}
+
+function bindPriorityPanel() {
+  $('priorityToggle').addEventListener('click', (e) => {
+    const body = $('priorityBody');
+    const open = body.classList.toggle('hidden') === false;
+    e.currentTarget.textContent = open ? '收起设置' : '展开设置';
+    e.currentTarget.setAttribute('aria-expanded', String(open));
+  });
+
+  $('priorityEnabled').addEventListener('change', () => {
+    $('prioritySaveState').textContent = '有未保存的改动';
+  });
+  for (const id of ['priorityDomains', 'priorityLimit', 'priorityShots']) {
+    $(id).addEventListener('change', () => { $('prioritySaveState').textContent = '有未保存的改动'; });
+  }
+
+  $('prioritySave').addEventListener('click', async () => {
+    const state = $('prioritySaveState');
+    state.textContent = '保存中…';
+    try {
+      SOURCES.config.priority = readPriorityForm();
+      const res = await fetch('/api/sources', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ config: SOURCES.config }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+      SOURCES = { config: data.config, catalog: data.catalog };
+      renderPriority();
+      renderSources();
+      state.textContent = data.warning || '已保存，下次检索按新配置跑';
+    } catch (err) {
+      state.textContent = `保存失败：${err.message}`;
+    }
+  });
+}
+
+/** 检索结果里的优先来源命中。这里是取证记录，不给播放/下载按钮。 */
+function renderPriorityHits(stage) {
+  const box = $('priorityResult');
+  const list = $('priorityHits');
+  list.replaceChildren();
+
+  if (!stage || !stage.enabled) { box.classList.add('hidden'); return; }
+  box.classList.remove('hidden');
+
+  const domains = stage.domains || [];
+  $('priorityResultNote').textContent = stage.status === 'ok'
+    ? `${domains.map((d) => `${d.domain} ${d.hits} 条`).join(' · ')}｜${stage.note}`
+    : `${stage.status === 'skipped' ? '已跳过' : '出错'}：${stage.reason || ''}`;
+
+  if (stage.status !== 'ok') return;
+  if ((stage.hits || []).length === 0) {
+    list.append(el('p', { class: 'field-note' }, '配置的站点上未发现匹配条目。'));
+    return;
+  }
+
+  for (const h of stage.hits) {
+    list.append(el('div', { class: 'evidence' },
+      el('div', { class: 'evidence-head' },
+        el('span', { class: 'chip tiny warn' }, h.domain),
+        el('a', { href: h.url, target: '_blank', rel: 'noopener noreferrer' }, h.title || h.url),
+        el('span', { class: 'spacer' }),
+        h.similarity != null
+          ? el('span', { class: 'chip tiny' }, `标题相似度 ${(h.similarity * 100).toFixed(0)}%`)
+          : null,
+      ),
+      el('p', { class: 'lead-url' }, h.url),
+      h.snippet ? el('p', { class: 'lead-note' }, h.snippet) : null,
+      el('p', { class: 'lead-note' },
+        `发现时间 ${h.observedAt}`
+        + (h.term ? ` · 检索词「${h.term}」` : '')
+        + (h.rank != null ? ` · 第 ${h.rank} 条` : '')),
+      h.screenshot ? img({ class: 'evidence-shot', src: h.screenshot, alt: '页面截图存证' }) : null,
+      h.screenshotError ? el('p', { class: 'lead-note' }, `截图失败：${h.screenshotError}`) : null,
+      el('p', { class: 'evidence-note' }, h.note),
+    ));
+  }
 }
 
 /* ---------------- 检索来源配置 ---------------- */
@@ -1074,9 +1180,11 @@ $('batchDownload').addEventListener('click', () => {
 
   bindTabs();
   $('deepRun').addEventListener('click', runDeepVerify);
+  bindPriorityPanel();
   bindSourcePanel();
   try {
     SOURCES = await (await fetch('/api/sources')).json();
+    renderPriority();
     renderSources();
   } catch {
     $('sourceSummary').textContent = '来源配置读取失败，本次按出厂默认检索';
