@@ -50,17 +50,35 @@ export const DEFAULT_SOURCES = [
   { id: 'wikimedia-commons', type: 'builtin', enabled: true, limit: 20 },
   { id: 'jellyfin', type: 'builtin', enabled: true, limit: 20 },
   { id: 'tmdb', type: 'builtin', enabled: true, limit: 1 },
-  // 四个引擎默认都勾上，数量各自可调
+  // 五大引擎默认都勾上，数量各自可调
   { id: 'engine:google', type: 'engine', engine: 'google', enabled: true, limit: 100 },
-  { id: 'engine:baidu', type: 'engine', engine: 'baidu', enabled: true, limit: 100 },
   { id: 'engine:bing', type: 'engine', engine: 'bing', enabled: true, limit: 100 },
+  { id: 'engine:baidu', type: 'engine', engine: 'baidu', enabled: true, limit: 100 },
+  { id: 'engine:yandex', type: 'engine', engine: 'yandex', enabled: true, limit: 100 },
   { id: 'engine:duckduckgo', type: 'engine', engine: 'duckduckgo', enabled: true, limit: 100 },
 ];
 
 /** 各引擎单次请求能返回的上限，用来提示用户"要翻几页"。 */
 export const ENGINE_PAGE_SIZE = {
-  google: 10, bing: 50, duckduckgo: 10, baidu: 10,
+  google: 10, bing: 50, baidu: 10, yandex: 10, duckduckgo: 10,
 };
+
+/**
+ * 检索词扩展的默认预算。
+ *
+ * 每多一个词，请求数就多「引擎数 × 页数」一份，SERP 服务按次计费，
+ * 所以这几个数字直接决定一次检索的成本。默认值算下来是
+ * 4 词 × 5 引擎 + 3 推荐词 × 5 引擎 = 35 组翻页请求。
+ */
+export const DEFAULT_EXPAND = {
+  maxVariants: 4,      // 近似词上限（含原词）
+  maxTerms: 4,         // 第一轮实际用几个词
+  useSuggested: true,  // 是否用引擎返回的推荐搜索词补搜第二轮
+  maxSuggested: 3,     // 第二轮用几个推荐词
+};
+
+/** 第三步嗅探甄别的条数上限。调研取证场景默认给得比展示场景大。 */
+export const DEFAULT_PROBE_LIMIT = 24;
 
 const clampLimit = (v, fallback) => {
   const n = Number(v);
@@ -110,7 +128,26 @@ export function normalizeConfig(raw) {
     ? raw.siteScope.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 500)
     : [...DEFAULT_SITE_SCOPE];
 
-  return { version: 1, defaults, sources, siteScope };
+  const expand = normalizeExpand(raw?.expand);
+  const probeLimit = clampInt(raw?.probeLimit, DEFAULT_PROBE_LIMIT, 1, 200);
+
+  return { version: 1, defaults, sources, siteScope, expand, probeLimit };
+}
+
+const clampInt = (v, fallback, lo, hi) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(lo, Math.min(hi, Math.round(n)));
+};
+
+/** 规范化词扩展预算，把上限卡死——这几个数字直接决定 SERP 花多少钱。 */
+export function normalizeExpand(raw) {
+  return {
+    maxVariants: clampInt(raw?.maxVariants, DEFAULT_EXPAND.maxVariants, 1, 10),
+    maxTerms: clampInt(raw?.maxTerms, DEFAULT_EXPAND.maxTerms, 1, 10),
+    useSuggested: raw?.useSuggested !== false,
+    maxSuggested: clampInt(raw?.maxSuggested, DEFAULT_EXPAND.maxSuggested, 0, 10),
+  };
 }
 
 /** 出厂配置。 */
@@ -119,6 +156,8 @@ export function defaultConfig() {
     defaults: { limit: DEFAULT_LIMIT },
     sources: DEFAULT_SOURCES,
     siteScope: DEFAULT_SITE_SCOPE,
+    expand: DEFAULT_EXPAND,
+    probeLimit: DEFAULT_PROBE_LIMIT,
   });
 }
 

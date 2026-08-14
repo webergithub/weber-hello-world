@@ -1,5 +1,5 @@
 /**
- * 搜索引擎适配器（Google / 百度 / Bing / DuckDuckGo，可自己加）。
+ * 搜索引擎适配器（Google / Bing / 百度 / Yandex / DuckDuckGo，可自己加）。
  *
  * 分工很明确：**引擎只负责"发现页面"，把页面变成播放直链交给结构化解析器。**
  * 不去爬任意页面翻 <video> 标签——那条路第一，技术上早就不成立（现在的视频
@@ -10,13 +10,14 @@
  * 搜到的页面里，域名能对上解析器的（archive.org 详情页、Commons 文件页）
  * 会被解析成真实片源；对不上的作为"发现的页面"列出来，不猜也不编。
  *
- * 四个引擎都没有能直接用的免费官方 API：Google 的 Web Search API 早已停用，
- * Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度的不对外。
+ * 这几家都没有能直接用的免费官方 API：Google 的 Web Search API 早已停用，
+ * Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Yandex 的不对外。
  * 所以这里做成可插拔的 SERP 后端，需要配 key；没配就如实报告"未配置"。
  */
 
 import { httpJson, settleAll } from '../core/http.js';
 import { titleSimilarity } from '../core/match.js';
+import { harvestRelated } from '../core/expand.js';
 import { extractSourcesFromMetadata } from './internetArchive.js';
 
 /* ───────────────────── SERP 后端 ───────────────────── */
@@ -35,18 +36,18 @@ function serpSettings(env = process.env) {
 /**
  * 每个引擎单次请求能拿多少条，用来算要翻几页。
  */
-const PAGE_SIZE = { google: 10, bing: 50, duckduckgo: 10, baidu: 10 };
+const PAGE_SIZE = { google: 10, bing: 50, baidu: 10, yandex: 10, duckduckgo: 10 };
 
 /**
  * 调 SERP 服务，返回规范化的结果列表。
  *
- * @param {string} engine 'google' | 'baidu' | 'bing' | 'duckduckgo' | 自定义
+ * @param {string} engine 'google' | 'bing' | 'baidu' | 'yandex' | 'duckduckgo' | 自定义
  * @param {string} q 已经拼好 site: 过滤条件的查询串
  * @param {{limit?: number, signal?: AbortSignal, fetchJson?: Function, env?: object}} [opts]
  * @returns {Promise<Array<{url:string,title:string,snippet:string,rank:number}>>}
  */
 export async function serpSearch(engine, q, opts = {}) {
-  const { limit = 100, signal, fetchJson = httpJson, env = process.env } = opts;
+  const { limit = 100, signal, fetchJson = httpJson, env = process.env, onRelated } = opts;
   const { provider, key, urlTemplate } = serpSettings(env);
 
   if (!provider) throw new Error('未配置 CINEROUTE_SERP_PROVIDER');
@@ -64,6 +65,10 @@ export async function serpSearch(engine, q, opts = {}) {
       // 前几页已经有结果就别因为后面某页失败而全丢
       if (out.length > 0) break;
       throw err;
+    }
+    // 推荐搜索词只在第一页有，顺手捞走给第二轮用
+    if (page === 1 && typeof onRelated === 'function') {
+      onRelated(harvestRelated(provider, data));
     }
     const items = normalizeSerp(provider, data);
     if (items.length === 0) break;                            // 没有更多结果
@@ -135,7 +140,7 @@ const COMMONS_FILE = /^https?:\/\/commons\.wikimedia\.org\/wiki\/(File|文件):(
  * @returns {Promise<{sources: object[], leads: object[]}>}
  */
 export async function resolveResults(results, query, opts = {}) {
-  const { fetchJson = httpJson, signal, engineId } = opts;
+  const { fetchJson = httpJson, signal, engineId, engineLabel } = opts;
   const sources = [];
   const leads = [];
 
@@ -161,7 +166,7 @@ export async function resolveResults(results, query, opts = {}) {
     if (extracted.length === 0) { leads.push(toLead(r, engineId, '该条目没有视频文件')); return; }
     const similarity = titleSimilarity(query.title, meta.metadata?.title || r.title || id);
     for (const s of extracted) {
-      sources.push({ ...s, similarity, discoveredBy: engineId, discoveredRank: r.rank });
+      sources.push({ ...s, similarity, ...citation(r, engineId, engineLabel) });
     }
   });
 
@@ -197,8 +202,7 @@ export async function resolveResults(results, query, opts = {}) {
           checksums: { md5: null, sha1: info.sha1 || null },
           similarity: titleSimilarity(query.title, name),
           rangeSupported: null, reachable: null,
-          discoveredBy: engineId,
-          discoveredRank: lead?.r.rank ?? null,
+          ...(lead ? citation(lead.r, engineId, engineLabel) : { discoveredBy: engineId, discoveredByLabel: engineLabel }),
         });
       }
     } catch {
@@ -212,10 +216,32 @@ export async function resolveResults(results, query, opts = {}) {
   return { sources, leads };
 }
 
+/**
+ * 溯源信息。取证要能回答「这个地址是怎么来的」——
+ * 哪个引擎、用哪个检索词、在结果里排第几、落地页是哪个。
+ * 这几个字段会一路带到最终结果，第三个 tab 的「引用」就是它们。
+ */
+function citation(r, engineId, engineLabel) {
+  return {
+    discoveredBy: engineId,
+    // 「谁发现的」的显示名。注意与片源自带的 providerLabel 区分：
+    // 后者是文件托管在哪（Internet Archive），前者是哪个引擎搜到的。
+    // 取证要的是后者，混用会让所有引用看起来都来自同一个源。
+    discoveredByLabel: engineLabel || engineId,
+    discoveredRank: r.rank ?? null,
+    discoveredTerm: r.term ?? null,
+    discoveredTermKind: r.termKind ?? null,
+    // 引擎搜到的那个页面地址（不是最终的视频直链）
+    discoveredVia: r.url ?? null,
+    discoveredTitle: r.title ?? null,
+  };
+}
+
 function toLead(r, engineId, reason) {
   return {
     url: r.url, title: r.title, snippet: r.snippet,
-    rank: r.rank, discoveredBy: engineId, reason,
+    rank: r.rank, term: r.term ?? null, termKind: r.termKind ?? null,
+    discoveredBy: engineId, reason,
   };
 }
 
@@ -230,7 +256,7 @@ export function buildScopedQuery(title, siteScope) {
 
 /** 引擎显示名。用户自己加的引擎不在表里，就首字母大写兜底。 */
 export const ENGINE_LABELS = {
-  google: 'Google', baidu: '百度', bing: 'Bing', duckduckgo: 'DuckDuckGo',
+  google: 'Google', bing: 'Bing', baidu: '百度', yandex: 'Yandex', duckduckgo: 'DuckDuckGo',
 };
 
 /**
@@ -272,25 +298,73 @@ export function createEngineAdapter(spec) {
       return { available: true, reason: null };
     },
 
+    /**
+     * 按给定的检索词逐个搜，保留「哪个词搜出哪条结果」的原始账目。
+     *
+     * `opts.terms` 是调用方（管线）算好的词表，包含原词、近似词、推荐词。
+     * 不传就退化成只搜片名——保证单独调用适配器时行为不变。
+     */
     async search(query, opts = {}) {
       const limit = opts.limit ?? 100;
       const scope = spec.siteScope || opts.siteScope || [];
-      const q = buildScopedQuery(query.title, scope);
+      const terms = opts.terms?.length
+        ? opts.terms
+        : [{ term: query.title, kind: 'original', why: '原始输入' }];
 
-      let results;
-      try {
-        results = await serpSearch(engine, q, { ...opts, limit });
-      } catch (err) {
-        return { provider: spec.id, items: [], sources: [], leads: [], error: String(err.message || err) };
+      // 多个词共用一个总配额，别让词数把请求数乘爆
+      const perTerm = Math.max(1, Math.floor(limit / terms.length));
+      const related = [];
+      const rounds = [];
+      const allResults = [];
+      let firstError = null;
+
+      for (const t of terms) {
+        const q = buildScopedQuery(t.term, scope);
+        let results;
+        try {
+          results = await serpSearch(engine, q, {
+            ...opts,
+            limit: perTerm,
+            onRelated: (r) => related.push(...r),
+          });
+        } catch (err) {
+          firstError ??= String(err.message || err);
+          rounds.push({ ...t, query: q, returned: 0, error: firstError, results: [] });
+          continue;
+        }
+        // 标注来源：这条是哪个引擎、用哪个词、第几名搜到的——取证时要能倒查
+        const tagged = results.map((r) => ({
+          ...r, engine: spec.id, term: t.term, termKind: t.kind,
+        }));
+        rounds.push({ ...t, query: q, returned: tagged.length, error: null, results: tagged });
+        allResults.push(...tagged);
       }
 
-      const { sources, leads } = await resolveResults(results, query, { ...opts, engineId: spec.id });
+      // 一个词都没搜成才算整体失败；部分失败保留已有结果
+      if (allResults.length === 0 && firstError) {
+        return {
+          provider: spec.id, items: [], sources: [], leads: [],
+          error: firstError, rounds, related: [],
+        };
+      }
+
+      const { sources, leads } = await resolveResults(allResults, query, { ...opts, engineId: spec.id, engineLabel: label });
       return {
         provider: spec.id,
         items: [],
         sources,
         leads,
-        stats: { returned: results.length, resolved: sources.length, unresolved: leads.length, limit },
+        // 第一步原始账目：逐词的搜索结果，未去重、未筛选
+        rounds,
+        related,
+        stats: {
+          terms: terms.length,
+          returned: allResults.length,
+          resolved: sources.length,
+          unresolved: leads.length,
+          limit,
+          perTerm,
+        },
       };
     },
   };

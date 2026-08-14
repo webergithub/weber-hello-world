@@ -16,9 +16,9 @@ import {
   limitFor, enabledSources, DEFAULT_LIMIT, DEFAULT_SOURCES, DEFAULT_SITE_SCOPE,
 } from '../src/core/sourceConfig.js';
 
-test('出厂默认：四个引擎都在且都已勾选，各取前 100 条', () => {
+test('出厂默认：五个引擎都在且都已勾选，各取前 100 条', () => {
   const cfg = defaultConfig();
-  for (const engine of ['google', 'baidu', 'bing', 'duckduckgo']) {
+  for (const engine of ['google', 'bing', 'baidu', 'yandex', 'duckduckgo']) {
     const s = cfg.sources.find((x) => x.id === `engine:${engine}`);
     assert.ok(s, `默认应包含 ${engine}`);
     assert.equal(s.enabled, true, `${engine} 默认应勾选`);

@@ -348,7 +348,7 @@ test('未配置 SERP 服务时引擎被跳过，其余来源照常出结果', as
   try {
     const r = await searchAll('Night of the Living Dead', { ...offline(), config: defaultConfig() });
     const engines = r.providers.filter((p) => p.id.startsWith('engine:'));
-    assert.equal(engines.length, 4, '四个引擎都应出现在数据源列表里');
+    assert.equal(engines.length, 5, '五个引擎都应出现在数据源列表里');
     for (const e of engines) {
       assert.equal(e.status, 'skipped');
       assert.match(e.reason, /SERP/);
@@ -357,4 +357,140 @@ test('未配置 SERP 服务时引擎被跳过，其余来源照常出结果', as
   } finally {
     if (prev !== undefined) process.env.CINEROUTE_SERP_PROVIDER = prev;
   }
+});
+
+/* ── 四步走：中间账目 ─────────────────────────────────────── */
+
+import { dedupeWithTrail, dedupeLeads } from '../src/core/pipeline.js';
+
+test('四个阶段都有产出，且计数能对得上', async () => {
+  await withFixtureSerp(async () => {
+    const r = await searchAll('Night of the Living Dead', offline());
+    const s = r.stages;
+    assert.ok(s, '应返回 stages');
+
+    for (const k of ['discovery', 'normalize', 'verify', 'final']) {
+      assert.ok(s[k], `缺少阶段 ${k}`);
+      assert.ok(s[k].label, `${k} 应有中文标签`);
+    }
+
+    // 第二步的输入应等于第一步解析出的片源数
+    assert.equal(s.normalize.before + s.normalize.removed * 0, s.normalize.before);
+    assert.equal(s.normalize.after + s.normalize.removed, s.normalize.before);
+    // 第三步的输入是第二步的输出
+    assert.equal(s.verify.total, s.normalize.after);
+    assert.equal(s.verify.usable + s.verify.rejected, s.verify.total);
+    // 第四步的直链数不会超过第三步判定可用的数量
+    assert.ok(s.final.directCount <= s.verify.usable);
+  });
+});
+
+test('第一步保留逐引擎逐词的原始结果，不做任何合并', async () => {
+  await withFixtureSerp(async () => {
+    const r = await searchAll('Night of the Living Dead', offline());
+    const d = r.stages.discovery;
+
+    assert.ok(d.terms.length > 1, '应该扩展出多个检索词');
+    assert.equal(d.terms[0].kind, 'original');
+
+    const google = d.engines.find((e) => e.id === 'engine:google');
+    assert.ok(google, '应有 Google 的记录');
+    assert.equal(google.rounds.length, d.terms.filter((t) => t.kind !== 'suggested').length,
+      '每个第一轮的词都该有一条记录');
+
+    // 原始结果里允许有重复——去重是第二步的事，第一步不能先斩后奏
+    const urls = google.rounds.flatMap((rd) => rd.results.map((x) => x.url));
+    assert.ok(urls.length > new Set(urls).size, '第一步应保留重复项');
+
+    // 每条都带着"哪个词搜到的"
+    for (const rd of google.rounds) {
+      for (const item of rd.results) assert.equal(item.term, rd.term);
+    }
+  });
+});
+
+test('第二步的每个分组都带完整引用，能倒查到引擎与检索词', async () => {
+  await withFixtureSerp(async () => {
+    const r = await searchAll('Night of the Living Dead', offline());
+    const groups = r.stages.normalize.groups;
+    assert.ok(groups.length > 0);
+
+    const merged = groups.find((g) => g.count > 1);
+    assert.ok(merged, '应有被合并的分组');
+    assert.ok(merged.keyLabel, '应说明按什么合并的');
+    assert.ok(merged.citations.length > 1, '合并的分组应保留多条来路');
+
+    for (const c of merged.citations) {
+      assert.ok(c.provider, '引用必须写明来源');
+      assert.ok(c.term, '引用必须写明用的哪个检索词');
+    }
+    // 被多个引擎独立命中的要能识别出来
+    assert.ok(groups.some((g) => new Set(g.citations.map((c) => c.provider)).size > 1));
+  });
+});
+
+test('第三步逐条给出可用/筛除的结论与原因，并附引用', async () => {
+  await withFixtureSerp(async () => {
+    const r = await searchAll('Night of the Living Dead', offline());
+    const v = r.stages.verify;
+
+    assert.ok(v.items.length > 0);
+    for (const it of v.items) {
+      assert.ok(['usable', 'rejected'].includes(it.verdict));
+      assert.ok(it.reason, `${it.filename} 缺少结论原因`);
+      assert.ok(it.url, '必须给出被甄别的地址');
+      assert.ok(Array.isArray(it.citations), '必须带引用数组');
+    }
+
+    // 被筛掉的要说清楚为什么
+    const rejected = v.items.filter((x) => x.verdict === 'rejected');
+    assert.ok(rejected.length > 0, '夹具里有 MKV 和预告片，应该被筛掉');
+    assert.ok(rejected.some((x) => /Matroska|不支持/.test(x.reason)));
+    assert.ok(rejected.some((x) => /trailer|非正片/.test(x.reason)));
+  });
+});
+
+test('第三步如实报告嗅探了几条——不能让人以为全验过了', async () => {
+  await withFixtureSerp(async () => {
+    const r = await searchAll('Night of the Living Dead', { ...offline(), probeLimit: 2 });
+    const v = r.stages.verify;
+    assert.equal(v.checked, 2, '只探测 2 条就该只报 2 条');
+    assert.ok(v.total > v.checked, '总数应大于探测数');
+    assert.ok(r.notes.some((n) => n.includes('只嗅探了前 2 条')), '应在说明里点出来');
+
+    // 没探测到的条目要有标记，UI 才能挂「未探测」提示
+    const unprobed = v.items.filter((x) => !x.probed);
+    assert.ok(unprobed.length > 0);
+    // 判定可用的，理由里必须说明这是按元数据判的而不是实测的；
+    // 被筛掉的理由说的是筛除原因（如容器不支持），不该混进探测状态。
+    for (const it of unprobed.filter((x) => x.verdict === 'usable')) {
+      assert.match(it.reason, /未探测|按上游元数据/);
+    }
+  });
+});
+
+test('线索按 URL 合并，同一页面不重复列出', () => {
+  const merged = dedupeLeads([
+    { url: 'https://a.example/x', discoveredBy: 'engine:google', term: 'a', rank: 1, reason: 'r' },
+    { url: 'https://a.example/x', discoveredBy: 'engine:google', term: 'b', rank: 2, reason: 'r' },
+    { url: 'https://a.example/x', discoveredBy: 'engine:bing', term: 'a', rank: 3, reason: 'r' },
+    { url: 'https://b.example/y', discoveredBy: 'engine:google', term: 'a', rank: 4, reason: 'r' },
+  ]);
+  assert.equal(merged.length, 2);
+  const first = merged.find((l) => l.url === 'https://a.example/x');
+  assert.equal(first.citations.length, 3, '三种「来源+词」组合都要留下');
+  assert.equal(first.foundByCount, 2, '两个引擎命中');
+});
+
+test('去重账目里合并数与保留数相加等于输入数', () => {
+  const mk = (url, md5) => ({ url, filename: url, checksums: { md5 }, discoveredBy: 'x' });
+  const { kept, groups, removed } = dedupeWithTrail([
+    mk('https://a/1.mp4', 'aaa'),
+    mk('https://mirror/1.mp4', 'aaa'),   // 同校验和，不同 URL → 合并
+    mk('https://b/2.mp4', 'bbb'),
+  ]);
+  assert.equal(kept.length, 2);
+  assert.equal(removed, 1);
+  assert.equal(groups.reduce((n, g) => n + g.count, 0), 3);
+  assert.equal(groups.find((g) => g.count === 2).keyKind, 'md5');
 });

@@ -13,6 +13,44 @@ import { rankSources, estimateReferenceRuntime, computeMaxDuration } from './sco
 import { probeAll } from './probe.js';
 import { buildAdapters, adapterAvailability } from '../adapters/registry.js';
 import { defaultConfig } from './sourceConfig.js';
+import { planFirstRound, planSecondRound } from './expand.js';
+
+/**
+ * 把两轮的适配器结果按源合并。
+ *
+ * 第二轮只跑引擎源，所以它的记录要并回第一轮对应的那条上，
+ * 而不是让同一个引擎在数据源列表里出现两次。
+ */
+function mergeRuns(runs1, runs2) {
+  if (runs2.length === 0) return runs1;
+  const byId = new Map(runs2.map((r) => [r.id, r]));
+  return runs1.map((r) => {
+    const extra = byId.get(r.id);
+    if (!extra) return r;
+    return {
+      ...r,
+      status: r.status === 'ok' || extra.status === 'ok' ? 'ok' : r.status,
+      count: (r.count ?? 0) + (extra.count ?? 0),
+      elapsedMs: (r.elapsedMs ?? 0) + (extra.elapsedMs ?? 0),
+      stats: r.stats && extra.stats
+        ? {
+            ...r.stats,
+            terms: (r.stats.terms ?? 0) + (extra.stats.terms ?? 0),
+            returned: (r.stats.returned ?? 0) + (extra.stats.returned ?? 0),
+            resolved: (r.stats.resolved ?? 0) + (extra.stats.resolved ?? 0),
+            unresolved: (r.stats.unresolved ?? 0) + (extra.stats.unresolved ?? 0),
+          }
+        : (r.stats ?? extra.stats),
+      result: {
+        ...(r.result ?? {}),
+        sources: [...(r.result?.sources ?? []), ...(extra.result?.sources ?? [])],
+        leads: [...(r.result?.leads ?? []), ...(extra.result?.leads ?? [])],
+        rounds: [...(r.result?.rounds ?? []), ...(extra.result?.rounds ?? [])],
+        related: [...(r.result?.related ?? []), ...(extra.result?.related ?? [])],
+      },
+    };
+  });
+}
 
 /**
  * 给单个适配器套超时与错误隔离，返回统一的状态记录。
@@ -57,24 +95,140 @@ async function runAdapter({ adapter, limit }, query, opts) {
  * @param {object[]} sources
  */
 export function dedupeSources(sources) {
-  const seen = new Map();
-  for (const s of sources) {
-    const key = s.checksums?.md5
-      ? `md5:${s.checksums.md5}`
-      : s.checksums?.sha1
-        ? `sha1:${s.checksums.sha1}`
-        : `url:${s.url}`;
-    const prev = seen.get(key);
-    if (!prev) {
-      seen.set(key, s);
+  return dedupeWithTrail(sources).kept;
+}
+
+/**
+ * 线索去重。
+ *
+ * 同一个页面会被多个引擎、多个检索词反复搜到，不合并的话列表里同一条
+ * 会出现七八遍——看着像搜到很多，其实是同一个东西。按 URL 合并，
+ * 把「谁用什么词搜到的」累加成引用列表，这才是调研要的信息。
+ *
+ * @param {object[]} leads
+ */
+export function dedupeLeads(leads) {
+  const byUrl = new Map();
+  for (const l of leads) {
+    const g = byUrl.get(l.url);
+    const cite = {
+      provider: l.discoveredBy,
+      term: l.term ?? null,
+      termKind: l.termKind ?? null,
+      rank: l.rank ?? null,
+      via: l.url,
+    };
+    if (!g) {
+      byUrl.set(l.url, { ...l, citations: [cite], foundByCount: 1 });
       continue;
     }
-    // 保留信息更全的那条（有分辨率/时长/体积的优先）。
-    const richness = (x) => (x.height ? 1 : 0) + (x.durationSec ? 1 : 0) + (x.bytes ? 1 : 0);
-    if (richness(s) > richness(prev)) seen.set(key, { ...s, mirrors: (prev.mirrors || 0) + 1 });
-    else seen.set(key, { ...prev, mirrors: (prev.mirrors || 0) + 1 });
+    const dup = g.citations.some((c) => c.provider === cite.provider && c.term === cite.term);
+    if (!dup) g.citations.push(cite);
+    g.foundByCount = new Set(g.citations.map((c) => c.provider)).size;
   }
-  return [...seen.values()];
+  return [...byUrl.values()];
+}
+
+/** 通过甄别的片源，一句话说明它凭什么算「可用」。 */
+function playableReason(s) {
+  const bits = [];
+  if (s.probeOutcome === 'ok' || s.reachable === true) bits.push('地址可达');
+  else if (s.probed) bits.push('探测未得到明确结论，按上游元数据判定');
+  else bits.push('未探测（超出本次探测配额），按上游元数据判定');
+  if (s.container) bits.push(`${s.container.toUpperCase()} 浏览器可直接播放`);
+  if (s.rangeSupported === true) bits.push('支持 Range，可拖动与断点续传');
+  if (s.checksums?.md5 || s.checksums?.sha1) bits.push('上游提供校验和，可核对完整性');
+  return bits.join('；');
+}
+
+/** 单条片源的溯源记录：这条是谁、用什么词、在第几名搜到的。 */
+function citationOf(s) {
+  return {
+    // provider/providerLabel = **谁发现的**（引擎或专用源）
+    provider: s.discoveredBy || s.provider,
+    providerLabel: s.discoveredByLabel || s.providerLabel || null,
+    // host = 文件**托管在哪**。两者不是一回事：Google 搜到一个
+    // 托管在 archive.org 的文件，发现者是 Google，托管方是 Internet Archive。
+    host: s.provider || null,
+    hostLabel: s.providerLabel || null,
+    term: s.discoveredTerm ?? null,
+    termKind: s.discoveredTermKind ?? null,
+    rank: s.discoveredRank ?? null,
+    via: s.discoveredVia ?? s.pageUrl ?? null,
+    viaTitle: s.discoveredTitle ?? null,
+    url: s.url,
+  };
+}
+
+/**
+ * 去重，并留下合并账目。
+ *
+ * 与 dedupeSources 的区别只在返回值：这里额外给出每个分组合并了哪些来源，
+ * 供「第二步」页面展示——调研时需要看到"这条被三个引擎同时搜到"这个事实，
+ * 光给去重后的结果等于把证据链掐断了。
+ *
+ * 合并时**溯源记录是累加的**：同一个文件被 Google 和百度分别搜到，
+ * 两条来路都要保留，否则只剩一条会让人误以为只有一个引擎命中。
+ *
+ * @param {object[]} sources
+ * @returns {{kept: object[], groups: object[], removed: number}}
+ */
+export function dedupeWithTrail(sources) {
+  const richness = (x) => (x.height ? 1 : 0) + (x.durationSec ? 1 : 0) + (x.bytes ? 1 : 0);
+  /** @type {Map<string, {key:string, keyKind:string, best:object, members:object[]}>} */
+  const groups = new Map();
+
+  for (const s of sources) {
+    const [keyKind, key] = s.checksums?.md5
+      ? ['md5', `md5:${s.checksums.md5}`]
+      : s.checksums?.sha1
+        ? ['sha1', `sha1:${s.checksums.sha1}`]
+        : ['url', `url:${s.url}`];
+
+    const g = groups.get(key);
+    if (!g) {
+      groups.set(key, { key, keyKind, best: s, members: [s] });
+      continue;
+    }
+    g.members.push(s);
+    // 保留信息更全的那条（有分辨率/时长/体积的优先）
+    if (richness(s) > richness(g.best)) g.best = s;
+  }
+
+  const kept = [];
+  const trail = [];
+  for (const g of groups.values()) {
+    const citations = g.members.map(citationOf);
+    // 同一个源同一个词重复上报的没有信息量，按 provider+term+url 去个重
+    const seenCite = new Set();
+    const uniqueCitations = citations.filter((c) => {
+      const k = `${c.provider}|${c.term}|${c.via}`;
+      if (seenCite.has(k)) return false;
+      seenCite.add(k);
+      return true;
+    });
+
+    kept.push({
+      ...g.best,
+      mirrors: g.members.length - 1,
+      citations: uniqueCitations,
+      // 有几个不同的来源报了这条——被多个引擎独立命中是可信度信号
+      foundByCount: new Set(uniqueCitations.map((c) => c.provider)).size,
+    });
+
+    trail.push({
+      key: g.key,
+      keyKind: g.keyKind,
+      keyLabel: { md5: '按 md5 校验和合并', sha1: '按 sha1 校验和合并', url: '按 URL 合并' }[g.keyKind],
+      url: g.best.url,
+      filename: g.best.filename || g.best.title || g.best.url,
+      count: g.members.length,
+      merged: g.members.length - 1,
+      citations: uniqueCitations,
+    });
+  }
+
+  return { kept, groups: trail, removed: sources.length - kept.length };
 }
 
 /**
@@ -149,39 +303,95 @@ export function buildRecommendations(playable, offers, opts = {}) {
  * 跑哪些源、每个源取多少条，全部来自 `opts.config`（配置驱动，不写死）。
  * 不传就用出厂配置。
  *
+ * 检索分四步走，每一步的中间结果都完整保留在返回值的 `stages` 里：
+ *   ① discovery —— 各引擎按原词/近似词/推荐词搜到的**原始**结果，分引擎分词呈现
+ *   ② normalize —— 跨引擎归一去重，并记录每条合并了谁
+ *   ③ verify    —— 对去重后的地址做嗅探甄别，筛出真正可用的，附溯源引用
+ *   ④ final     —— 打分排序后的最终推荐
+ * 这不是为了好看：调研取证要能回答"这个地址是怎么来的、中间被谁筛掉了"。
+ *
  * @param {string} rawQuery 用户输入，可含年份，如 "Metropolis 1927"
  * @param {{limit?: number, probeLimit?: number, signal?: AbortSignal,
  *          fetchJson?: Function, probeFn?: Function,
- *          config?: object, adapters?: object[]}} [opts]
+ *          config?: object, adapters?: object[], expand?: object}} [opts]
  */
 export async function searchAll(rawQuery, opts = {}) {
   const started = Date.now();
   const query = parseQuery(rawQuery);
   const limit = opts.limit ?? 5;
-  const probeLimit = opts.probeLimit ?? 12;
 
   // opts.adapters 是测试用的直接注入口；正常路径一律走配置。
+  const config = opts.config ?? defaultConfig();
   const plan = opts.adapters
     ? opts.adapters.map((adapter) => ({ adapter, source: null, limit: null }))
-    : buildAdapters(opts.config ?? defaultConfig());
+    : buildAdapters(config);
+
+  const expandCfg = { ...(config.expand ?? {}), ...(opts.expand ?? {}) };
+  // 取证时希望尽量多探一些，别只探前 12 个就下结论
+  const probeLimit = opts.probeLimit ?? config.probeLimit ?? 24;
 
   const adapterOpts = {
     signal: opts.signal,
     ...(opts.fetchJson ? { fetchJson: opts.fetchJson } : {}),
   };
 
-  // 1) 所有源并发跑，互不阻塞。
-  const runs = await Promise.all(plan.map((p) => runAdapter(p, query, adapterOpts)));
+  /* ── 第一步：发现 ─────────────────────────────────────────
+   * 先用原词 + 近似词跑一轮，顺手收下各引擎返回的推荐搜索词；
+   * 如果拿到了推荐词，再补一轮。两轮的结果都算「第一步」的产出。 */
+  const round1Terms = planFirstRound(query, {
+    maxVariants: expandCfg.maxVariants ?? 4,
+    maxTerms: expandCfg.maxTerms ?? 4,
+  });
+
+  const runs1 = await Promise.all(
+    plan.map((p) => runAdapter(p, query, { ...adapterOpts, terms: round1Terms })),
+  );
+
+  const rawSuggested = runs1.flatMap((r) => r.result?.related ?? []);
+  const round2Terms = (expandCfg.useSuggested ?? true)
+    ? planSecondRound(rawSuggested, query, round1Terms, {
+        maxSuggested: expandCfg.maxSuggested ?? 3,
+      })
+    : [];
+
+  // 第二轮只跑引擎源：专用适配器（IA / Commons / TMDB）已经按片名搜过，
+  // 拿推荐词再搜一遍纯属重复消耗。
+  const runs2 = round2Terms.length > 0
+    ? await Promise.all(
+        plan
+          .filter((p) => p.adapter.id.startsWith('engine:'))
+          .map((p) => runAdapter(p, query, { ...adapterOpts, terms: round2Terms })),
+      )
+    : [];
+
+  const runs = mergeRuns(runs1, runs2);
+  const allTerms = [...round1Terms, ...round2Terms];
 
   // 2) 汇总直链候选与权威元数据。
-  const rawSources = runs.flatMap((r) => r.result?.sources ?? []);
+  // 专用适配器（IA / Commons / Jellyfin）自己不产出溯源字段——它们是按片名
+  // 直接查 API，没有"搜索词"和"结果排名"的概念。这里补上，否则引用里会出现
+  // 一片 null，取证时看不出这条是怎么来的。
+  const rawSources = runs.flatMap((r) => (r.result?.sources ?? []).map((s, i) => (
+    s.discoveredBy ? s : {
+      ...s,
+      discoveredBy: r.id,
+      discoveredByLabel: r.label,
+      discoveredRank: i + 1,
+      discoveredTerm: query.title,
+      discoveredTermKind: 'original',
+      discoveredVia: s.pageUrl ?? null,
+    }
+  )));
   const metaRun = runs.find((r) => r.kind === 'metadata' && r.result?.titleInfo);
   const titleInfo = metaRun?.result?.titleInfo ?? null;
   const offers = runs.flatMap((r) => r.result?.offers ?? []);
   // 引擎搜到但没有对应解析器的页面：如实列出来，不去猜里面有没有视频。
-  const leads = runs.flatMap((r) => r.result?.leads ?? []);
+  // 同一个页面会被多引擎多词反复搜到，按 URL 合并，来路累加成引用。
+  const rawLeads = runs.flatMap((r) => r.result?.leads ?? []);
+  const leads = dedupeLeads(rawLeads);
 
-  const sources = dedupeSources(rawSources);
+  /* ── 第二步：归一去重 ──────────────────────────────────── */
+  const { kept: sources, groups: dedupeGroups, removed: dedupeRemoved } = dedupeWithTrail(rawSources);
 
   // 3) 参考片长：权威值优先，否则用候选时长中位数兜底。
   let referenceRuntimeSec = titleInfo?.runtimeSec ?? null;
@@ -210,6 +420,41 @@ export async function searchAll(rawQuery, opts = {}) {
 
   // 6) 第二趟：带真实探测结果重排。
   const final = rankSources(probed, { ...rankCtx, limit });
+
+  /* ── 第三步：嗅探甄别的账目 ────────────────────────────────
+   * probed 里已经带着每条的探测结论和打分理由，这里把它整理成
+   * 「通过 / 被筛掉 + 原因 + 引用」的形式。没被探测到的也要如实列出，
+   * 不能让人以为全部都验过了。 */
+  const rankedAll = [...final.top, ...final.overflow, ...final.alternatives];
+  const verifyItems = rankedAll.map((s) => {
+    const rejected = Boolean(s.blockReason);
+    return {
+      url: s.url,
+      filename: s.filename || s.title || s.url,
+      provider: s.provider,
+      providerLabel: s.providerLabel || s.provider,
+      container: s.container || null,
+      height: s.height ?? null,
+      durationSec: s.durationSec ?? null,
+      bytes: s.bytes ?? null,
+      // 嗅探拿到的事实
+      probed: Boolean(s.probed),
+      probeOutcome: s.probeOutcome ?? (s.probed ? 'ok' : 'not-probed'),
+      httpStatus: s.probeStatus ?? null,
+      contentType: s.probeContentType ?? null,
+      reachable: s.reachable ?? null,
+      rangeSupported: s.rangeSupported ?? null,
+      checksums: s.checksums ?? null,
+      // 甄别结论
+      verdict: rejected ? 'rejected' : 'usable',
+      reason: rejected ? s.blockReason : playableReason(s),
+      score: s.score ?? null,
+      // 溯源引用：这个地址是谁、用什么词、从哪个页面找到的
+      citations: s.citations ?? [],
+      pageUrl: s.pageUrl ?? null,
+    };
+  });
+  const usable = verifyItems.filter((v) => v.verdict === 'usable');
 
   // 7) 组推荐位：前 3 位直接可播，第 4/5 位正版订阅/付费渠道。
   const recommendations = buildRecommendations(
@@ -244,8 +489,78 @@ export async function searchAll(rawQuery, opts = {}) {
   if (leads.length > 0) {
     notes.push(`引擎另搜到 ${leads.length} 个页面，但这些域名没有对应的解析器，只列出不解析`);
   }
+  if (rawLeads.length > leads.length) {
+    notes.push(`这 ${leads.length} 个页面被重复搜到 ${rawLeads.length} 次，已按 URL 合并（每条下方列出全部来路）`);
+  }
+  if (round2Terms.length > 0) {
+    notes.push(`用引擎返回的推荐搜索词补搜了一轮：${round2Terms.map((t) => t.term).join('、')}`);
+  }
+  if (!opts.skipProbe && rankedAll.length > probeLimit) {
+    notes.push(`第三步只嗅探了前 ${probeLimit} 条（共 ${rankedAll.length} 条），其余按上游元数据判定；调大 probeLimit 可全量嗅探`);
+  }
+
+  /* 四步走的完整账目。UI 用它渲染四个 tab，也可以直接取 JSON 存证。 */
+  const stages = {
+    discovery: {
+      label: '第一步 · 各引擎原始检索结果',
+      terms: allTerms,
+      suggestedRaw: [...new Set(rawSuggested)],
+      suggestedUsed: round2Terms.map((t) => t.term),
+      engines: runs.map((r) => ({
+        id: r.id,
+        label: r.label,
+        kind: r.kind,
+        status: r.status,
+        reason: r.reason ?? null,
+        limit: r.limit ?? null,
+        elapsedMs: r.elapsedMs,
+        // 引擎源有逐词账目；专用适配器没有，用一条汇总代替
+        rounds: r.result?.rounds ?? (r.result
+          ? [{
+              term: query.title, kind: 'original', why: '原始输入',
+              returned: r.result.sources?.length ?? 0, error: null,
+              results: (r.result.sources ?? []).map((s, i) => ({
+                url: s.url, title: s.filename || s.title || s.url,
+                snippet: '', rank: i + 1, engine: r.id,
+                term: query.title, termKind: 'original',
+              })),
+            }]
+          : []),
+        total: r.result?.rounds
+          ? r.result.rounds.reduce((n, x) => n + x.returned, 0)
+          : (r.result?.sources?.length ?? 0),
+      })),
+      totalResults: rawSources.length + leads.length,
+    },
+    normalize: {
+      label: '第二步 · 跨引擎归一去重',
+      before: rawSources.length,
+      after: sources.length,
+      removed: dedupeRemoved,
+      groups: dedupeGroups.sort((a, b) => b.count - a.count),
+      // 被多个引擎独立命中的，单独拎出来——这是可信度最高的一批
+      multiSourced: dedupeGroups.filter((g) => new Set(g.citations.map((c) => c.provider)).size > 1).length,
+    },
+    verify: {
+      label: '第三步 · 嗅探甄别',
+      checked: opts.skipProbe ? 0 : Math.min(probeLimit, preOrdered.length),
+      total: rankedAll.length,
+      usable: usable.length,
+      rejected: verifyItems.length - usable.length,
+      items: verifyItems,
+      // 没有解析器、只能作为线索的页面也归到这一步，方便一起看
+      leads,
+    },
+    final: {
+      label: '第四步 · 最终结果',
+      recommendations,
+      directCount,
+      offerCount,
+    },
+  };
 
   return {
+    stages,
     query: { raw: rawQuery, ...query },
     elapsedMs: Date.now() - started,
     title: titleInfo

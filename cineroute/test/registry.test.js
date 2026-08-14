@@ -141,9 +141,9 @@ test('引擎适配器继承全局站点范围，也能被源自己覆盖', () =>
   assert.deepEqual(plan[1].adapter.siteScope, ['www.loc.gov'], '自带范围优先');
 });
 
-test('出厂配置下四个引擎都已勾选，且都是 direct 源', () => {
+test('出厂配置下五个引擎都已勾选，且都是 direct 源', () => {
   const ids = buildAdapters(defaultConfig()).map((p) => p.adapter.id);
-  for (const e of ['google', 'baidu', 'bing', 'duckduckgo']) {
+  for (const e of ['google', 'bing', 'baidu', 'yandex', 'duckduckgo']) {
     assert.ok(ids.includes(`engine:${e}`), `出厂应勾选 ${e}`);
   }
   for (const a of ADAPTERS.filter((x) => x.id.startsWith('engine:'))) {

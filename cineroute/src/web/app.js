@@ -283,6 +283,255 @@ function upsertJob(job) {
   if (TERMINAL.has(job.status)) closeEventsIfIdle();
 }
 
+/* ---------------- 四步走 tab ---------------- */
+
+const STAGES = ['discovery', 'normalize', 'verify', 'final'];
+let activeStage = 'final';
+
+function selectStage(name) {
+  activeStage = STAGES.includes(name) ? name : 'final';
+  for (const s of STAGES) {
+    $(`panel-${s}`).classList.toggle('hidden', s !== activeStage);
+  }
+  for (const btn of document.querySelectorAll('#stageTabs .tab')) {
+    const on = btn.dataset.stage === activeStage;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-selected', String(on));
+  }
+}
+
+function bindTabs() {
+  const tabs = [...document.querySelectorAll('#stageTabs .tab')];
+  for (const btn of tabs) {
+    btn.addEventListener('click', () => selectStage(btn.dataset.stage));
+    // 键盘左右键切换，符合 tablist 的惯例
+    btn.addEventListener('keydown', (e) => {
+      const i = tabs.indexOf(btn);
+      const next = e.key === 'ArrowRight' ? i + 1 : e.key === 'ArrowLeft' ? i - 1 : -1;
+      if (next < 0 || next >= tabs.length) return;
+      e.preventDefault();
+      tabs[next].focus();
+      selectStage(tabs[next].dataset.stage);
+    });
+  }
+}
+
+const TERM_KIND = {
+  original: { label: '原词', cls: 'kind-original' },
+  variant: { label: '近似词', cls: 'kind-variant' },
+  suggested: { label: '推荐词', cls: 'kind-suggested' },
+};
+
+/** 一条溯源引用。取证的关键：这个地址是谁、用什么词、第几名、从哪个页面找到的。 */
+function citationNode(c) {
+  const kind = TERM_KIND[c.termKind] || TERM_KIND.original;
+  return el('li', { class: 'cite' },
+    // 发现者：哪个引擎/数据源搜到的
+    el('span', { class: 'cite-src' }, c.providerLabel || c.provider || '未知来源'),
+    c.rank != null ? el('span', { class: 'cite-rank' }, `第 ${c.rank} 名`) : null,
+    c.term ? el('span', { class: `chip tiny ${kind.cls}` }, `${kind.label}：${c.term}`) : null,
+    // 托管方与发现者不同时才标出来，避免「Internet Archive · Internet Archive」这种废话
+    c.hostLabel && c.hostLabel !== (c.providerLabel || c.provider)
+      ? el('span', { class: 'cite-host' }, `托管于 ${c.hostLabel}`)
+      : null,
+    c.via
+      ? el('a', { class: 'cite-via', href: c.via, target: '_blank', rel: 'noopener noreferrer' }, c.via)
+      : el('span', { class: 'cite-via muted' }, '（无落地页，直接由数据源 API 返回）'),
+  );
+}
+
+/* ── 第一步：各引擎原始结果 ── */
+function renderDiscovery(d) {
+  const terms = $('termList');
+  terms.replaceChildren(
+    el('div', { class: 'term-head' }, '本次用了这些检索词：'),
+    ...d.terms.map((t) => {
+      const kind = TERM_KIND[t.kind] || TERM_KIND.original;
+      return el('span', { class: `term-chip ${kind.cls}`, title: t.why },
+        el('b', {}, kind.label), t.term);
+    }),
+  );
+  if (d.suggestedRaw?.length) {
+    terms.append(el('p', { class: 'field-note' },
+      `引擎共返回 ${d.suggestedRaw.length} 个推荐搜索词，筛掉跑题的后采用了 ${d.suggestedUsed.length} 个。`));
+  }
+
+  const box = $('engineResults');
+  box.replaceChildren();
+  for (const e of d.engines) {
+    const wrap = el('div', { class: 'engine-block' });
+    const head = el('div', { class: 'engine-head' },
+      el('span', { class: `dot ${e.status}` }),
+      el('b', {}, e.label),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'engine-total' },
+        e.status === 'ok' ? `${e.total} 条 · ${e.elapsedMs}ms` : (e.reason || e.status)),
+    );
+    wrap.append(head);
+
+    if (e.status !== 'ok') { box.append(wrap); continue; }
+
+    for (const r of e.rounds) {
+      const kind = TERM_KIND[r.kind] || TERM_KIND.original;
+      const list = el('ol', { class: 'raw-list hidden' });
+      for (const item of r.results) {
+        list.append(el('li', {},
+          el('a', { href: item.url, target: '_blank', rel: 'noopener noreferrer' }, item.title || item.url),
+          el('span', { class: 'raw-url' }, item.url),
+          item.snippet ? el('span', { class: 'raw-snippet' }, item.snippet) : null,
+        ));
+      }
+      const toggle = el('button', {
+        class: 'round-head', type: 'button',
+        onclick: () => {
+          const open = list.classList.toggle('hidden') === false;
+          toggle.classList.toggle('open', open);
+        },
+      },
+        el('span', { class: `chip tiny ${kind.cls}` }, kind.label),
+        el('span', { class: 'round-term' }, r.term),
+        el('span', { class: 'spacer' }),
+        el('span', { class: 'round-count' }, r.error ? `失败：${r.error}` : `${r.returned} 条`),
+      );
+      wrap.append(toggle, list);
+    }
+    box.append(wrap);
+  }
+}
+
+/* ── 第二步：归一去重 ── */
+function renderNormalize(n) {
+  $('normalizeSummary').textContent =
+    `${n.before} 条原始结果 → 归一为 ${n.after} 条，合并掉 ${n.removed} 条重复；`
+    + `其中 ${n.multiSourced} 条被两个以上的来源独立命中（互相印证，可信度更高）。`;
+
+  const box = $('dedupeList');
+  box.replaceChildren();
+  if (n.groups.length === 0) {
+    box.append(el('p', { class: 'field-note' }, '没有候选。'));
+    return;
+  }
+  for (const g of n.groups) {
+    const cites = el('ul', { class: 'cites hidden' }, ...g.citations.map(citationNode));
+    const providers = [...new Set(g.citations.map((c) => c.provider))];
+    const toggle = el('button', {
+      class: 'dedupe-head', type: 'button',
+      onclick: () => {
+        const open = cites.classList.toggle('hidden') === false;
+        toggle.classList.toggle('open', open);
+      },
+    },
+      el('span', { class: `chip tiny ${g.count > 1 ? 'good' : ''}` }, `×${g.count}`),
+      el('span', { class: 'dedupe-name' }, g.filename),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'chip tiny' }, g.keyLabel),
+      el('span', { class: 'dedupe-src' }, `${providers.length} 个来源`),
+    );
+    box.append(toggle, cites);
+  }
+}
+
+/* ── 第三步：嗅探甄别 ── */
+function renderVerify(v) {
+  $('verifySummary').textContent =
+    `对 ${v.total} 条去重后的地址做嗅探甄别（其中 ${v.checked} 条发了真实探测请求）：`
+    + `${v.usable} 条判定可用，${v.rejected} 条被筛掉。每条都附原始来源地址，可倒查取证。`;
+
+  const box = $('verifyList');
+  const draw = (filter) => {
+    box.replaceChildren();
+    const items = v.items.filter((x) => filter === 'all' || x.verdict === filter);
+    if (items.length === 0) {
+      box.append(el('p', { class: 'field-note' }, '没有符合条件的条目。'));
+      return;
+    }
+    for (const it of items) {
+      const ok = it.verdict === 'usable';
+      const cites = el('ul', { class: 'cites' }, ...it.citations.map(citationNode));
+      box.append(
+        el('div', { class: `verify-item ${ok ? 'ok' : 'rejected'}` },
+          el('div', { class: 'verify-head' },
+            el('span', { class: `chip tiny ${ok ? 'good' : 'warn'}` }, ok ? '✓ 可用' : '✗ 已筛除'),
+            el('span', { class: 'verify-name' }, it.filename),
+            el('span', { class: 'spacer' }),
+            it.score != null ? el('span', { class: 'verify-score' }, `${it.score} 分`) : null,
+          ),
+          el('p', { class: 'verify-url' },
+            el('a', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, it.url)),
+          el('div', { class: 'specs' },
+            el('span', { class: 'chip tiny' }, (it.container || '?').toUpperCase()),
+            it.height ? el('span', { class: 'chip tiny' }, `${it.height}p`) : null,
+            it.durationSec ? el('span', { class: 'chip tiny' }, fmtDuration(it.durationSec)) : null,
+            it.bytes ? el('span', { class: 'chip tiny' }, fmtSize(it.bytes)) : null,
+            it.httpStatus ? el('span', { class: 'chip tiny' }, `HTTP ${it.httpStatus}`) : null,
+            it.contentType ? el('span', { class: 'chip tiny' }, it.contentType) : null,
+            !it.probed ? el('span', { class: 'chip tiny warn' }, '未探测') : null,
+          ),
+          el('p', { class: 'verify-reason' }, it.reason || ''),
+          el('div', { class: 'cite-block' },
+            el('div', { class: 'cite-title' }, `引用 · 原始来源（${it.citations.length}）`),
+            cites),
+        ),
+      );
+    }
+  };
+  draw('all');
+
+  for (const radio of document.querySelectorAll('input[name="verifyFilter"]')) {
+    radio.checked = radio.value === 'all';
+    radio.onchange = () => { if (radio.checked) draw(radio.value); };
+  }
+
+  // 线索（没有解析器的域名）
+  const leads = v.leads || [];
+  const leadsPanel = $('leadsPanel');
+  const leadsList = $('leadsList');
+  leadsList.replaceChildren();
+  leadsPanel.classList.toggle('hidden', leads.length === 0);
+  for (const l of leads) {
+    const cites = l.citations || [];
+    leadsList.append(
+      el('div', { class: 'lead' },
+        el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.title || l.url),
+        el('p', { class: 'lead-url' }, l.url),
+        el('p', { class: 'lead-note' },
+          `${l.reason || ''}`
+          + (cites.length > 1 ? ` · 被 ${l.foundByCount} 个来源、${cites.length} 种检索词命中` : '')),
+        cites.length
+          ? el('ul', { class: 'cites' }, ...cites.map((c) => {
+              const kind = TERM_KIND[c.termKind] || TERM_KIND.original;
+              return el('li', { class: 'cite' },
+                el('span', { class: 'cite-src' }, c.provider || '引擎'),
+                c.rank != null ? el('span', { class: 'cite-rank' }, `第 ${c.rank} 名`) : null,
+                c.term ? el('span', { class: `chip tiny ${kind.cls}` }, `${kind.label}：${c.term}`) : null,
+              );
+            }))
+          : null,
+      ),
+    );
+  }
+}
+
+function renderStages(data) {
+  const s = data.stages;
+  if (!s) return;
+  renderDiscovery(s.discovery);
+  renderNormalize(s.normalize);
+  renderVerify(s.verify);
+
+  const counts = {
+    discovery: `${s.discovery.totalResults}`,
+    normalize: `${s.normalize.after}`,
+    verify: `${s.verify.usable}`,
+    final: `${s.final.recommendations.length}`,
+  };
+  for (const node of document.querySelectorAll('#stageTabs .tab-count')) {
+    node.textContent = counts[node.dataset.count] ?? '';
+  }
+  // 每次检索回到最终结果页；想看过程再自己点
+  selectStage('final');
+}
+
 /* ---------------- 渲染：整页 ---------------- */
 
 function renderResult(data) {
@@ -348,23 +597,6 @@ function renderResult(data) {
     );
   }
 
-  // 引擎发现但没有解析器的页面
-  const leads = data.leads || [];
-  const leadsPanel = $('leadsPanel');
-  const leadsList = $('leadsList');
-  leadsList.replaceChildren();
-  leadsPanel.classList.toggle('hidden', leads.length === 0);
-  for (const l of leads) {
-    leadsList.append(
-      el('div', { class: 'lead' },
-        el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.title || l.url),
-        el('p', { class: 'lead-url' }, l.url),
-        el('p', { class: 'lead-note' },
-          `${l.discoveredBy || '引擎'} 第 ${l.rank ?? '?'} 条 · ${l.reason || ''}`),
-      ),
-    );
-  }
-
   // 数据源
   const provList = $('providerList');
   provList.replaceChildren();
@@ -395,6 +627,9 @@ function renderResult(data) {
   notes.replaceChildren();
   for (const n of data.notes || []) notes.append(el('li', {}, n));
 
+  // 四步走的中间账目
+  renderStages(data);
+
   $('results').classList.remove('hidden');
 }
 
@@ -406,7 +641,7 @@ function renderResult(data) {
  */
 let SOURCES = { config: null, catalog: null };
 
-const ENGINE_LABELS = { google: 'Google', baidu: '百度', bing: 'Bing', duckduckgo: 'DuckDuckGo' };
+const ENGINE_LABELS = { google: 'Google', bing: 'Bing', baidu: '百度', yandex: 'Yandex', duckduckgo: 'DuckDuckGo' };
 const engineLabel = (engine) => ENGINE_LABELS[engine]
   || (engine ? engine[0].toUpperCase() + engine.slice(1) : engine);
 /** 中文名后不加空格（「百度搜索」），西文名后加（「Google 搜索」）。 */
@@ -641,6 +876,7 @@ $('batchDownload').addEventListener('click', () => {
     badge.classList.remove('hidden');
   }
 
+  bindTabs();
   bindSourcePanel();
   try {
     SOURCES = await (await fetch('/api/sources')).json();
