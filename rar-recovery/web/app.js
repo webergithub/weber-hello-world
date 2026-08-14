@@ -116,6 +116,7 @@ async function tick() {
   $("statTried").textContent = `已试 ${s.tried.toLocaleString()} / ${s.total.toLocaleString()}`;
   $("statRate").textContent = Math.round(s.rate).toLocaleString() + "/秒";
   $("statEta").textContent = "预计 " + fmtTime(s.eta);
+  $("statWorkers").textContent = s.workers ? `⚡ ${s.workers} 线程并行` : "";
   $("statMsg").textContent = s.status === "extracting"
     ? "✅ 已找到密码，正在解压…" : (s.message || "");
 

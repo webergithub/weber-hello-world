@@ -39,6 +39,7 @@ def main() -> int:
     ap.add_argument("--wordlist", help="额外字典文件（如 rockyou.txt）")
     ap.add_argument("--guess", nargs="*", default=[], help="你自己记得的候选密码，优先尝试")
     ap.add_argument("--digits-max", type=int, default=None, help="纯数字穷举最大位数")
+    ap.add_argument("--workers", type=int, default=0, help="并行线程数（0=自动，按 CPU 核数）")
     ap.add_argument("--no-dates", action="store_true", help="不尝试生日/日期")
     ap.add_argument("--out", help="解压输出目录（默认 <包名>_unlocked）")
     ap.add_argument("--no-extract", action="store_true", help="只找密码，不自动解压")
@@ -53,14 +54,17 @@ def main() -> int:
         return 2
 
     opts = Options(strategy=args.strategy, wordlist=args.wordlist,
-                   extra_passwords=list(args.guess), include_dates=not args.no_dates)
+                   extra_passwords=list(args.guess), include_dates=not args.no_dates,
+                   workers=args.workers)
     if args.digits_max is not None:
         opts.digits_max = args.digits_max
 
     mgr = JobManager()
     job = mgr.start(args.archive, opts, auto_extract=not args.no_extract)
 
-    print("🔍 开始尝试……（Ctrl+C 取消）\n")
+    # 等 job 起来读到实际线程数
+    time.sleep(0.15)
+    print(f"🔍 开始尝试……（{job.snapshot().get('workers', 1)} 线程并行，Ctrl+C 取消）\n")
     try:
         while True:
             s = job.snapshot()

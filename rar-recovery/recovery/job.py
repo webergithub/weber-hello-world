@@ -28,6 +28,7 @@ class Job:
     tried: int = 0
     total: int = 0
     rate: float = 0.0               # 每秒尝试次数
+    workers: int = 1                # 并行线程数
     started_at: float = 0.0
     finished_at: float = 0.0
     password: Optional[str] = None
@@ -51,6 +52,7 @@ class Job:
                 "tried": self.tried,
                 "total": self.total,
                 "rate": round(self.rate, 1),
+                "workers": self.workers,
                 "elapsed": round(elapsed, 1),
                 "eta": round(eta, 1) if eta is not None else None,
                 "password": self.password,
@@ -105,29 +107,10 @@ class JobManager:
             engine.self_test()
 
             job.total = cand.estimate_total(job.options)
-            t0 = time.time()
-            last = t0
-            found_pw = None
-            canceled = False
-            for pw in cand.iter_candidates(job.options):
-                if job._cancel.is_set():
-                    canceled = True
-                    break
-                hit = engine.test(pw)
-                with job._lock:
-                    job.tried += 1
-                    now = time.time()
-                    if now - last >= 0.3:
-                        job.rate = job.tried / max(1e-6, now - t0)
-                        last = now
-                if hit:
-                    found_pw = pw
-                    break
+            job.workers = self._resolve_workers(job.options)
+            outcome, found_pw = self._search(job, engine)
 
-            with job._lock:
-                job.rate = job.tried / max(1e-6, time.time() - t0)
-
-            if canceled:
+            if outcome == "canceled":
                 job.status = "canceled"
                 job.message = "已取消。"
             elif found_pw is not None:
@@ -155,6 +138,70 @@ class JobManager:
         finally:
             if not job.finished_at:
                 job.finished_at = time.time()
+
+    @staticmethod
+    def _resolve_workers(opts) -> int:
+        w = int(getattr(opts, "workers", 0) or 0)
+        if w > 0:
+            return min(w, 64)
+        cpu = os.cpu_count() or 4
+        return max(1, min(cpu, 8))
+
+    def _search(self, job: Job, engine: Engine):
+        """多线程并行搜索：找到即停，支持取消。
+
+        每次密码测试彼此独立（unrar/7z 各起子进程、zip 各开句柄），
+        用线程池并行；子进程等待时释放 GIL，多核能明显提速。
+        返回 (outcome, found_pw)，outcome ∈ {found, exhausted, canceled}。
+        """
+        from concurrent.futures import ThreadPoolExecutor, FIRST_COMPLETED, wait as fwait
+
+        stop = threading.Event()
+        result = {"pw": None, "err": None}
+        t0 = time.time()
+        last = [t0]
+        workers = job.workers
+
+        def worker(pw: str):
+            if stop.is_set() or job._cancel.is_set():
+                return
+            try:
+                hit = engine.test(pw)
+            except Exception as e:  # noqa: BLE001  工具/压缩包异常 -> 整个任务报错
+                result["err"] = e
+                stop.set()
+                return
+            with job._lock:
+                job.tried += 1
+                now = time.time()
+                if now - last[0] >= 0.3:
+                    job.rate = job.tried / max(1e-6, now - t0)
+                    last[0] = now
+            if hit:
+                result["pw"] = pw
+                stop.set()
+
+        inflight: set = set()
+        maxq = max(2, workers * 4)     # 限制在途任务数，避免把生成器一次性铺开
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            for pw in cand.iter_candidates(job.options):
+                if stop.is_set() or job._cancel.is_set():
+                    break
+                inflight.add(ex.submit(worker, pw))
+                if len(inflight) >= maxq:
+                    _done, inflight = fwait(inflight, return_when=FIRST_COMPLETED)
+            # with 块退出会等待剩余任务；已被 stop 短路的会立即返回
+
+        with job._lock:
+            job.rate = job.tried / max(1e-6, time.time() - t0)
+
+        if result["err"] is not None:
+            raise result["err"]
+        if result["pw"] is not None:
+            return ("found", result["pw"])
+        if job._cancel.is_set():
+            return ("canceled", None)
+        return ("exhausted", None)
 
     def _do_extract(self, job: Job, password: str):
         try:

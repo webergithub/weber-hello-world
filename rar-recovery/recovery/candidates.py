@@ -38,6 +38,7 @@ class Options:
     wordcombos: bool = True             # 常见词 + 数字后缀
     brute_charset: str = "none"         # none|digits|lower|loweralnum|alnum
     brute_maxlen: int = 0
+    workers: int = 0                    # 并行线程数，0=自动(按 CPU 核数)
 
     def resolved(self) -> "Options":
         o = Options(**self.__dict__)

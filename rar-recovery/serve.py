@@ -169,6 +169,11 @@ class Handler(BaseHTTPRequestHandler):
                 opts.digits_max = int(data["digits_max"])
             except (TypeError, ValueError):
                 pass
+        if data.get("workers") is not None:
+            try:
+                opts.workers = int(data["workers"])
+            except (TypeError, ValueError):
+                pass
         auto = bool(data.get("auto_extract", True))
         job = MANAGER.start(p, opts, auto_extract=auto)
         return self._json(200, {"job_id": job.id})
