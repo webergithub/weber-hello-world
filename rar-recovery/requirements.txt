@@ -1,0 +1,10 @@
+# 核心功能不需要任何第三方库（纯 Python 标准库）。
+# 下面是可选增强：
+
+# 支持 AES 加密的 ZIP（.zip 里较新的加密方式）。缺失时会退回系统 7z。
+pyzipper>=0.3.6
+
+# RAR / 7z 的解压后端不是 Python 包，而是系统命令，请用包管理器安装：
+#   macOS:  brew install unrar        （RAR，必需）
+#           brew install sevenzip     （7z，可选）
+#   Ubuntu: sudo apt install unrar p7zip-full

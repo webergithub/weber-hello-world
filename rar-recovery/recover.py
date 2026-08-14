@@ -1,0 +1,108 @@
+#!/usr/bin/env python3
+"""命令行版：破解并解压受密码保护的压缩包（RAR/ZIP/7z）。
+
+用法示例：
+    python3 recover.py 我的文件.rar
+    python3 recover.py secret.rar --strategy fast
+    python3 recover.py secret.rar --wordlist rockyou.txt
+    python3 recover.py secret.rar --guess 我常用的密码 另一个猜测
+    python3 recover.py secret.zip --digits-max 8 --out ./解压结果
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+
+from recovery import detect
+from recovery.candidates import Options
+from recovery.job import JobManager
+
+
+def human(n: float) -> str:
+    if n is None:
+        return "?"
+    if n < 60:
+        return f"{n:.0f}秒"
+    if n < 3600:
+        return f"{n/60:.1f}分"
+    if n < 86400:
+        return f"{n/3600:.1f}小时"
+    return f"{n/86400:.1f}天"
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser(description="压缩包密码恢复（仅用于你自己的文件）")
+    ap.add_argument("archive", help="压缩包路径 (.rar/.zip/.7z)")
+    ap.add_argument("--strategy", choices=["fast", "standard", "deep"],
+                    default="standard", help="搜索强度（默认 standard）")
+    ap.add_argument("--wordlist", help="额外字典文件（如 rockyou.txt）")
+    ap.add_argument("--guess", nargs="*", default=[], help="你自己记得的候选密码，优先尝试")
+    ap.add_argument("--digits-max", type=int, default=None, help="纯数字穷举最大位数")
+    ap.add_argument("--no-dates", action="store_true", help="不尝试生日/日期")
+    ap.add_argument("--out", help="解压输出目录（默认 <包名>_unlocked）")
+    ap.add_argument("--no-extract", action="store_true", help="只找密码，不自动解压")
+    args = ap.parse_args()
+
+    info = detect(args.archive)
+    print(f"📦 压缩包类型：{info.kind}"
+          + (f" (RAR{info.rar_version})" if info.rar_version else "")
+          + f"　{info.note}")
+    if info.kind == "unknown":
+        print("❌ 无法识别的格式。")
+        return 2
+
+    opts = Options(strategy=args.strategy, wordlist=args.wordlist,
+                   extra_passwords=list(args.guess), include_dates=not args.no_dates)
+    if args.digits_max is not None:
+        opts.digits_max = args.digits_max
+
+    mgr = JobManager()
+    job = mgr.start(args.archive, opts, auto_extract=not args.no_extract)
+
+    print("🔍 开始尝试……（Ctrl+C 取消）\n")
+    try:
+        while True:
+            s = job.snapshot()
+            if s["status"] in ("running", "queued"):
+                pct = (s["tried"] / s["total"] * 100) if s["total"] else 0
+                sys.stdout.write(
+                    f"\r已试 {s['tried']:>10,} / 约 {s['total']:>12,}"
+                    f"  ({pct:5.1f}%)  {s['rate']:>7.0f}/秒"
+                    f"  预计剩余 {human(s['eta']):>8}   "
+                )
+                sys.stdout.flush()
+                time.sleep(0.4)
+            elif s["status"] == "extracting":
+                sys.stdout.write("\r✅ 已找到密码，正在解压……                              ")
+                sys.stdout.flush()
+                time.sleep(0.2)
+            else:
+                break
+    except KeyboardInterrupt:
+        job.cancel()
+        time.sleep(0.5)
+
+    s = job.snapshot()
+    print("\n")
+    if s["status"] == "found":
+        print(f"✅ 密码是：{s['password']}")
+        if s["extracted_to"]:
+            print(f"📂 已解压到：{s['extracted_to']}（{len(s['extracted_files'])} 个文件）")
+            for fpath in s["extracted_files"][:20]:
+                print(f"    - {fpath}")
+            if len(s["extracted_files"]) > 20:
+                print(f"    … 还有 {len(s['extracted_files']) - 20} 个")
+        return 0
+    if s["status"] == "not_encrypted":
+        print("ℹ️  " + s["message"])
+        return 0
+    if s["status"] == "error":
+        print("❌ " + s["message"])
+        return 1
+    print("😕 " + s["message"])
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

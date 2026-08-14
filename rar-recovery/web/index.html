@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>压缩包密码恢复</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>🔓 压缩包密码恢复</h1>
+      <p class="sub">找回你自己忘记密码的 RAR / ZIP / 7z 压缩包 · 全程本地运行，文件不出本机</p>
+    </header>
+
+    <!-- 步骤 1：选择压缩包 -->
+    <section class="card">
+      <h2><span class="step">1</span> 选择压缩包</h2>
+      <div class="row">
+        <input id="path" type="text" placeholder="粘贴本机压缩包完整路径，例如 /Users/你/Downloads/secret.rar" />
+        <button id="scanBtn" class="primary">扫描</button>
+      </div>
+      <div id="drop" class="drop">
+        或把压缩包 <b>拖到这里</b> 上传　<label class="filebtn">选择文件<input id="file" type="file" hidden /></label>
+      </div>
+      <div id="archiveInfo" class="info hidden"></div>
+    </section>
+
+    <!-- 步骤 2：设置并开始 -->
+    <section class="card" id="optCard">
+      <h2><span class="step">2</span> 搜索强度</h2>
+      <div class="strategies">
+        <label class="strat"><input type="radio" name="strategy" value="fast" />
+          <b>快速</b><span>几千常见密码 + 生日/日期 + 4位数字。约几秒~几分钟</span></label>
+        <label class="strat"><input type="radio" name="strategy" value="standard" checked />
+          <b>标准（推荐）</b><span>再加 6位数字 + 常见词加数字。约几分钟~几十分钟</span></label>
+        <label class="strat"><input type="radio" name="strategy" value="deep" />
+          <b>深度</b><span>再加 8位数字 + 小字符集暴力。很慢，建议配合 hashcat</span></label>
+      </div>
+
+      <details class="adv">
+        <summary>高级选项（记得点什么就填什么，命中率更高）</summary>
+        <div class="advbody">
+          <label>你还记得的候选密码（每行一个，会最优先尝试）
+            <textarea id="guesses" rows="3" placeholder="常用的密码&#10;生日&#10;手机号"></textarea>
+          </label>
+          <label>额外字典文件路径（可选，如 rockyou.txt）
+            <input id="wordlist" type="text" placeholder="/path/to/rockyou.txt" />
+          </label>
+          <label class="ckline"><input id="dates" type="checkbox" checked /> 尝试生日/日期组合</label>
+        </div>
+      </details>
+
+      <div class="row end">
+        <button id="startBtn" class="primary big" disabled>开始破解</button>
+        <button id="cancelBtn" class="ghost hidden">取消</button>
+      </div>
+    </section>
+
+    <!-- 进度 -->
+    <section class="card hidden" id="progCard">
+      <h2>进度</h2>
+      <div class="bar"><div id="barFill"></div></div>
+      <div class="stats">
+        <span id="statPct">0%</span>
+        <span id="statTried">已试 0 / 0</span>
+        <span id="statRate">0/秒</span>
+        <span id="statEta">预计 —</span>
+      </div>
+      <p id="statMsg" class="msg"></p>
+    </section>
+
+    <!-- 结果 -->
+    <section class="card hidden" id="resultCard">
+      <div id="resultBody"></div>
+    </section>
+
+    <footer>
+      <p>⚠️ 本工具只用于恢复<strong>你本人拥有</strong>的压缩包密码。RAR/7z 采用强加密，若当年设的是随机长密码，可能无法恢复。</p>
+    </footer>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

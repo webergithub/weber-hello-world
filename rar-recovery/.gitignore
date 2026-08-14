@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+*_unlocked/
+rar_recovery_uploads/
+.pytest_cache/
