@@ -75,11 +75,12 @@ test('第一页就失败则如实抛错（没有结果可保）', async () => {
   );
 });
 
-test('没配 SERP 服务就明说，不假装能搜', async () => {
+test('一个后端都没配就明说，不假装能搜', async () => {
   await assert.rejects(
     () => serpSearch('google', 'x', { env: {} }),
-    /CINEROUTE_SERP_PROVIDER/,
+    /CINEROUTE_SERP_BACKEND/,
   );
+  // 只写了 provider 没写 key —— 兼容旧配置，backend 自动推成 api
   await assert.rejects(
     () => serpSearch('google', 'x', { env: { CINEROUTE_SERP_PROVIDER: 'serper' } }),
     /CINEROUTE_SERP_KEY/,
@@ -186,12 +187,13 @@ test('详情页解析失败时降级为线索，而不是编一个地址出来',
   assert.match(leads[0].reason, /解析失败/);
 });
 
-test('未配置时适配器自报不可用，检索不会因此报错', async () => {
+test('未配置时适配器自报不可用，三种后端各自检查各自的配置', async () => {
   const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
-  const verdict = adapter.checkConfig({});
-  assert.equal(verdict.available, false);
-  assert.match(verdict.reason, /CINEROUTE_SERP_PROVIDER/);
 
+  assert.equal(adapter.checkConfig({}).available, false);
+  assert.match(adapter.checkConfig({}).reason, /CINEROUTE_SERP_BACKEND/);
+
+  // api
   assert.equal(adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'nope' }).available, false);
   assert.equal(
     adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'custom' }).available, false,
@@ -201,6 +203,20 @@ test('未配置时适配器自报不可用，检索不会因此报错', async ()
     adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' }).available,
     true,
   );
+
+  // cli：缺命令模板不算配好
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }).available, false);
+  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }).reason, /CINEROUTE_SERP_CMD/);
+  assert.equal(
+    adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'ddgr --json {query}' }).available,
+    true,
+  );
+
+  // browser：不需要任何配置
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }).available, true);
+
+  // 不认识的后端要报出来，而不是默默当成某一种
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'telepathy' }).available, false);
 });
 
 test('引擎失败时返回错误而不是抛出，不拖垮其他源', async () => {

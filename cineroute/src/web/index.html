@@ -107,6 +107,11 @@
         <span class="tab-name">最终结果</span>
         <span class="tab-count" data-count="final"></span>
       </button>
+      <button class="tab" role="tab" type="button" data-stage="deep" aria-selected="false">
+        <span class="tab-num">5</span>
+        <span class="tab-name">模拟打开验证</span>
+        <span class="tab-count" data-count="deep"></span>
+      </button>
     </nav>
 
     <section id="panel-discovery" class="panel stage-panel hidden" role="tabpanel">
@@ -163,6 +168,28 @@
         <div id="offersList" class="offers"></div>
         <p class="attribution">观看渠道数据来源 <strong>JustWatch</strong>（经 TMDB 提供）</p>
       </div>
+    </section>
+
+    <section id="panel-deep" class="panel stage-panel hidden" role="tabpanel">
+      <h2>⑤ 模拟打开验证</h2>
+      <p class="slot-note">
+        把第四步的 Top-N 真的<strong>在无头浏览器里打开</strong>：测加载等待时间、
+        拖进度条到 8 个时间点截图、做清晰度识别；同时用多线程模拟下载测吞吐。
+        前四步都只是根据元数据和 HTTP 头判断，<strong>这一步是唯一真正解码的环节</strong>。
+      </p>
+
+      <div class="deep-controls">
+        <label class="field"><span>验前几名</span>
+          <input id="deepTopN" type="number" min="1" max="20" value="5"></label>
+        <label class="field"><span>下载线程</span>
+          <input id="deepThreads" type="number" min="1" max="16" value="5"></label>
+        <label class="field"><span>最多轮数</span>
+          <input id="deepRounds" type="number" min="1" max="10" value="10"></label>
+        <span class="spacer"></span>
+        <button id="deepRun" type="button">开始验证</button>
+      </div>
+      <p id="deepStatus" class="field-note"></p>
+      <div id="deepRounds_out"></div>
     </section>
 
     <section id="playerPanel" class="panel hidden">

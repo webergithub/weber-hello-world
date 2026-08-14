@@ -1,64 +1,110 @@
 [
   {
     "_comment": "顺序即优先级：更具体的匹配必须排在更宽泛的前面，否则会被误匹配。引擎结果排最前——引擎的查询串里带着 site:xxx 限定条件，域名子串会误撞下面那些按域名匹配的条目。",
-    "when": ["serp.fixture", "engine=google", "Night of the Living Dead"],
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "Night of the Living Dead"
+    ],
     "file": "serp-google-notld.json"
   },
   {
-    "when": ["serp.fixture", "engine=baidu", "Night of the Living Dead"],
+    "when": [
+      "serp.fixture",
+      "engine=baidu",
+      "Night of the Living Dead"
+    ],
     "file": "serp-baidu-notld.json"
   },
   {
-    "when": ["serp.fixture"],
+    "when": [
+      "serp.fixture"
+    ],
     "file": "serp-empty.json"
   },
   {
-    "when": ["/metadata/notld_1968_restored_4k"],
+    "_comment": "Jellyfin 自建库。离线演示里指向本地文件，供第五步真解码。",
+    "when": [
+      "/Items",
+      "Night of the Living Dead"
+    ],
+    "file": "jellyfin-notld.json"
+  },
+  {
+    "when": [
+      "/metadata/notld_1968_restored_4k"
+    ],
     "file": "ia-metadata-notld-restored.json"
   },
   {
-    "when": ["/metadata/notld_behind_the_scenes"],
+    "when": [
+      "/metadata/notld_behind_the_scenes"
+    ],
     "file": "ia-metadata-notld-bts.json"
   },
   {
-    "when": ["/metadata/night_of_the_living_dead"],
+    "when": [
+      "/metadata/night_of_the_living_dead"
+    ],
     "file": "ia-metadata-notld.json"
   },
   {
-    "when": ["/metadata/metropolis_1927_restored"],
+    "when": [
+      "/metadata/metropolis_1927_restored"
+    ],
     "file": "ia-metadata-metropolis.json"
   },
   {
-    "when": ["advancedsearch.php", "Night of the Living Dead"],
+    "when": [
+      "advancedsearch.php",
+      "Night of the Living Dead"
+    ],
     "file": "ia-search-notld.json"
   },
   {
-    "when": ["advancedsearch.php", "Metropolis"],
+    "when": [
+      "advancedsearch.php",
+      "Metropolis"
+    ],
     "file": "ia-search-metropolis.json"
   },
   {
-    "when": ["advancedsearch.php"],
+    "when": [
+      "advancedsearch.php"
+    ],
     "file": "ia-search-empty.json"
   },
   {
     "_comment": "按 /w/api.php 匹配，不要只写域名——引擎查询串里也含这个域名。",
-    "when": ["commons.wikimedia.org/w/api.php", "Metropolis"],
+    "when": [
+      "commons.wikimedia.org/w/api.php",
+      "Metropolis"
+    ],
     "file": "commons-search-metropolis.json"
   },
   {
-    "when": ["commons.wikimedia.org/w/api.php"],
+    "when": [
+      "commons.wikimedia.org/w/api.php"
+    ],
     "file": "commons-search-empty.json"
   },
   {
-    "when": ["/search/multi", "Night of the Living Dead"],
+    "when": [
+      "/search/multi",
+      "Night of the Living Dead"
+    ],
     "file": "tmdb-search-notld.json"
   },
   {
-    "when": ["/movie/10331/watch/providers"],
+    "when": [
+      "/movie/10331/watch/providers"
+    ],
     "file": "tmdb-providers-notld.json"
   },
   {
-    "when": ["/movie/10331"],
+    "when": [
+      "/movie/10331"
+    ],
     "file": "tmdb-detail-notld.json"
   }
 ]

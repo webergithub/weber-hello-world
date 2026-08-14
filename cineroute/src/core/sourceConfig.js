@@ -80,6 +80,23 @@ export const DEFAULT_EXPAND = {
 /** 第三步嗅探甄别的条数上限。调研取证场景默认给得比展示场景大。 */
 export const DEFAULT_PROBE_LIMIT = 24;
 
+/**
+ * 第五步「深度验证」的预算。
+ *
+ * 这一步是真开浏览器解码、真发并发请求，比前四步贵得多，所以每个数字
+ * 都直接对应资源消耗：topN 决定验几个、threads 决定每个开几路并发、
+ * maxRounds 决定最坏情况下重试到什么时候。
+ */
+export const DEFAULT_VERIFY = {
+  enabled: true,
+  topN: 5,          // 验第四步的前几名
+  threads: 5,       // 模拟下载的并发线程数
+  maxRounds: 10,    // 全军覆没时最多再试几轮
+  shotWidth: 480,   // 截图采样宽度（也是清晰度计算的分辨率）
+  probeBytes: 262144,
+  concurrency: 2,   // 同时开几个浏览器页面做播放嗅探
+};
+
 const clampLimit = (v, fallback) => {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
@@ -130,8 +147,9 @@ export function normalizeConfig(raw) {
 
   const expand = normalizeExpand(raw?.expand);
   const probeLimit = clampInt(raw?.probeLimit, DEFAULT_PROBE_LIMIT, 1, 200);
+  const verify = normalizeVerify(raw?.verify);
 
-  return { version: 1, defaults, sources, siteScope, expand, probeLimit };
+  return { version: 1, defaults, sources, siteScope, expand, probeLimit, verify };
 }
 
 const clampInt = (v, fallback, lo, hi) => {
@@ -139,6 +157,19 @@ const clampInt = (v, fallback, lo, hi) => {
   if (!Number.isFinite(n)) return fallback;
   return Math.max(lo, Math.min(hi, Math.round(n)));
 };
+
+/** 规范化深度验证预算。上限卡死，免得一次检索把机器打满。 */
+export function normalizeVerify(raw) {
+  return {
+    enabled: raw?.enabled !== false,
+    topN: clampInt(raw?.topN, DEFAULT_VERIFY.topN, 1, 20),
+    threads: clampInt(raw?.threads, DEFAULT_VERIFY.threads, 1, 16),
+    maxRounds: clampInt(raw?.maxRounds, DEFAULT_VERIFY.maxRounds, 1, 10),
+    shotWidth: clampInt(raw?.shotWidth, DEFAULT_VERIFY.shotWidth, 160, 1280),
+    probeBytes: clampInt(raw?.probeBytes, DEFAULT_VERIFY.probeBytes, 4096, 8 * 1024 * 1024),
+    concurrency: clampInt(raw?.concurrency, DEFAULT_VERIFY.concurrency, 1, 6),
+  };
+}
 
 /** 规范化词扩展预算，把上限卡死——这几个数字直接决定 SERP 花多少钱。 */
 export function normalizeExpand(raw) {
@@ -158,6 +189,7 @@ export function defaultConfig() {
     siteScope: DEFAULT_SITE_SCOPE,
     expand: DEFAULT_EXPAND,
     probeLimit: DEFAULT_PROBE_LIMIT,
+    verify: DEFAULT_VERIFY,
   });
 }
 

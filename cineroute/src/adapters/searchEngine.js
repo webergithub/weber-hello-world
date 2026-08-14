@@ -12,119 +12,28 @@
  *
  * 这几家都没有能直接用的免费官方 API：Google 的 Web Search API 早已停用，
  * Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Yandex 的不对外。
- * 所以这里做成可插拔的 SERP 后端，需要配 key；没配就如实报告"未配置"。
+ * 所以检索做成三种可插拔后端（见 serp.js）：付费 SERP 服务、本机 CLI 工具、
+ * 无头浏览器开结果页。没有任何一种可用时如实报告"未配置"，不假装搜过。
  */
 
 import { httpJson, settleAll } from '../core/http.js';
 import { titleSimilarity } from '../core/match.js';
-import { harvestRelated } from '../core/expand.js';
+import { runSerp, checkBackend, SERP_BACKENDS, SERP_PROVIDERS, PAGE_SIZE } from './serp.js';
 import { extractSourcesFromMetadata } from './internetArchive.js';
 
-/* ───────────────────── SERP 后端 ───────────────────── */
+// 兼容旧的引用点
+export { SERP_PROVIDERS, SERP_BACKENDS, PAGE_SIZE };
+export { normalizeSerp, engineSearchUrl, buildArgv, parseCliOutput } from './serp.js';
 
-/** 支持的 SERP 服务商。custom 用 URL 模板，自己接别的服务。 */
-export const SERP_PROVIDERS = ['serper', 'brave', 'custom'];
-
-function serpSettings(env = process.env) {
-  return {
-    provider: env.CINEROUTE_SERP_PROVIDER || null,
-    key: env.CINEROUTE_SERP_KEY || null,
-    urlTemplate: env.CINEROUTE_SERP_URL || null,
-  };
-}
+/* ───────────────────── 检索 ───────────────────── */
 
 /**
- * 每个引擎单次请求能拿多少条，用来算要翻几页。
- */
-const PAGE_SIZE = { google: 10, bing: 50, baidu: 10, yandex: 10, duckduckgo: 10 };
-
-/**
- * 调 SERP 服务，返回规范化的结果列表。
- *
- * @param {string} engine 'google' | 'bing' | 'baidu' | 'yandex' | 'duckduckgo' | 自定义
- * @param {string} q 已经拼好 site: 过滤条件的查询串
- * @param {{limit?: number, signal?: AbortSignal, fetchJson?: Function, env?: object}} [opts]
- * @returns {Promise<Array<{url:string,title:string,snippet:string,rank:number}>>}
+ * 按配置的后端搜一个词并翻页。后端有三种（api / cli / browser），
+ * 具体见 serp.js —— 这里只关心"给我结果"，不关心结果怎么来的。
  */
 export async function serpSearch(engine, q, opts = {}) {
-  const { limit = 100, signal, fetchJson = httpJson, env = process.env, onRelated } = opts;
-  const { provider, key, urlTemplate } = serpSettings(env);
-
-  if (!provider) throw new Error('未配置 CINEROUTE_SERP_PROVIDER');
-  if (provider !== 'custom' && !key) throw new Error('未配置 CINEROUTE_SERP_KEY');
-
-  const pageSize = PAGE_SIZE[engine] ?? 10;
-  const pages = Math.min(10, Math.ceil(limit / pageSize));   // 最多翻 10 页，防止把额度打光
-  const out = [];
-
-  for (let page = 1; page <= pages && out.length < limit; page += 1) {
-    let data;
-    try {
-      data = await callProvider({ provider, key, urlTemplate, engine, q, pageSize, page, signal, fetchJson });
-    } catch (err) {
-      // 前几页已经有结果就别因为后面某页失败而全丢
-      if (out.length > 0) break;
-      throw err;
-    }
-    // 推荐搜索词只在第一页有，顺手捞走给第二轮用
-    if (page === 1 && typeof onRelated === 'function') {
-      onRelated(harvestRelated(provider, data));
-    }
-    const items = normalizeSerp(provider, data);
-    if (items.length === 0) break;                            // 没有更多结果
-    for (const it of items) {
-      if (out.length >= limit) break;
-      out.push({ ...it, rank: out.length + 1 });
-    }
-    // 返回不满一页说明结果到头了，再翻一页只是白花一次配额。
-    if (items.length < pageSize) break;
-  }
-  return out;
-}
-
-async function callProvider({ provider, key, urlTemplate, engine, q, pageSize, page, signal, fetchJson }) {
-  if (provider === 'serper') {
-    // serper.dev：POST，engine 走不同子域
-    const host = engine === 'google' ? 'google.serper.dev' : `${engine}.serper.dev`;
-    return fetchJson(`https://${host}/search`, {
-      method: 'POST',
-      headers: { 'X-API-KEY': key, 'content-type': 'application/json' },
-      body: JSON.stringify({ q, num: pageSize, page }),
-      signal,
-      timeoutMs: 12000,
-    });
-  }
-  if (provider === 'brave') {
-    const p = new URLSearchParams({ q, count: String(pageSize), offset: String((page - 1) * pageSize) });
-    return fetchJson(`https://api.search.brave.com/res/v1/web/search?${p}`, {
-      headers: { 'X-Subscription-Token': key, accept: 'application/json' },
-      signal,
-      timeoutMs: 12000,
-    });
-  }
-  // custom：URL 模板，占位符 {query} {engine} {limit} {page} {key}
-  if (!urlTemplate) throw new Error('provider=custom 需要同时配置 CINEROUTE_SERP_URL');
-  const url = urlTemplate
-    .replace('{query}', encodeURIComponent(q))
-    .replace('{engine}', encodeURIComponent(engine))
-    .replace('{limit}', String(pageSize))
-    .replace('{page}', String(page))
-    .replace('{key}', encodeURIComponent(key || ''));
-  return fetchJson(url, { signal, timeoutMs: 12000 });
-}
-
-/** 把各家不同的响应结构压成统一形状。 */
-export function normalizeSerp(provider, data) {
-  const pick = (arr, mapper) => (Array.isArray(arr) ? arr.map(mapper).filter((x) => x.url) : []);
-  if (provider === 'brave') {
-    return pick(data?.web?.results, (r) => ({
-      url: r.url, title: r.title || '', snippet: r.description || '',
-    }));
-  }
-  // serper 与 custom 都按 organic 数组取，custom 也兼容 results
-  return pick(data?.organic || data?.results, (r) => ({
-    url: r.link || r.url, title: r.title || '', snippet: r.snippet || r.description || '',
-  }));
+  const { results } = await runSerp(engine, q, opts);
+  return results;
 }
 
 /* ───────────────────── 页面 → 片源 ───────────────────── */
@@ -276,26 +185,15 @@ export function createEngineAdapter(spec) {
     label,
     kind: 'direct',
     requiresConfig: true,
-    configHint: '设置 CINEROUTE_SERP_PROVIDER 与 CINEROUTE_SERP_KEY（四大引擎均无免费官方 API，需接 SERP 服务）',
+    configHint: '设置 CINEROUTE_SERP_BACKEND=api|cli|browser。'
+      + 'api 需配 CINEROUTE_SERP_PROVIDER/KEY；cli 需配 CINEROUTE_SERP_CMD；'
+      + 'browser 免配置，但依赖本机 Chromium 且会被引擎反自动化检测',
     engine,
     siteScope: spec.siteScope || null,
 
-    /** 自查配置。没配就如实报告"未配置"，不假装能搜。 */
+    /** 自查配置。三种后端只要有一种配齐就算可用。 */
     checkConfig(env = process.env) {
-      const { provider, key, urlTemplate } = serpSettings(env);
-      if (!provider) {
-        return { available: false, reason: '未配置 SERP 服务（CINEROUTE_SERP_PROVIDER）' };
-      }
-      if (!SERP_PROVIDERS.includes(provider)) {
-        return { available: false, reason: `不认识的 SERP 服务 ${provider}，可选：${SERP_PROVIDERS.join(' / ')}` };
-      }
-      if (provider === 'custom' && !urlTemplate) {
-        return { available: false, reason: 'provider=custom 需要同时配置 CINEROUTE_SERP_URL' };
-      }
-      if (provider !== 'custom' && !key) {
-        return { available: false, reason: '未配置 CINEROUTE_SERP_KEY' };
-      }
-      return { available: true, reason: null };
+      return checkBackend(env);
     },
 
     /**
@@ -314,6 +212,8 @@ export function createEngineAdapter(spec) {
       // 多个词共用一个总配额，别让词数把请求数乘爆
       const perTerm = Math.max(1, Math.floor(limit / terms.length));
       const related = [];
+      const backendNotes = [];
+      let usedBackend = null;
       const rounds = [];
       const allResults = [];
       let firstError = null;
@@ -322,11 +222,11 @@ export function createEngineAdapter(spec) {
         const q = buildScopedQuery(t.term, scope);
         let results;
         try {
-          results = await serpSearch(engine, q, {
-            ...opts,
-            limit: perTerm,
-            onRelated: (r) => related.push(...r),
-          });
+          const r = await runSerp(engine, q, { ...opts, limit: perTerm });
+          results = r.results;
+          related.push(...r.related);
+          if (r.notes?.length) backendNotes.push(...r.notes);
+          usedBackend = r.backend;
         } catch (err) {
           firstError ??= String(err.message || err);
           rounds.push({ ...t, query: q, returned: 0, error: firstError, results: [] });
@@ -357,7 +257,10 @@ export function createEngineAdapter(spec) {
         // 第一步原始账目：逐词的搜索结果，未去重、未筛选
         rounds,
         related,
+        backend: usedBackend,
+        backendNotes: [...new Set(backendNotes)],
         stats: {
+          backend: usedBackend,
           terms: terms.length,
           returned: allResults.length,
           resolved: sources.length,

@@ -285,7 +285,7 @@ function upsertJob(job) {
 
 /* ---------------- 四步走 tab ---------------- */
 
-const STAGES = ['discovery', 'normalize', 'verify', 'final'];
+const STAGES = ['discovery', 'normalize', 'verify', 'final', 'deep'];
 let activeStage = 'final';
 
 function selectStage(name) {
@@ -512,7 +512,202 @@ function renderVerify(v) {
   }
 }
 
+/* ── 第五步：模拟打开验证 ── */
+
+let LAST_RESULT = null;
+
+const fmtMs = (v) => (v == null ? '—' : `${v} ms`);
+
+/** 八张截图。这是这一步最直观的产出，所以给它单独的网格。 */
+function frameGrid(frames) {
+  const grid = el('div', { class: 'shot-grid' });
+  for (const f of frames) {
+    if (!f.captured) {
+      grid.append(el('div', { class: 'shot missing' },
+        el('div', { class: 'shot-ph' }, '✗'),
+        el('div', { class: 'shot-cap' }, el('b', {}, f.label), el('span', {}, f.reason || '未截到')),
+      ));
+      continue;
+    }
+    grid.append(el('div', { class: 'shot' },
+      img({ src: f.jpeg, alt: `${f.label} 截图`, loading: 'lazy' }),
+      el('div', { class: 'shot-cap' },
+        el('b', {}, f.label),
+        el('span', {}, `落点 ${f.atActual?.toFixed(1) ?? '?'}s · 清晰度 ${f.sharpness}`),
+        f.blank ? el('span', { class: 'chip tiny warn' }, '空白帧') : null,
+      ),
+    ));
+  }
+  return grid;
+}
+
+function deepItemCard(it) {
+  const p = it.playback || {};
+  const d = it.download || {};
+  const lv = it.verdict?.level || 'fail';
+
+  const card = el('div', { class: `deep-item ${lv}` });
+  card.append(
+    el('div', { class: 'deep-head' },
+      it.rank != null ? el('span', { class: 'rank' }, String(it.rank)) : null,
+      el('span', { class: 'deep-name' }, it.filename),
+      el('span', { class: 'spacer' }),
+      p.grade ? el('span', { class: `grade grade-${p.grade}` }, p.grade) : null,
+      el('span', { class: `chip tiny ${lv === 'ok' ? 'good' : lv === 'warn' ? 'warn' : 'bad'}` },
+        it.verdict?.text || ''),
+    ),
+    el('p', { class: 'verify-url' },
+      el('a', { href: it.url, target: '_blank', rel: 'noopener noreferrer' }, it.url)),
+  );
+
+  // 打开耗时——「点开要等多久」
+  card.append(
+    el('div', { class: 'metric-row' },
+      el('span', { class: 'metric' }, el('b', {}, fmtMs(p.timings?.metadataMs)), '拿到元数据'),
+      el('span', { class: 'metric' }, el('b', {}, fmtMs(p.timings?.firstDataMs)), '首帧数据'),
+      el('span', { class: 'metric' }, el('b', {}, fmtMs(p.timings?.canPlayMs)), '可开始播'),
+      el('span', { class: 'metric' }, el('b', {}, fmtMs(p.timings?.canPlayThroughMs)), '缓冲够播完'),
+      el('span', { class: 'metric' }, el('b', {}, String(p.stalls ?? 0)), '卡顿次数'),
+      el('span', { class: 'metric' },
+        el('b', {}, p.decoded?.width ? `${p.decoded.width}×${p.decoded.height}` : '—'), '实际解码'),
+    ),
+  );
+
+  if (!p.ok) card.append(el('p', { class: 'blocked-reason' }, `⚠ 放不出画面：${p.reason || '未知原因'}`));
+  if (p.gradeNote) card.append(el('p', { class: 'verify-reason' }, `清晰度评级：${p.gradeNote}`));
+  if (it.resolutionCheck && !it.resolutionCheck.match) {
+    card.append(el('p', { class: 'blocked-reason' }, `⚠ ${it.resolutionCheck.note}`));
+  }
+  if (p.coverage?.note) {
+    card.append(el('p', { class: p.coverage.degraded ? 'blocked-reason' : 'verify-reason' },
+      `取样覆盖：截到 ${p.coverage.captured}/${p.coverage.total} 张 —— ${p.coverage.note}`));
+  }
+  if (p.quality) {
+    card.append(el('p', { class: 'verify-reason' },
+      `清晰度中位 ${p.quality.sharpnessMedian} · 对比度 ${p.quality.contrastMedian}`
+      + (p.quality.detailDensity != null ? ` · 细节密度 ${p.quality.detailDensity}` : '')));
+  }
+
+  if (p.frames?.length) card.append(frameGrid(p.frames));
+
+  // 模拟下载
+  const dlBox = el('div', { class: 'dl-box' },
+    el('div', { class: 'dl-head' },
+      el('b', {}, `模拟下载 · ${d.threads ?? 0} 线程`),
+      el('span', { class: `chip tiny ${d.ok ? 'good' : 'warn'}` }, d.ok ? '通过' : (d.reason || '失败')),
+      el('span', { class: 'spacer' }),
+      el('span', { class: 'dl-speed' },
+        d.aggregateBytesPerSec ? `${fmtSize(d.aggregateBytesPerSec)}/s` : '—',
+        d.estimatedFullDownloadSec != null ? ` · 推算整片 ${d.estimatedFullDownloadSec}s` : ''),
+    ),
+  );
+  for (const s of d.segments ?? []) {
+    dlBox.append(el('div', { class: `dl-seg ${s.ok ? 'ok' : 'fail'}` },
+      el('span', { class: 'seg-i' }, `#${s.index}`),
+      el('span', { class: 'seg-range' }, `bytes ${s.start}–${s.end}`),
+      el('span', { class: 'spacer' }),
+      s.ok
+        ? el('span', {}, `${fmtSize(s.bytes)} · ${s.elapsedMs}ms · ${fmtSize(s.bytesPerSec)}/s`
+            + (s.rangeExact ? '' : ' · ⚠ 区间不符'))
+        : el('span', {}, s.reason || '失败'),
+    ));
+  }
+  card.append(dlBox);
+  return card;
+}
+
+function renderDeep(data) {
+  const box = $('deepRounds_out');
+  box.replaceChildren();
+
+  if (data.skipped) {
+    box.append(el('p', { class: 'blocked-reason' }, `⚠ ${data.reason}`));
+    return;
+  }
+
+  $('deepStatus').textContent =
+    `${data.stopReason}（共 ${data.totalRounds} 轮，上限 ${data.maxRounds} 轮，每轮验前 ${data.topN} 名）`;
+
+  for (const rd of data.rounds) {
+    const isActive = rd.round === data.activeRound;
+    const body = el('div', { class: `round-body${isActive ? '' : ' hidden'}` });
+    for (const it of rd.items) body.append(deepItemCard(it));
+
+    const head = el('button', {
+      class: `round-toggle${isActive ? ' open' : ''}`, type: 'button',
+      onclick: () => {
+        const open = body.classList.toggle('hidden') === false;
+        head.classList.toggle('open', open);
+      },
+    },
+      el('span', { class: 'chip tiny' }, `第 ${rd.round} 轮`),
+      el('span', {}, `候选 ${rd.candidateRange.join('–')} 名`),
+      el('span', { class: 'spacer' }),
+      el('span', { class: `chip tiny ${rd.allFailed ? 'warn' : 'good'}` },
+        rd.allFailed ? '全部不可用' : `${rd.usableCount}/${rd.total} 可用`),
+      el('span', { class: 'round-meta' }, `可播 ${rd.playableCount} · 可下 ${rd.downloadableCount} · ${rd.elapsedMs}ms`),
+    );
+    box.append(head, body);
+  }
+
+  if (data.rejected?.length) {
+    box.append(el('p', { class: 'field-note' },
+      `${data.rejected.length} 个地址因不在白名单内被拒绝验证。`));
+  }
+
+  const tabCount = document.querySelector('#stageTabs .tab-count[data-count="deep"]');
+  if (tabCount) {
+    const last = data.rounds[data.rounds.length - 1];
+    tabCount.textContent = last ? String(last.usableCount) : '';
+  }
+}
+
+async function runDeepVerify() {
+  const btn = $('deepRun');
+  const status = $('deepStatus');
+  if (!LAST_RESULT) { status.textContent = '请先检索。'; return; }
+
+  // 验的是第四步推荐位里的直链，外加备选——备选里常有下载可用的
+  const candidates = [
+    ...LAST_RESULT.recommendations.filter((r) => r.kind === 'direct').map((r) => r.source),
+    ...(LAST_RESULT.top || []),
+    ...(LAST_RESULT.alternatives || []),
+  ];
+  const seen = new Set();
+  const unique = candidates.filter((c) => c && !seen.has(c.url) && seen.add(c.url));
+  if (unique.length === 0) { status.textContent = '没有可验证的片源。'; return; }
+
+  btn.disabled = true;
+  status.textContent = '正在打开浏览器、逐个加载并截图…（这一步会真的解码，比前几步慢）';
+  try {
+    const res = await fetch('/api/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        candidates: unique,
+        verify: {
+          topN: Number($('deepTopN').value) || 5,
+          threads: Number($('deepThreads').value) || 5,
+          maxRounds: Number($('deepRounds').value) || 10,
+        },
+      }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+    renderDeep(data);
+    if (data.skipped) status.textContent = data.reason;
+  } catch (err) {
+    status.textContent = `验证失败：${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 function renderStages(data) {
+  LAST_RESULT = data;
+  // 换了检索就把上一次的深度验证结果清掉，免得张冠李戴
+  $('deepRounds_out').replaceChildren();
+  $('deepStatus').textContent = '点「开始验证」运行。这一步会真的打开浏览器解码，比前几步慢。';
   const s = data.stages;
   if (!s) return;
   renderDiscovery(s.discovery);
@@ -524,6 +719,7 @@ function renderStages(data) {
     normalize: `${s.normalize.after}`,
     verify: `${s.verify.usable}`,
     final: `${s.final.recommendations.length}`,
+    deep: '',            // 第五步要手动触发，没跑之前不显示数字
   };
   for (const node of document.querySelectorAll('#stageTabs .tab-count')) {
     node.textContent = counts[node.dataset.count] ?? '';
@@ -877,6 +1073,7 @@ $('batchDownload').addEventListener('click', () => {
   }
 
   bindTabs();
+  $('deepRun').addEventListener('click', runDeepVerify);
   bindSourcePanel();
   try {
     SOURCES = await (await fetch('/api/sources')).json();

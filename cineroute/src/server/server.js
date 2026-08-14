@@ -19,6 +19,8 @@ import {
 } from '../core/sourceConfig.js';
 import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
 import { DownloadManager } from './downloader.js';
+import { launch, findChrome } from '../browser/cdp.js';
+import { verifyWithRounds } from '../verify/deepVerify.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = path.resolve(HERE, '../web');
@@ -152,6 +154,19 @@ export async function startServer(options = {}) {
   // 配置文件不存在也能跑——loadConfig 会回落到出厂默认。
   let sourceConfig = await loadConfig();
 
+  // 深度验证要开无头浏览器。开一次很贵（两秒多），所以进程内复用一个实例，
+  // 用完不关；进程退出时统一收。并发由 verify.concurrency 控制页面数。
+  let sharedBrowser = null;
+  let browserLaunching = null;
+  async function getBrowser() {
+    if (sharedBrowser && !sharedBrowser.closed) return sharedBrowser;
+    if (!browserLaunching) {
+      browserLaunching = launch().then((b) => { sharedBrowser = b; browserLaunching = null; return b; })
+        .catch((e) => { browserLaunching = null; throw e; });
+    }
+    return browserLaunching;
+  }
+
   /** 把"系统里有哪些源可选"告诉前端，用来渲染勾选面板。 */
   function sourceCatalog() {
     const enabledIds = new Set(sourceConfig.sources.map((s) => s.id));
@@ -233,6 +248,54 @@ export async function startServer(options = {}) {
         return;
       }
 
+      // 第五步：深度验证。真开浏览器解码、真发并发请求，比检索贵得多，
+      // 所以做成单独的接口，由前端在用户点开第五个 tab 时才调。
+      if (pathname === '/api/verify' && req.method === 'POST') {
+        const body = JSON.parse(await readBody(req, 1024 * 256));
+        const cands = Array.isArray(body?.candidates) ? body.candidates : [];
+        if (cands.length === 0) { sendJson(res, 400, { error: '没有可验证的候选' }); return; }
+
+        const vcfg = { ...sourceConfig.verify, ...(body.verify ?? {}) };
+        if (!vcfg.enabled) { sendJson(res, 200, { skipped: true, reason: '深度验证已在配置中关闭' }); return; }
+
+        const chrome = await findChrome();
+        if (!chrome) {
+          sendJson(res, 200, {
+            skipped: true,
+            reason: '本机找不到 Chromium，无法做播放嗅探。可用 CINEROUTE_CHROME 指定路径；'
+              + '模拟下载不依赖浏览器，仍可单独使用。',
+          });
+          return;
+        }
+
+        // 白名单同样管住这里：不能让 /api/verify 变成任意地址的打开器
+        const allowed = [];
+        const rejected = [];
+        for (const c of cands) {
+          const v = isAllowedMediaUrl(c.url || '');
+          if (v.ok) allowed.push(c); else rejected.push({ url: c.url, reason: v.reason });
+        }
+        if (allowed.length === 0) {
+          sendJson(res, 403, { error: '候选地址全部不在白名单内', rejected });
+          return;
+        }
+
+        const browser = await getBrowser();
+        const baseUrl = `http://127.0.0.1:${port}`;
+        const out = await verifyWithRounds(
+          allowed,
+          { topN: vcfg.topN, maxRounds: vcfg.maxRounds },
+          {
+            browser, baseUrl,
+            threads: vcfg.threads,
+            probeBytes: vcfg.probeBytes,
+            concurrency: vcfg.concurrency,
+          },
+        );
+        sendJson(res, 200, { ...out, rejected, config: vcfg });
+        return;
+      }
+
       if (pathname === '/api/search') {
         const q = (url.searchParams.get('q') || '').trim();
         if (!q) { sendJson(res, 400, { error: '缺少查询参数 q' }); return; }
@@ -299,6 +362,14 @@ export async function startServer(options = {}) {
       else res.end();
     }
   });
+
+  // 进程退出时把无头浏览器一起收掉，否则会留下孤儿进程和临时目录
+  const shutdown = async () => {
+    if (sharedBrowser) { try { await sharedBrowser.close(); } catch { /* 已经没了 */ } }
+  };
+  process.once('SIGINT', () => { shutdown().finally(() => process.exit(0)); });
+  process.once('SIGTERM', () => { shutdown().finally(() => process.exit(0)); });
+  server.on('close', shutdown);
 
   await new Promise((resolve) => server.listen(port, host, resolve));
 

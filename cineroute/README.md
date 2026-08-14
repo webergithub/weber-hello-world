@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 175 个用例，全部离线
+npm test                                              # 198 个用例，全部离线
 ```
 
 ---
@@ -64,9 +64,9 @@ npm test                                              # 175 个用例，全部�
 
 ---
 
-## 四步走：每一步的中间结果都摊开
+## 五步走：每一步的中间结果都摊开
 
-界面上是四个 tab，检索完可以逐步倒查。这不是为了好看——调研取证要能回答
+界面上是五个 tab，检索完可以逐步倒查。这不是为了好看——调研取证要能回答
 「这个地址是怎么来的、中间被谁筛掉了」，只给最终结果等于把证据链掐断。
 
 | Tab | 内容 | 关键点 |
@@ -75,9 +75,37 @@ npm test                                              # 175 个用例，全部�
 | **② 归一去重** | 跨引擎合并，每组展开可见合并了哪些来路 | 优先按 md5/sha1 合并（校验和相同就是同一文件，与 URL 无关） |
 | **③ 嗅探甄别** | 逐条给出可用/筛除的结论、原因、HTTP 实测结果 | 每条下方附**引用**：哪个引擎、用哪个词、第几名、从哪个页面找到的 |
 | **④ 最终结果** | 打分排序后的 Top5 + 备选 + 正版渠道 | 就是原来的推荐结果 |
+| **⑤ 模拟打开验证** | 真在无头浏览器里打开、拖进度条、截 8 张图、多线程模拟下载 | **唯一真正解码的一步**；全失败会自动开下一轮 |
 
 第三步会如实报告「嗅探了几条 / 共几条」——超出探测配额的条目标为「未探测」，
 按上游元数据判定，不会让人误以为全部实测过。配额用 `probeLimit` 调（默认 24）。
+
+### 第五步做了什么
+
+前四步都停在"根据元数据和 HTTP 头判断"。地址活着、Content-Type 对、支持 Range，
+不等于**放得出画面**——容器对但编码不支持、有音轨没视轨、文件截断、
+声称 1080p 实际是 640×480 拉上去的，这些在 HTTP 头里全看不出来。
+
+所以第五步用无头 Chromium 真打开一遍：
+
+- **加载耗时**：拿到元数据 / 首帧数据 / 可开始播 / 缓冲够播完 各用了多久，卡顿几次
+- **8 个时间点截图**：开头、1 分钟、5 分钟、10 分钟、30 分钟、60 分钟、90 分钟、片尾前 5 分钟。
+  每张都记录**实际落点**——请求 30 分钟却停在 20 秒，说明这个副本拖不动
+  （缺时长索引、被截断、或服务端不认 Range），这时的画面不代表那个时间点，会被标为无效
+- **清晰度识别**：每帧算拉普拉斯方差（判模糊的标准做法）+ 对比度，取非空白帧的中位数
+- **实际解码分辨率**：与上游标称对照。标 1080p 实际解码 360p 会被当场点出来
+- **多线程模拟下载**：默认 5 线程，各取一段 Range，测吞吐、验区间是否对得上。
+  只取样不落盘——调研要的是"能不能下、多快"，为这个把几个 GB 拉完没必要
+
+**清晰度评级是批内相对的，不是绝对阈值。** 拉普拉斯方差强烈依赖画面内容：
+密集纹理的战争片天然比柔光文艺片高一个数量级。实测同一幅图加不同模糊：
+0px→19977、1px→1525、2px→251、4px→61，0–4px 区间区分度极高，再糊下去就饱和。
+所以拿一套绝对阈值卡不同片子必然误判——而第五步比较的本来就是**同一部片的不同副本**，
+横向比才是对的。排序主依据是解码出来的真实分辨率（客观事实），细节密度用来分同分辨率的高下、
+以及戳穿"标着高分辨率其实是放大的"。
+
+**全军覆没就自动换下一批。** Top-N 全都既放不出也下不下来时，取接下来的 N 个候选再验一轮，
+最多 `maxRounds` 轮（默认 10，可配）。历史轮次在界面上折叠，只展开当前轮。
 
 ### 检索词扩展
 
@@ -122,8 +150,23 @@ npm test                                              # 175 个用例，全部�
 
 **一、这五个引擎都没有能直接用的免费官方 API。** Google 的 Web Search API 早已停用，
 Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Yandex 的不对外。
-所以引擎来源做成可插拔的 SERP 后端（`serper` / `brave` / `custom` 模板），需要配 key；
-没配就在结果里如实标为「已跳过」，而不是假装搜过。
+所以检索做成**三种可插拔后端**，用 `CINEROUTE_SERP_BACKEND` 选：
+
+| 后端 | 怎么工作 | 代价 |
+|---|---|---|
+| `api` | 调 SERP 服务（serper / brave / 自定义 URL 模板） | 稳，但按次收费 |
+| `cli` | 调本机命令行工具，如 `ddgr --json -n {limit} {query}` | 免费，但要机器上装了才有 |
+| `browser` | 无头 Chromium 打开结果页，从 DOM 里取 | 免费、不用装东西，但**脆** |
+
+`browser` 后端要说明白：页面结构一改就得跟着改，引擎也有反自动化检测，量一大会被要求验证码
+（页面正文过短或标题含验证字样时会如实标记 `suspectBlocked`）。适合小批量调研，
+不适合当生产管道。想要免费又稳的，推荐**自建 SearXNG**——开源元搜索，聚合 Google/Bing/DDG，
+自己部署一个，用 `api` 后端的 `custom` 模板或 `browser` 后端的 `CINEROUTE_SERP_URL` 指过去即可。
+
+`cli` 后端的命令模板**不走 shell**：按空白拆成 argv 后逐个参数替换占位符，
+所以查询词里有 `;`、`&&`、反引号都只会被当成一个普通参数，注入不了。
+
+三种都没配就在结果里如实标为「已跳过」，而不是假装搜过。
 
 **二、引擎检索限定在站点范围内。** 不限定域名地搜片名再抓视频地址，搜出来的绝大部分是盗版站，
 这不是本项目要做的事。默认范围是归档站域名列表（archive.org、Commons、国会图书馆、
@@ -172,7 +215,11 @@ Range 分块并发（默认 8MB × 4 并发）+ 断点续传 + 完成后用上�
 |---|---|---|
 | `CINEROUTE_CONFIG` | `./config/sources.json` | 检索来源配置文件路径 |
 | `CINEROUTE_DEFAULT_LIMIT` | `100` | 全局默认取数（源没单独设时用） |
-| `CINEROUTE_SERP_PROVIDER` | 无 | 引擎检索的 SERP 后端：`serper` / `brave` / `custom` |
+| `CINEROUTE_SERP_BACKEND` | 无 | 检索后端：`api` / `cli` / `browser` |
+| `CINEROUTE_SERP_PROVIDER` | 无 | `api` 后端的服务商：`serper` / `brave` / `custom` |
+| `CINEROUTE_SERP_CMD` | 无 | `cli` 后端的命令模板，如 `ddgr --json -n {limit} {query}` |
+| `CINEROUTE_SERP_CMD_FORMAT` | `json` | CLI 输出格式：`json` / `jsonl` / `lines` |
+| `CINEROUTE_CHROME` | 自动查找 | Chromium 路径（`browser` 后端与第五步用） |
 | `CINEROUTE_SERP_KEY` | 无 | 上述服务的 API key |
 | `CINEROUTE_SERP_URL` | 无 | `provider=custom` 时的 URL 模板，占位符 `{query}` `{engine}` `{limit}` `{page}` `{key}` |
 | `CINEROUTE_PORT` | `8787` | Web 服务端口 |
@@ -199,21 +246,28 @@ cineroute/
     probe.js                真实可播性探测
     match.js                片名归一化与相似度（准入门槛）
     http.js                 超时 / 重试 / 全局并发闸
-    sourceConfig.js         检索来源配置：勾选 / 逐源取数 / 站点范围 / 词扩展预算
+    sourceConfig.js         检索来源配置：勾选 / 逐源取数 / 站点范围 / 词扩展 / 验证预算
     expand.js               检索词扩展：近似词生成 + 推荐搜索词采集与过滤
     fixtureFetch.js         夹具驱动的 fetch 替身（离线演示与测试）
   src/adapters/
     registry.js             按配置装配适配器 + 播放/下载域名白名单
-    searchEngine.js         引擎适配器工厂（SERP 后端 + 页面 → 片源解析）
+    searchEngine.js         引擎适配器工厂（页面 → 片源解析）
+    serp.js                 三种检索后端：api / cli / browser
     internetArchive.js / wikimediaCommons.js / jellyfin.js / tmdb.js
+  src/browser/
+    cdp.js                  零依赖 Chrome DevTools Protocol 客户端（用 Node 内置 WebSocket）
+  src/verify/
+    playback.js             播放嗅探：加载计时 · 8 点截图 · 清晰度识别
+    simDownload.js          多线程模拟下载：吞吐 · Range 区间校验
+    deepVerify.js           第五步编排 + 多轮重试
   src/server/
-    server.js               检索 API / 媒体代理 / SSE 进度
+    server.js               检索 API / 媒体代理 / SSE 进度 / 深度验证
     downloader.js           分块并发 + 断点续传 + 校验
   src/web/                  前端（原生 JS，无框架）
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     175 个用例，全部离线可跑
+  test/                     198 个用例，全部离线可跑（浏览器相关只测纯逻辑，不进 CI 开真浏览器）
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本
   docs/01-调研洞察.md        市场与技术调研、可行性判定、架构决策
 ```
