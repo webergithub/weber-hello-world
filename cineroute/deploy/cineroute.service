@@ -1,0 +1,66 @@
+# CineRoute 影路 —— systemd 服务单元
+#
+# 安装位置：/etc/systemd/system/cineroute.service
+# 改完执行：systemctl daemon-reload && systemctl restart cineroute
+#
+# 环境变量写在 /etc/cineroute.env（见 install.sh 生成的模板），
+# 不要直接写在这个文件里——那样 API key 会出现在 `systemctl cat` 的输出里。
+
+[Unit]
+Description=CineRoute 影路 —— 影视片源聚合检索
+Documentation=https://github.com/webergithub/weber-hello-world/tree/main/cineroute
+After=network-online.target
+Wants=network-online.target
+
+# 启动失败别无限重试打满日志：5 分钟内连续失败 5 次就停下等人处理。
+# 这两个键属于 [Unit]，写在 [Service] 里 systemd 会忽略（systemd-analyze verify 会报）。
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cineroute
+Group=cineroute
+WorkingDirectory=/opt/cineroute
+
+# 端口、路径、API key 都从这里读。文件不存在时用 - 前缀让服务照常启动。
+EnvironmentFile=-/etc/cineroute.env
+
+# node 装在哪不一定（NodeSource 装到 /usr/bin，nvm 或源码装可能在 /usr/local/bin）。
+# install.sh 检测到路径不同时会写一个 drop-in 覆盖这一行，见
+# /etc/systemd/system/cineroute.service.d/10-node-path.conf
+ExecStart=/usr/bin/node /opt/cineroute/index.js --serve
+
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cineroute
+
+# ── 安全加固 ────────────────────────────────────────────────
+# 这个服务会去取任意上游视频并落盘，权限给得越小越好。
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# ProtectSystem=strict 让整个文件系统只读，所以要显式开出可写目录：
+#   /var/lib/cineroute  —— 下载产物与 sources.json 配置
+# 代码目录 /opt/cineroute 保持只读，服务跑起来后改不了自己的代码。
+ReadWritePaths=/var/lib/cineroute
+
+# 视频下载会同时开多个分块连接，默认的文件描述符上限够用但留点余量
+LimitNOFILE=8192
+
+[Install]
+WantedBy=multi-user.target

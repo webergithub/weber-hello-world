@@ -130,13 +130,17 @@ async function proxyMedia(req, res, target) {
 
 /**
  * 启动服务。
- * @param {{offline?: boolean, offlineOpts?: object, port?: number, downloadDir?: string}} [options]
+ * @param {{offline?: boolean, offlineOpts?: object, port?: number,
+ *          host?: string, downloadDir?: string}} [options]
  */
 export async function startServer(options = {}) {
   const {
     offline = false,
     offlineOpts = {},
     port = Number(process.env.CINEROUTE_PORT || 8787),
+    // 绑定地址。放在 Nginx 之类的反代后面时设成 127.0.0.1，
+    // 否则应用端口自己也对公网开着，绕过反代上的一切限制就能直连。
+    host = process.env.CINEROUTE_HOST || '0.0.0.0',
     downloadDir = process.env.CINEROUTE_DOWNLOAD_DIR || path.resolve(process.cwd(), 'downloads'),
   } = options;
 
@@ -296,10 +300,10 @@ export async function startServer(options = {}) {
     }
   });
 
-  await new Promise((resolve) => server.listen(port, resolve));
+  await new Promise((resolve) => server.listen(port, host, resolve));
 
   console.log(`\n🎬  CineRoute 影路 已启动`);
-  console.log(`    http://localhost:${port}`);
+  console.log(`    http://localhost:${port}${host === '127.0.0.1' ? '  （仅本机可访问）' : ''}`);
   console.log(`    下载目录：${downloadDir}`);
   if (offline) console.log('    ⚠️  离线夹具模式：仅 Night of the Living Dead / Metropolis 有数据，媒体代理与下载不可用');
   console.log('');

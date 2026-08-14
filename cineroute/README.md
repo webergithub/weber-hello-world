@@ -146,6 +146,7 @@ Range 分块并发（默认 8MB × 4 并发）+ 断点续传 + 完成后用上�
 | `CINEROUTE_SERP_KEY` | 无 | 上述服务的 API key |
 | `CINEROUTE_SERP_URL` | 无 | `provider=custom` 时的 URL 模板，占位符 `{query}` `{engine}` `{limit}` `{page}` `{key}` |
 | `CINEROUTE_PORT` | `8787` | Web 服务端口 |
+| `CINEROUTE_HOST` | `0.0.0.0` | 监听地址。放在反代后面设 `127.0.0.1`，否则应用端口自己也对外开着 |
 | `CINEROUTE_DOWNLOAD_DIR` | `./downloads` | 下载目录 |
 | `CINEROUTE_REGION` | `US` | 正版渠道地区 |
 | `CINEROUTE_LANGUAGE` | `zh-CN` | TMDB 语言 |
@@ -182,8 +183,28 @@ cineroute/
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
   test/                     155 个用例，全部离线可跑
+  deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本
   docs/01-调研洞察.md        市场与技术调研、可行性判定、架构决策
 ```
+
+---
+
+## 部署到服务器
+
+零依赖，所以部署就是拉代码 + systemd + Nginx 反代，不需要 `npm install` 也不需要构建。
+
+```bash
+git clone --depth 1 -b claude/movie-tv-search-platform-gwzo4k \
+  https://github.com/webergithub/weber-hello-world.git /tmp/cineroute-src
+sudo bash /tmp/cineroute-src/cineroute/deploy/install.sh
+```
+
+完整步骤、Nginx 配置、以及三个容易踩的坑（SELinux、OCI 安全列表、IPv6）
+见 [`deploy/README.md`](deploy/README.md)。
+
+> **挂公网前注意**：这套接口没有登录认证。`/media` 和 `/api/download` 有域名白名单
+> （内网地址与 `file://` 一律拒绝），不会被拿去打内网，但会被拿去白嫖带宽。
+> `deploy/nginx.conf` 里留了 Basic Auth 和 IP 白名单两种口子，二选一打开。
 
 ---
 
