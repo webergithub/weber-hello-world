@@ -125,8 +125,13 @@ test('/api/search?stream=1 边跑边推进度，最后推一帧完整结果', as
   const server = await startServer({
     offline: true,
     offlineOpts: { ...offline(), serp: { ...FIXTURE_SERP_CONFIG } },
+    // 显式给配置，别去读磁盘上的 config/sources.json——
+    // 那个文件的内容取决于跑测试的人在界面上改过什么
+    config: defaultConfig(),
     port: 0,
     host: '127.0.0.1',
+    // 必须静音：node --test 下子进程的 stdout 就是测试运行器的序列化通道
+    quiet: true,
   });
   const { port } = server.address();
 
@@ -157,8 +162,11 @@ test('不带 stream=1 时仍返回一整个 JSON，脚本调用方不受影响',
   const server = await startServer({
     offline: true,
     offlineOpts: { ...offline(), serp: { ...FIXTURE_SERP_CONFIG } },
+    config: defaultConfig(),
     port: 0,
     host: '127.0.0.1',
+    // 必须静音：node --test 下子进程的 stdout 就是测试运行器的序列化通道
+    quiet: true,
   });
   const { port } = server.address();
   try {

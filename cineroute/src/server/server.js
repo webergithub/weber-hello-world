@@ -134,8 +134,19 @@ async function proxyMedia(req, res, target) {
 
 /**
  * 启动服务。
- * @param {{offline?: boolean, offlineOpts?: object, port?: number,
- *          host?: string, downloadDir?: string}} [options]
+ *
+ * `config` 传了就用传进来的，不去读磁盘上的配置文件。测试要靠它：
+ * 否则一次运行的结果取决于 `config/sources.json` 当时恰好是什么内容，
+ * 换台机器、或者刚在界面上改过设置，同一个测试就会给出不同结果。
+ *
+ * `quiet` 关掉启动横幅。这不是"少打点日志"的偏好问题：`node --test` 跑
+ * 测试文件时，子进程的 **stdout 就是测试运行器的序列化通道**，往里写东西
+ * 会把协议帧撞坏，报出来是一句莫名其妙的
+ * `Unable to deserialize cloned data due to invalid or unsupported version.`，
+ * 而且时有时无。作为库函数被调用时本来也不该擅自往 stdout 上写。
+ *
+ * @param {{offline?: boolean, offlineOpts?: object, port?: number, host?: string,
+ *          downloadDir?: string, config?: object, quiet?: boolean}} [options]
  */
 export async function startServer(options = {}) {
   const {
@@ -146,6 +157,7 @@ export async function startServer(options = {}) {
     // 否则应用端口自己也对公网开着，绕过反代上的一切限制就能直连。
     host = process.env.CINEROUTE_HOST || '0.0.0.0',
     downloadDir = process.env.CINEROUTE_DOWNLOAD_DIR || path.resolve(process.cwd(), 'downloads'),
+    quiet = false,
   } = options;
 
   const downloads = new DownloadManager({ dir: downloadDir, concurrency: 2 });
@@ -154,7 +166,7 @@ export async function startServer(options = {}) {
 
   // 数据源配置：进程启动时读一次，PUT /api/sources 之后就地更新。
   // 配置文件不存在也能跑——loadConfig 会回落到出厂默认。
-  let sourceConfig = await loadConfig();
+  let sourceConfig = options.config ? normalizeConfig(options.config) : await loadConfig();
 
   // 深度验证要开无头浏览器。开一次很贵（两秒多），所以进程内复用一个实例，
   // 用完不关；进程退出时统一收。并发由 verify.concurrency 控制页面数。
@@ -488,11 +500,13 @@ export async function startServer(options = {}) {
   // 直接打印入参会打出 http://localhost:0 这种没法点的地址。
   const boundPort = server.address()?.port ?? port;
 
-  console.log(`\n🎬  CineRoute 影路 已启动`);
-  console.log(`    http://localhost:${boundPort}${host === '127.0.0.1' ? '  （仅本机可访问）' : ''}`);
-  console.log(`    下载目录：${downloadDir}`);
-  if (offline) console.log('    ⚠️  离线夹具模式：仅 Night of the Living Dead / Metropolis 有数据，媒体代理与下载不可用');
-  console.log('');
+  if (!quiet) {
+    console.log(`\n🎬  CineRoute 影路 已启动`);
+    console.log(`    http://localhost:${boundPort}${host === '127.0.0.1' ? '  （仅本机可访问）' : ''}`);
+    console.log(`    下载目录：${downloadDir}`);
+    if (offline) console.log('    ⚠️  离线夹具模式：仅 Night of the Living Dead / Metropolis 有数据，媒体代理与下载不可用');
+    console.log('');
+  }
 
   return server;
 }

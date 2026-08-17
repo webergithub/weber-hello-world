@@ -15,13 +15,33 @@ const NOISE_TOKENS = new Set([
   'official', 'part', 'reel', 'edition', 'cut', 'version',
 ]);
 
-/** 一眼可判定"不是正片"的词。命中即降级，不参与 Top5。 */
-const NON_FEATURE_HINTS = [
-  'trailer', 'teaser', 'preview', 'clip', 'excerpt', 'behind the scenes',
+/**
+ * 一眼可判定"不是正片"的词。命中即降级，不参与 Top5。
+ *
+ * 拉丁文的部分必须**按整词匹配**。原来是裸的 includes()，于是
+ * `Ghostbusters` 里的 ost、`Eclipse` 里的 clip、`Lost in Translation`
+ * 里的 ost 全部误命中——后果不轻：完整度维度直接归零并标记为可疑，
+ * 等于把一部正片踢出推荐位。
+ */
+const NON_FEATURE_HINTS_LATIN = [
+  'trailer', 'teaser', 'preview', 'clip', 'clips', 'excerpt', 'behind the scenes',
   'making of', 'interview', 'commentary', 'review', 'reaction',
   'soundtrack', 'ost', 'sample', 'promo', 'outtake', 'blooper',
+];
+
+/** 中文没有词边界，只能按子串匹配——这几个词也确实不会嵌在别的词里。 */
+const NON_FEATURE_HINTS_CJK = [
   '预告', '片段', '花絮', '解说', '影评', '幕后', '访谈', '主题曲',
 ];
+
+/** 供外部查看的完整表（顺序即匹配顺序）。 */
+export const NON_FEATURE_HINTS = [...NON_FEATURE_HINTS_LATIN, ...NON_FEATURE_HINTS_CJK];
+
+/** 整词匹配：前后都不能紧邻字母或数字。 */
+const LATIN_HINT_RE = NON_FEATURE_HINTS_LATIN.map((h) => [
+  h,
+  new RegExp(`(?<![a-z0-9])${h.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![a-z0-9])`, 'i'),
+]);
 
 const CJK_RE = /[㐀-䶿一-鿿぀-ヿ가-힯]/;
 
@@ -141,31 +161,67 @@ export function yearCompatible(queryYear, candidateYear, tolerance = 2) {
 
 /**
  * 是否疑似"非正片"（预告/花絮/解说）。
+ *
+ * 传进来的多半是文件名，所以先把 `_` `-` `.` 当成分词符换成空格：
+ * `notld_behind_the_scenes.mp4` 与 `notld behind the scenes.mp4`
+ * 说的是同一件事，不该一个判得出一个判不出。
+ *
  * @param {string} text
  * @returns {string|null} 命中的提示词，未命中返回 null
  */
 export function nonFeatureHint(text) {
   if (!text) return null;
-  const lower = String(text).toLowerCase();
-  for (const hint of NON_FEATURE_HINTS) {
-    if (lower.includes(hint)) return hint;
+  const raw = String(text);
+  const spaced = raw.replace(/[_\-–—.]+/g, ' ');
+
+  for (const [hint, re] of LATIN_HINT_RE) {
+    if (re.test(spaced)) return hint;
+  }
+  for (const hint of NON_FEATURE_HINTS_CJK) {
+    if (raw.includes(hint)) return hint;
   }
   return null;
 }
 
 /**
  * 从自由文本中抽取查询里的年份，例如 "教父 1972" / "Metropolis (1927)"。
+ *
+ * 结尾的四位数不一定是年份，很多时候是片名的一部分：
+ * 《唐探1900》《Blade Runner 2049》《2012》《1917》。剥错了就是拿着
+ * 半个片名去搜，搜出来的东西全不对。所以加了两道闸：
+ *
+ *  1) **年份前面必须有分隔符**（空格或左括号）。`唐探1900` 里的 1900
+ *     紧贴汉字，是片名的一部分；`唐探1900 2025` 里的 2025 前面有空格，
+ *     才是用户手输的年份。
+ *  2) **不接受太靠后的年份**。2049 年的电影还不存在，出现在片名结尾
+ *     只可能是片名自带的。上限给到今年 +2，留出已定档新片的余量。
+ *
+ * 整串就是一个年份时（《2012》《1917》）两头落空，此时保留整串作片名，
+ * 同时把年份也报出来——用户输 "2012" 既可能想搜那部片，也可能想搜那一年。
+ *
  * @param {string} q
+ * @param {{maxYear?: number}} [opts] maxYear 可注入，方便测试不受当前日期影响
  * @returns {{title: string, year: number|null}}
  */
-export function parseQuery(q) {
+export function parseQuery(q, opts = {}) {
   const raw = String(q || '').trim();
-  const m = raw.match(/\(?\b((?:18|19|20)\d{2})\b\)?\s*$/);
+  const maxYear = opts.maxYear ?? new Date().getFullYear() + 2;
+
+  // 整串就是一个年份
+  if (/^\(?((?:18|19|20)\d{2})\)?$/.test(raw)) {
+    return { title: raw, year: Number(raw.replace(/[()]/g, '')) };
+  }
+
+  // 结尾年份：前面必须是空白或左括号
+  const m = raw.match(/(?:^|[\s(])\(?((?:18|19|20)\d{2})\)?\s*$/);
   if (!m) return { title: raw, year: null };
-  return {
-    title: raw.slice(0, m.index).trim() || raw,
-    year: Number(m[1]),
-  };
+
+  const year = Number(m[1]);
+  // 未来太远的不是上映年份，是片名的一部分（Blade Runner 2049）
+  if (year > maxYear) return { title: raw, year: null };
+
+  const title = raw.slice(0, m.index).trim();
+  return title ? { title, year } : { title: raw, year };
 }
 
 /**

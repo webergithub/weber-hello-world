@@ -17,6 +17,8 @@
  * 见 capTerms()。
  */
 
+import { normalizeTitle, tokenize } from './match.js';
+
 /** 中日韩字符：这类片名不适用英文的冠词/词序规则。 */
 const CJK = /[㐀-䶿一-鿿぀-ヿ가-힯]/;
 
@@ -106,12 +108,26 @@ export function harvestRelated(provider, data) {
   });
 }
 
+/** 推荐词要覆盖片名多大比例的实词才算相关。 */
+const RELEVANCE = 0.6;
+
 /**
  * 推荐词质量过滤。
  *
  * 引擎返回的相关搜索里混着大量与本次调研无关的东西
  *（演员八卦、周边商品、"xxx 影评"）。只保留还带着原片名的，
  * 否则第二轮会拿着一堆跑题的词去搜，白烧配额还污染候选池。
+ *
+ * 判据是**实词覆盖率**：把片名和候选词都过一遍归一化 + 切词
+ *（英文按空格切并去掉冠词之类的噪音词，中日韩切成字符 bigram），
+ * 片名的实词有六成以上出现在候选词里才留下。
+ *
+ * 之前是"取片名里最长的那个词当锚点，看候选词包不包含它"，有两处塌陷：
+ *  - 锚点是从**原始**片名切的，标点会粘进去：《Dune: Part Two》的锚点
+ *    成了 `dune:`，而引擎返回的相关搜索早把标点洗掉了（`dune part two
+ *    full movie`），于是一条都留不下，第二轮白跑；
+ *  - 反过来，单个词的锚点又太松：《Killers of the Flower Moon》的锚点是
+ *    `killers`，`killers of the kill floor` 这种也照收。
  *
  * @param {string[]} terms
  * @param {string} title
@@ -120,15 +136,18 @@ export function harvestRelated(provider, data) {
 export function filterSuggested(terms, title, already = new Set()) {
   const t = clean(title).toLowerCase();
   if (!t) return [];
-  // 片名里最长的那个词作为锚点；太短的词（如 "the"）不足以判断相关性
-  const anchor = t.split(/\s+/).sort((a, b) => b.length - a.length)[0] || t;
-  const useAnchor = anchor.length >= 4 || CJK.test(anchor);
+
+  const titleTokens = [...new Set(tokenize(normalizeTitle(title)))];
+  if (titleTokens.length === 0) return [];
+  const need = Math.max(1, Math.ceil(titleTokens.length * RELEVANCE));
 
   return terms.filter((term) => {
     const k = clean(term).toLowerCase();
     if (!k || already.has(k)) return false;
     if (k === t) return false;
-    return useAnchor ? k.includes(anchor) : k.includes(t);
+    const termTokens = new Set(tokenize(normalizeTitle(term)));
+    const covered = titleTokens.filter((x) => termTokens.has(x)).length;
+    return covered >= need;
   });
 }
 
