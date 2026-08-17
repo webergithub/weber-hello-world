@@ -14,6 +14,7 @@
 import { spawn } from 'node:child_process';
 import { httpJson } from '../core/http.js';
 import { harvestRelated } from '../core/expand.js';
+import { findChromeSync } from '../browser/cdp.js';
 
 export const SERP_BACKENDS = ['api', 'cli', 'browser'];
 /** api 后端下支持的服务商。 */
@@ -22,49 +23,100 @@ export const SERP_PROVIDERS = ['serper', 'brave', 'custom'];
 /** 每个引擎单次请求能拿多少条，用来算要翻几页。 */
 export const PAGE_SIZE = { google: 10, bing: 50, baidu: 10, yandex: 10, duckduckgo: 10 };
 
-export function serpSettings(env = process.env) {
+/**
+ * 合并「设置页里填的」与「环境变量里给的」。
+ *
+ * 规则：**设置页填了就用设置页的，留空的字段才回落到环境变量。**
+ * 这样界面上改完立刻生效（否则用户在设置页改了没反应，只会觉得是坏的），
+ * 同时保留用环境变量部署的老路子——尤其是 API key，不想写进配置文件的
+ * 可以只放环境变量，设置页那一栏空着即可。
+ *
+ * @param {object} [env]
+ * @param {object} [cfg] 配置文件里的 serp 块
+ */
+export function serpSettings(env = process.env, cfg = null) {
+  const t = (v) => (v == null ? '' : String(v).trim());
+  const or = (a, b) => t(a) || t(b) || null;
+  // backend 的 'auto' 表示"没明说"，要继续往环境变量找，都没有就交给 resolveBackend 猜
+  const explicit = cfg?.backend && cfg.backend !== 'auto' ? cfg.backend : t(env.CINEROUTE_SERP_BACKEND);
   return {
-    backend: env.CINEROUTE_SERP_BACKEND || (env.CINEROUTE_SERP_PROVIDER ? 'api' : null),
-    provider: env.CINEROUTE_SERP_PROVIDER || null,
-    key: env.CINEROUTE_SERP_KEY || null,
-    urlTemplate: env.CINEROUTE_SERP_URL || null,
-    cmd: env.CINEROUTE_SERP_CMD || null,
-    cmdFormat: env.CINEROUTE_SERP_CMD_FORMAT || 'json',
-    chrome: env.CINEROUTE_CHROME || null,
+    backend: explicit || null,
+    provider: or(cfg?.provider, env.CINEROUTE_SERP_PROVIDER),
+    key: or(cfg?.key, env.CINEROUTE_SERP_KEY),
+    urlTemplate: or(cfg?.urlTemplate, env.CINEROUTE_SERP_URL),
+    cmd: or(cfg?.cmd, env.CINEROUTE_SERP_CMD),
+    cmdFormat: or(cfg?.cmdFormat, env.CINEROUTE_SERP_CMD_FORMAT) || 'json',
+    chrome: or(cfg?.chromePath, env.CINEROUTE_CHROME),
+    timeoutMs: Number(cfg?.timeoutMs) > 0 ? Number(cfg.timeoutMs) : 25000,
+    settleMs: Number.isFinite(Number(cfg?.settleMs)) ? Number(cfg.settleMs) : 800,
   };
 }
 
 /**
- * 后端是否配齐了。没配齐要说清楚缺什么，不能假装能搜。
- * @returns {{available: boolean, reason: string|null}}
+ * 决定这次到底走哪条路。
+ *
+ * 没有显式指定时按「已经配好了什么」自动挑，顺序是 api → cli → browser：
+ * 付费服务最稳所以优先；命令行工具次之；无头浏览器免配置但最脆，排最后。
+ * 一条都不通就返回 backend=null，由 checkBackend 组织成一句人话。
+ *
+ * @param {object} settings serpSettings() 的产物
+ * @param {{hasChrome?: boolean}} [opts] 显式给出 Chromium 是否存在（测试用，
+ *        也让调用方在已经启动过浏览器时省掉一次文件探测）
  */
-export function checkBackend(env = process.env) {
-  const s = serpSettings(env);
-  if (!s.backend) {
-    return { available: false, reason: '未配置检索后端（CINEROUTE_SERP_BACKEND=api|cli|browser）' };
+export function resolveBackend(settings, opts = {}) {
+  if (settings.backend) return { backend: settings.backend, auto: false, why: null };
+  if (settings.provider) return { backend: 'api', auto: true, why: '已配置 SERP 服务商，自动选用 api' };
+  if (settings.cmd) return { backend: 'cli', auto: true, why: '已配置命令行工具，自动选用 cli' };
+  const hasChrome = opts.hasChrome ?? Boolean(findChromeSync(settings.chrome));
+  if (hasChrome) return { backend: 'browser', auto: true, why: '本机有 Chromium，自动选用无头浏览器打开结果页' };
+  return { backend: null, auto: true, why: null };
+}
+
+/**
+ * 后端是否配齐了。没配齐要说清楚缺什么，不能假装能搜。
+ *
+ * @param {object} [env]
+ * @param {object} [cfg] 配置文件里的 serp 块
+ * @param {{hasChrome?: boolean}} [opts]
+ * @returns {{available: boolean, backend: string|null, auto: boolean,
+ *            why: string|null, reason: string|null}}
+ */
+export function checkBackend(env = process.env, cfg = null, opts = {}) {
+  const s = serpSettings(env, cfg);
+  const { backend, auto, why } = resolveBackend(s, opts);
+  const no = (reason) => ({ available: false, backend, auto, why, reason });
+  const yes = () => ({ available: true, backend, auto, why, reason: null });
+
+  if (!backend) {
+    return no('没有可用的检索后端：没配 SERP 服务商、没配命令行工具，本机也找不到 Chromium。'
+      + '到设置页「检索后端」里选一种，或装个 Chromium 让它自动走无头浏览器');
   }
-  if (!SERP_BACKENDS.includes(s.backend)) {
-    return { available: false, reason: `不认识的后端 ${s.backend}，可选：${SERP_BACKENDS.join(' / ')}` };
+  if (!SERP_BACKENDS.includes(backend)) {
+    return no(`不认识的后端 ${backend}，可选：${SERP_BACKENDS.join(' / ')}`);
   }
-  if (s.backend === 'api') {
-    if (!s.provider) return { available: false, reason: '未配置 CINEROUTE_SERP_PROVIDER' };
+  if (backend === 'api') {
+    if (!s.provider) return no('api 后端需要选一个服务商（设置页「检索后端」，或 CINEROUTE_SERP_PROVIDER）');
     if (!SERP_PROVIDERS.includes(s.provider)) {
-      return { available: false, reason: `不认识的服务商 ${s.provider}，可选：${SERP_PROVIDERS.join(' / ')}` };
+      return no(`不认识的服务商 ${s.provider}，可选：${SERP_PROVIDERS.join(' / ')}`);
     }
     if (s.provider === 'custom' && !s.urlTemplate) {
-      return { available: false, reason: 'provider=custom 需要同时配置 CINEROUTE_SERP_URL' };
+      return no('provider=custom 需要同时填 URL 模板（CINEROUTE_SERP_URL）');
     }
-    if (s.provider !== 'custom' && !s.key) return { available: false, reason: '未配置 CINEROUTE_SERP_KEY' };
-    return { available: true, reason: null };
+    if (s.provider !== 'custom' && !s.key) return no('缺 API key（设置页「检索后端」，或 CINEROUTE_SERP_KEY）');
+    return yes();
   }
-  if (s.backend === 'cli') {
+  if (backend === 'cli') {
     if (!s.cmd) {
-      return { available: false, reason: '未配置 CINEROUTE_SERP_CMD（命令模板，如 `ddgr --json -n {limit} {query}`）' };
+      return no('cli 后端需要填命令模板，如 `ddgr --json -n {limit} {query}`（CINEROUTE_SERP_CMD）');
     }
-    return { available: true, reason: null };
+    return yes();
   }
-  // browser：不需要配置，找得到 Chromium 就能跑
-  return { available: true, reason: null };
+  // browser：不用配，但机器上得真有 Chromium
+  const hasChrome = opts.hasChrome ?? Boolean(findChromeSync(s.chrome));
+  if (!hasChrome) {
+    return no('选了 browser 后端，但本机找不到 Chromium。装一个，或在设置页填浏览器路径（CINEROUTE_CHROME）');
+  }
+  return yes();
 }
 
 /* ───────────────────── api 后端 ───────────────────── */
@@ -320,16 +372,17 @@ export async function browserSearchPage(browser, engine, q, page, pageSize, opts
  * @param {string} engine
  * @param {string} q 已拼好 site: 限定的查询串
  * @param {{limit?: number, signal?: AbortSignal, fetchJson?: Function, env?: object,
- *          browser?: object, onRelated?: Function}} [opts]
+ *          serp?: object, browser?: object, onRelated?: Function}} [opts]
  * @returns {Promise<{results: object[], related: string[], backend: string, notes: string[]}>}
  */
 export async function runSerp(engine, q, opts = {}) {
   const { limit = 100, signal, fetchJson = httpJson, env = process.env, browser, onRelated } = opts;
-  const settings = serpSettings(env);
-  const verdict = checkBackend(env);
+  const settings = serpSettings(env, opts.serp);
+  // 已经拿到浏览器实例就不必再去磁盘上找 Chromium 了
+  const verdict = checkBackend(env, opts.serp, browser ? { hasChrome: true } : {});
   if (!verdict.available) throw new Error(verdict.reason);
 
-  const backend = settings.backend;
+  const backend = verdict.backend;
   const pageSize = PAGE_SIZE[engine] ?? 10;
   const pages = Math.min(10, Math.ceil(limit / pageSize));
   const results = [];
@@ -352,7 +405,10 @@ export async function runSerp(engine, q, opts = {}) {
       } else {
         if (!browser) throw new Error('browser 后端需要调用方传入已启动的浏览器连接');
         const r = await browserSearchPage(browser, engine, q, page, pageSize, {
-          ...opts, urlTemplate: settings.urlTemplate,
+          ...opts,
+          urlTemplate: settings.urlTemplate,
+          timeoutMs: opts.timeoutMs ?? settings.timeoutMs,
+          settleMs: opts.settleMs ?? settings.settleMs,
         });
         items = r.results;
         if (page === 1) related.push(...r.related);

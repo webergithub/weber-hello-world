@@ -287,8 +287,15 @@ test('各引擎的结果页地址带上了分页参数', () => {
   assert.match(engineSearchUrl('yandex', 'x', 2, 10), /p=1/);
 });
 
-test('browser 后端不需要任何配置就算可用；cli 缺命令则不可用', () => {
-  assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'browser' }).available, true);
-  assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'cli' }).available, false);
-  assert.equal(checkBackend({}).available, false);
+test('browser 后端不用填配置，但得真有 Chromium；cli 缺命令则不可用', () => {
+  const has = { hasChrome: true };
+  const none = { hasChrome: false };
+  assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'browser' }, null, has).available, true);
+  assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'browser' }, null, none).available, false);
+  assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'cli' }, null, has).available, false);
+  // 什么都没配、机器上也没有 Chromium —— 三条路都不通
+  assert.equal(checkBackend({}, null, none).available, false);
+  // 什么都没配但有 Chromium —— 自动走无头浏览器，这是开箱即用那条路
+  assert.equal(checkBackend({}, null, has).available, true);
+  assert.equal(checkBackend({}, null, has).backend, 'browser');
 });

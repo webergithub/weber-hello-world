@@ -96,15 +96,29 @@ export async function probeSource(source, opts = {}) {
 /**
  * 批量探测。只探测前 `limit` 个，其余原样返回。
  *
+ * `onProbed` 每探完一个就回调一次（含失败的那些，回调拿到的是原始条目）。
+ * 这是给进度条用的：探测是整条管线里最慢的两步之一，不逐条回报的话
+ * 界面会在这里静默好几秒。
+ *
  * @param {object[]} sources 已按预排名排序
- * @param {{limit?: number, signal?: AbortSignal, probeFn?: typeof httpProbeHeaders}} [opts]
+ * @param {{limit?: number, signal?: AbortSignal, probeFn?: typeof httpProbeHeaders,
+ *          onProbed?: (source: object) => void}} [opts]
  * @returns {Promise<object[]>}
  */
 export async function probeAll(sources, opts = {}) {
-  const { limit = 12 } = opts;
+  const { limit = 12, onProbed } = opts;
   const head = sources.slice(0, limit);
   const tail = sources.slice(limit);
 
-  const probed = await settleAll(head.map((s) => () => probeSource(s, opts)));
+  const probed = await settleAll(head.map((s, i) => async () => {
+    try {
+      const out = await probeSource(s, opts);
+      if (onProbed) { try { onProbed(out ?? head[i]); } catch { /* 回调出错不影响探测 */ } }
+      return out;
+    } catch (err) {
+      if (onProbed) { try { onProbed(head[i]); } catch { /* 同上 */ } }
+      throw err;
+    }
+  }));
   return [...probed.map((p, i) => p ?? head[i]), ...tail];
 }

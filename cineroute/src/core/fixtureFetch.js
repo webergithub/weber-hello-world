@@ -39,6 +39,25 @@ export function applyFixtureSerpEnv(env = process.env) {
 }
 
 /**
+ * 离线模式的 serp 配置块（与上面的环境变量等价）。
+ *
+ * 环境变量那份挡不住配置文件——用户在设置页选了 browser 之后，配置里的
+ * 显式后端会盖过环境变量，`--offline` 就跑不通了。所以离线模式额外把这份
+ * 直接塞进检索参数，硬性指到夹具上。
+ */
+export const FIXTURE_SERP_CONFIG = {
+  backend: 'api',
+  provider: 'custom',
+  key: '',
+  urlTemplate: FIXTURE_SERP_ENV.CINEROUTE_SERP_URL,
+  cmd: '',
+  cmdFormat: 'json',
+  chromePath: '',
+  timeoutMs: 25000,
+  settleMs: 0,
+};
+
+/**
  * 创建一个签名与 httpJson 兼容的函数。
  * @param {string} [dir]
  * @returns {(url: string, opts?: object) => Promise<any>}

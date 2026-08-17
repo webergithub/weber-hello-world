@@ -16,7 +16,10 @@
         <p class="tagline">一次输入 · 多源并发 · 深度解析真实片源 · Top5 点开即播</p>
       </div>
     </div>
-    <div id="modeBadge" class="badge hidden"></div>
+    <div class="topbar-right">
+      <div id="modeBadge" class="badge hidden"></div>
+      <a class="ghost-btn" href="/settings.html">⚙️ 设置</a>
+    </div>
   </header>
 
   <form id="searchForm" class="search">
@@ -30,87 +33,20 @@
     受版权保护的作品只给出正版观看渠道，不解析播放地址。
   </p>
 
-  <!-- 固定模块：排在检索来源之前，因为它先跑 -->
-  <section class="panel priority-panel">
-    <div class="sources-head">
-      <h2>📌 优先来源</h2>
-      <span id="prioritySummary" class="sources-summary"></span>
-      <label class="pick"><input id="priorityEnabled" type="checkbox" checked> 启用</label>
-      <button id="priorityToggle" class="toggle" type="button" aria-expanded="false">展开设置</button>
+  <!-- 检索前的一眼状态：后端通不通、启用了哪些源。改配置去设置页。 -->
+  <section id="readyBar" class="ready-bar"></section>
+
+  <!-- 检索进度：点检索后出现，实时显示当前在做什么 -->
+  <section id="progress" class="progress-panel hidden">
+    <div class="progress-head">
+      <span id="progressPhase" class="progress-phase"></span>
+      <span class="spacer"></span>
+      <span id="progressPct" class="progress-pct"></span>
+      <span id="progressElapsed" class="progress-elapsed"></span>
     </div>
-
-    <p class="field-note priority-note">
-      先查这些站点上<strong>有没有这部片子</strong>，命中就记一条取证记录
-      （地址 + 页面标题 + 发现时间，可选截图）。
-      <strong>只回答「在不在」，不解析播放地址</strong>——结果进线索列表，
-      不进播放/下载通道，也不会被加进媒体白名单。
-    </p>
-
-    <div id="priorityBody" class="sources-body hidden">
-      <p class="field-note">一行一个域名。整条 URL 粘进来也行，会自动剥成域名。</p>
-      <textarea id="priorityDomains" rows="4" spellcheck="false"
-                placeholder="yifan.tv&#10;olevod.com"></textarea>
-
-      <div class="global-row" style="margin-top:12px">
-        <label class="field"><span>每站取前</span>
-          <input id="priorityLimit" type="number" min="1" max="100" value="10"></label>
-        <label class="pick"><input id="priorityShots" type="checkbox"> 给命中页面截图存证</label>
-        <span class="field-note">截图要开无头浏览器，慢一些。</span>
-        <span class="spacer"></span>
-        <button id="prioritySave" type="button">保存并生效</button>
-        <span id="prioritySaveState" class="field-note"></span>
-      </div>
-    </div>
-  </section>
-
-  <section class="panel sources">
-    <div class="sources-head">
-      <h2>🔎 检索来源</h2>
-      <span id="sourceSummary" class="sources-summary"></span>
-      <button id="sourceToggle" class="toggle" type="button" aria-expanded="false">展开设置</button>
-    </div>
-
-    <div id="sourceBody" class="sources-body hidden">
-      <div class="global-row">
-        <label class="field">
-          <span>全局默认取数</span>
-          <input id="defaultLimit" type="number" min="1" max="1000" step="10">
-        </label>
-        <span class="field-note">没有单独设数量的来源用这个值。</span>
-        <span class="spacer"></span>
-        <button id="sourceReset" class="toggle" type="button">恢复出厂</button>
-      </div>
-
-      <h3>搜索引擎</h3>
-      <p class="field-note">
-        勾选后按下面的数量取该引擎的前 N 条结果，每个引擎可单独设。
-        <span id="serpState" class="serp-state"></span>
-      </p>
-      <div id="engineList" class="source-rows"></div>
-
-      <div class="add-row">
-        <select id="addEngineSelect" aria-label="要添加的搜索引擎"></select>
-        <input id="addEngineName" type="text" placeholder="或填其他引擎名，如 yandex" spellcheck="false">
-        <input id="addEngineLimit" type="number" min="1" max="1000" placeholder="数量" value="100">
-        <button id="addEngineBtn" class="toggle" type="button">+ 添加引擎</button>
-      </div>
-
-      <h3>专用数据源</h3>
-      <p class="field-note">有专门的解析器，直接产出结构化片源，不依赖搜索引擎。</p>
-      <div id="builtinList" class="source-rows"></div>
-
-      <h3>站点范围</h3>
-      <p class="field-note">
-        引擎检索会被限定在这些域名内（拼成 <code>site:</code> 条件）。
-        一行一个域名，可以自己增删。
-      </p>
-      <textarea id="siteScope" rows="6" spellcheck="false"></textarea>
-
-      <div class="save-row">
-        <button id="sourceSave" type="button">保存并生效</button>
-        <span id="sourceSaveState" class="field-note"></span>
-      </div>
-    </div>
+    <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+    <p id="progressDetail" class="progress-detail"></p>
+    <ol id="progressLog" class="progress-log"></ol>
   </section>
 
   <section id="status" class="status hidden"></section>

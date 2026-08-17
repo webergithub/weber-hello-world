@@ -14,6 +14,7 @@ import { probeAll } from './probe.js';
 import { buildAdapters, adapterAvailability } from '../adapters/registry.js';
 import { defaultConfig } from './sourceConfig.js';
 import { planFirstRound, planSecondRound } from './expand.js';
+import { createReporter } from './progress.js';
 
 /**
  * 把两轮的适配器结果按源合并。
@@ -56,19 +57,22 @@ function mergeRuns(runs1, runs2) {
  * 给单个适配器套超时与错误隔离，返回统一的状态记录。
  * `limit` 是这一次该取多少条——来自配置，不是写死的。
  */
-async function runAdapter({ adapter, limit }, query, opts) {
+async function runAdapter({ adapter, limit }, query, opts, onSettled = null) {
   const started = Date.now();
   const availability = adapterAvailability(adapter);
   const base = { id: adapter.id, label: adapter.label, kind: adapter.kind, limit: limit ?? null };
+  // 每个源跑完就立刻回报一次，而不是等 Promise.all 全部结束——
+  // 界面上要看到"哪个源已经回来了、拿到几条"，等齐了才报就没有过程可言了。
+  const settle = (rec) => { if (onSettled) onSettled(rec); return rec; };
 
   if (!availability.available) {
-    return { ...base, status: 'skipped', reason: availability.reason, count: 0, elapsedMs: 0, result: null };
+    return settle({ ...base, status: 'skipped', reason: availability.reason, count: 0, elapsedMs: 0, result: null });
   }
 
   try {
     const result = await adapter.search(query, limit == null ? opts : { ...opts, limit });
     const count = (result?.sources?.length ?? 0) || (result?.offers?.length ?? 0);
-    return {
+    return settle({
       ...base,
       status: result?.error ? 'error' : 'ok',
       reason: result?.error ?? null,
@@ -77,14 +81,42 @@ async function runAdapter({ adapter, limit }, query, opts) {
       stats: result?.stats ?? null,
       elapsedMs: Date.now() - started,
       result,
-    };
+    });
   } catch (err) {
-    return {
+    return settle({
       ...base,
       status: 'error', reason: String(err?.message || err),
       count: 0, elapsedMs: Date.now() - started, result: null,
-    };
+    });
   }
+}
+
+
+/**
+ * 把一个源的收工状态翻成一行进度消息。
+ *
+ * 三种状态都要如实说：ok 报拿到多少条，skipped 报为什么没跑，
+ * error 报错在哪。以前这些只能等整次检索结束后在"数据源"面板里看，
+ * 过程中界面是黑的。
+ */
+function reportRun(report, rec, done, total) {
+  const status = { ok: 'ok', skipped: 'warn', error: 'err' }[rec.status] ?? 'info';
+  const st = rec.stats;
+  // stats 的形状按源的种类不同：引擎源报"搜到/解析出/没解析器"，
+  // 优先来源报"查了几个站、命中几条"。不能拿一套字段去套所有源，
+  // 否则会打出一行「返回 undefined 条」。
+  let detail;
+  if (rec.status !== 'ok') detail = rec.reason;
+  else if (st && st.returned != null) {
+    detail = `返回 ${st.returned} 条，解析出 ${st.resolved} 个片源、${st.unresolved} 条线索`;
+  } else if (st && st.hits != null) {
+    detail = `查了 ${st.domains} 个站点，命中 ${st.hits} 条存在性记录`;
+  } else {
+    detail = `${rec.count} 条`;
+  }
+  report.step(`${rec.label} · ${{ ok: '完成', skipped: '跳过', error: '出错' }[rec.status] ?? rec.status}`, {
+    done, total, status, detail,
+  });
 }
 
 /**
@@ -317,11 +349,16 @@ export function buildRecommendations(playable, offers, opts = {}) {
  */
 export async function searchAll(rawQuery, opts = {}) {
   const started = Date.now();
+  const report = createReporter(opts.onProgress);
   const query = parseQuery(rawQuery);
   const limit = opts.limit ?? 5;
+  report.phase('plan', `解析「${rawQuery}」`);
 
   // opts.adapters 是测试用的直接注入口；正常路径一律走配置。
-  const config = opts.config ?? defaultConfig();
+  // opts.serp 覆盖配置里的检索后端——离线夹具模式靠它把引擎接到本地夹具上，
+  // 免得用户在设置页选了 browser 之后 --offline 就跑不通了。
+  const baseConfig = opts.config ?? defaultConfig();
+  const config = opts.serp ? { ...baseConfig, serp: opts.serp } : baseConfig;
   const plan = opts.adapters
     ? opts.adapters.map((adapter) => ({ adapter, source: null, limit: null }))
     : buildAdapters(config);
@@ -333,6 +370,9 @@ export async function searchAll(rawQuery, opts = {}) {
   const adapterOpts = {
     signal: opts.signal,
     ...(opts.fetchJson ? { fetchJson: opts.fetchJson } : {}),
+    // browser 后端要用它开结果页。以前这里没传，导致设成 browser 也搜不出东西
+    // ——报错停在"browser 后端需要调用方传入已启动的浏览器连接"。
+    ...(opts.browser ? { browser: opts.browser } : {}),
   };
 
   /* ── 第一步：发现 ─────────────────────────────────────────
@@ -342,9 +382,15 @@ export async function searchAll(rawQuery, opts = {}) {
     maxVariants: expandCfg.maxVariants ?? 4,
     maxTerms: expandCfg.maxTerms ?? 4,
   });
+  report.step(`检索词 ${round1Terms.length} 个：${round1Terms.map((t) => t.term).join('、')}`, {
+    done: 1, total: 1,
+  });
 
+  report.phase('discovery', `${plan.length} 个来源 × ${round1Terms.length} 个检索词`);
+  let doneCount = 0;
   const runs1 = await Promise.all(
-    plan.map((p) => runAdapter(p, query, { ...adapterOpts, terms: round1Terms })),
+    plan.map((p) => runAdapter(p, query, { ...adapterOpts, terms: round1Terms },
+      (rec) => reportRun(report, rec, ++doneCount, plan.length))),
   );
 
   const rawSuggested = runs1.flatMap((r) => r.result?.related ?? []);
@@ -356,13 +402,19 @@ export async function searchAll(rawQuery, opts = {}) {
 
   // 第二轮只跑引擎源：专用适配器（IA / Commons / TMDB）已经按片名搜过，
   // 拿推荐词再搜一遍纯属重复消耗。
-  const runs2 = round2Terms.length > 0
-    ? await Promise.all(
-        plan
-          .filter((p) => p.adapter.id.startsWith('engine:'))
-          .map((p) => runAdapter(p, query, { ...adapterOpts, terms: round2Terms })),
-      )
-    : [];
+  let runs2 = [];
+  if (round2Terms.length > 0) {
+    const enginePlan = plan.filter((p) => p.adapter.id.startsWith('engine:'));
+    report.phase('expand', `推荐词：${round2Terms.map((t) => t.term).join('、')}`);
+    let n = 0;
+    runs2 = await Promise.all(
+      enginePlan.map((p) => runAdapter(p, query, { ...adapterOpts, terms: round2Terms },
+        (rec) => reportRun(report, rec, ++n, enginePlan.length))),
+    );
+  } else {
+    report.phase('expand', '引擎没给出可用的推荐搜索词，跳过补搜');
+    report.step('跳过', { done: 1, total: 1 });
+  }
 
   const runs = mergeRuns(runs1, runs2);
   const allTerms = [...round1Terms, ...round2Terms];
@@ -395,7 +447,9 @@ export async function searchAll(rawQuery, opts = {}) {
   const leads = dedupeLeads(rawLeads);
 
   /* ── 第二步：归一去重 ──────────────────────────────────── */
+  report.phase('normalize', `${rawSources.length} 条候选、${leads.length} 条线索`);
   const { kept: sources, groups: dedupeGroups, removed: dedupeRemoved } = dedupeWithTrail(rawSources);
+  report.step(`去重后剩 ${sources.length} 条，合并掉 ${dedupeRemoved} 条`, { done: 1, total: 1 });
 
   // 3) 参考片长：权威值优先，否则用候选时长中位数兜底。
   let referenceRuntimeSec = titleInfo?.runtimeSec ?? null;
@@ -410,20 +464,39 @@ export async function searchAll(rawQuery, opts = {}) {
   const rankCtx = { referenceRuntimeSec, maxDurationSec, weights: opts.weights };
 
   // 4) 第一趟：不带探测结果预排名，挑出值得探测的候选。
+  report.phase('prerank', referenceRuntimeSec ? `参考片长 ${Math.round(referenceRuntimeSec / 60)} 分钟` : null);
   const pre = rankSources(sources, { ...rankCtx, limit: probeLimit });
   const preOrdered = [...pre.top, ...pre.overflow, ...pre.alternatives];
+  report.step(`预排名完成，${preOrdered.length} 条待嗅探`, { done: 1, total: 1 });
 
   // 5) 只探测靠前的候选。
+  const probeTotal = Math.min(probeLimit, preOrdered.length);
+  report.phase('probe', opts.skipProbe ? '已跳过' : `对前 ${probeTotal} 条发 HEAD / Range 请求`);
+  let probeDone = 0;
   const probed = opts.skipProbe
     ? preOrdered
     : await probeAll(preOrdered, {
         limit: probeLimit,
         signal: opts.signal,
         ...(opts.probeFn ? { probeFn: opts.probeFn } : {}),
+        onProbed: (s) => {
+          probeDone += 1;
+          report.step(`嗅探 ${s.filename || s.title || s.url}`, {
+            done: probeDone, total: probeTotal,
+            status: s.reachable === false ? 'warn' : 'ok',
+            detail: s.probeOutcome === 'ok' || s.reachable
+              ? `可达${s.rangeSupported ? '，支持 Range' : ''}`
+              : (s.blockReason || s.probeOutcome || '未得到明确结论'),
+          });
+        },
       });
+  if (opts.skipProbe) report.step('跳过嗅探', { done: 1, total: 1 });
 
   // 6) 第二趟：带真实探测结果重排。
+  report.phase('rank', `${probed.length} 条重新打分`);
   const final = rankSources(probed, { ...rankCtx, limit });
+  report.step(`可直接播放 ${final.top.length + final.overflow.length} 条，备选 ${final.alternatives.length} 条`,
+    { done: 1, total: 1 });
 
   /* ── 第三步：嗅探甄别的账目 ────────────────────────────────
    * probed 里已经带着每条的探测结论和打分理由，这里把它整理成
@@ -511,6 +584,8 @@ export async function searchAll(rawQuery, opts = {}) {
     notes.push(`第三步只嗅探了前 ${probeLimit} 条（共 ${rankedAll.length} 条），其余按上游元数据判定；调大 probeLimit 可全量嗅探`);
   }
 
+  report.phase('assemble', `${recommendations.length} 个推荐位`);
+
   /* 四步走的完整账目。UI 用它渲染四个 tab，也可以直接取 JSON 存证。 */
   const stages = {
     // 第 0 步：优先来源。排在最前面，因为它先跑、结果先出。
@@ -584,6 +659,8 @@ export async function searchAll(rawQuery, opts = {}) {
       offerCount,
     },
   };
+
+  report.done(`共 ${sources.length} 条候选，${final.top.length} 条可直接播放`);
 
   return {
     stages,

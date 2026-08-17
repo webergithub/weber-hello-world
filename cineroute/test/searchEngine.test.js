@@ -76,14 +76,15 @@ test('第一页就失败则如实抛错（没有结果可保）', async () => {
 });
 
 test('一个后端都没配就明说，不假装能搜', async () => {
-  await assert.rejects(
-    () => serpSearch('google', 'x', { env: {} }),
-    /CINEROUTE_SERP_BACKEND/,
-  );
-  // 只写了 provider 没写 key —— 兼容旧配置，backend 自动推成 api
+  // 只写了 provider 没写 key —— backend=auto 推成 api，然后卡在缺 key
   await assert.rejects(
     () => serpSearch('google', 'x', { env: { CINEROUTE_SERP_PROVIDER: 'serper' } }),
-    /CINEROUTE_SERP_KEY/,
+    /key/i,
+  );
+  // 显式选了 cli 却没给命令模板
+  await assert.rejects(
+    () => serpSearch('google', 'x', { env: { CINEROUTE_SERP_BACKEND: 'cli' } }),
+    /命令模板/,
   );
 });
 
@@ -189,34 +190,74 @@ test('详情页解析失败时降级为线索，而不是编一个地址出来',
 
 test('未配置时适配器自报不可用，三种后端各自检查各自的配置', async () => {
   const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
+  // 有没有 Chromium 是机器状态，会让"什么都没配"的判定摇摆，所以显式给定
+  const noChrome = { hasChrome: false };
+  const hasChrome = { hasChrome: true };
 
-  assert.equal(adapter.checkConfig({}).available, false);
-  assert.match(adapter.checkConfig({}).reason, /CINEROUTE_SERP_BACKEND/);
+  assert.equal(adapter.checkConfig({}, noChrome).available, false);
+  assert.match(adapter.checkConfig({}, noChrome).reason, /没有可用的检索后端/);
 
   // api
-  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'nope' }).available, false);
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'nope' }, noChrome).available, false);
   assert.equal(
-    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'custom' }).available, false,
+    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'custom' }, noChrome).available, false,
     'custom 缺 URL 模板也算未配置',
   );
   assert.equal(
-    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' }).available,
+    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' }, noChrome).available,
     true,
   );
 
   // cli：缺命令模板不算配好
-  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }).available, false);
-  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }).reason, /CINEROUTE_SERP_CMD/);
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, noChrome).available, false);
+  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, noChrome).reason, /命令模板/);
   assert.equal(
-    adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'ddgr --json {query}' }).available,
+    adapter.checkConfig(
+      { CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'ddgr --json {query}' }, noChrome,
+    ).available,
     true,
   );
 
-  // browser：不需要任何配置
-  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }).available, true);
+  // browser：不用填任何东西，但机器上得真有 Chromium
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, hasChrome).available, true);
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, noChrome).available, false);
+  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, noChrome).reason, /找不到 Chromium/);
 
   // 不认识的后端要报出来，而不是默默当成某一种
-  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'telepathy' }).available, false);
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'telepathy' }, noChrome).available, false);
+});
+
+test('backend=auto 时按现场情况自己挑一条能走的路', () => {
+  const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
+  const pick = (env, cfg, opts) => createEngineAdapter({
+    id: 'engine:google', engine: 'google', serp: cfg,
+  }).checkConfig(env, opts);
+
+  // 优先级：api > cli > browser
+  let v = pick({}, { backend: 'auto', provider: 'serper', key: 'k' }, { hasChrome: true });
+  assert.equal(v.backend, 'api');
+  assert.equal(v.auto, true, '没显式指定就算自动挑的');
+
+  v = pick({}, { backend: 'auto', cmd: 'ddgr --json {query}' }, { hasChrome: true });
+  assert.equal(v.backend, 'cli');
+
+  // 什么都没配但机器上有 Chromium —— 这是"开箱即用"那条路
+  v = pick({}, { backend: 'auto' }, { hasChrome: true });
+  assert.equal(v.backend, 'browser');
+  assert.equal(v.available, true);
+
+  // 显式指定就不再自动挑
+  v = pick({}, { backend: 'browser', provider: 'serper', key: 'k' }, { hasChrome: true });
+  assert.equal(v.backend, 'browser');
+  assert.equal(v.auto, false);
+
+  // 设置页填了就盖过环境变量；设置页留空才回落到环境变量
+  v = pick({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'x {query}' }, { backend: 'auto' }, { hasChrome: true });
+  assert.equal(v.backend, 'cli', '配置里是 auto，环境变量说了算');
+  v = pick({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'x {query}' }, { backend: 'browser' }, { hasChrome: true });
+  assert.equal(v.backend, 'browser', '配置里显式指定就盖过环境变量');
+
+  assert.equal(adapter.checkConfig({}, { hasChrome: false }).available, false);
 });
 
 test('引擎失败时返回错误而不是抛出，不拖垮其他源', async () => {

@@ -1,52 +1,16 @@
 /**
- * CineRoute 前端。
+ * CineRoute 前端（主页：检索 + 结果）。
+ *
+ * 配置类界面全在 /settings.html —— 这里只管"搜"和"看结果"。
  *
  * 注意：片名、文件名、简介都来自第三方归档站，是**用户上传的内容**。
- * 因此本文件全程用 createElement + textContent 构建 DOM，不做任何
+ * 所以全程用 dom.js 的 el()（字符串走 textContent），不做任何
  * innerHTML 字符串拼接 —— 否则一个恶意条目标题就能在本地页面里执行脚本。
  */
 
-const $ = (id) => document.getElementById(id);
-
-/** 图片加载失败就隐藏，不留破图占位（第三方图床可能不可达）。 */
-function img(props) {
-  const node = document.createElement('img');
-  node.addEventListener('error', () => node.classList.add('broken'), { once: true });
-  for (const [k, v] of Object.entries(props)) if (v != null) node.setAttribute(k, v);
-  return node;
-}
-
-/** 安全的元素构造器：children 传字符串时走 textContent。 */
-function el(tag, props = {}, ...children) {
-  const node = document.createElement(tag);
-  for (const [k, v] of Object.entries(props)) {
-    if (v == null || v === false) continue;
-    if (k === 'class') node.className = v;
-    else if (k === 'dataset') Object.assign(node.dataset, v);
-    else if (k.startsWith('on') && typeof v === 'function') node.addEventListener(k.slice(2), v);
-    else node.setAttribute(k, v);
-  }
-  for (const c of children.flat()) {
-    if (c == null || c === false) continue;
-    node.append(typeof c === 'string' || typeof c === 'number' ? String(c) : c);
-  }
-  return node;
-}
-
-const fmtSize = (b) => {
-  if (!b) return '—';
-  const mb = b / 1024 / 1024;
-  return mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${Math.round(mb)} MB`;
-};
-
-const fmtDuration = (s) => {
-  if (!s) return '—';
-  const h = Math.floor(s / 3600);
-  const m = Math.round((s % 3600) / 60);
-  return h > 0 ? `${h} 时 ${String(m).padStart(2, '0')} 分` : `${m} 分钟`;
-};
-
-const fmtSpeed = (bps) => (bps > 0 ? `${fmtSize(bps)}/s` : '—');
+import {
+  $, el, img, fmtSize, fmtDuration, fmtSpeed, engineTitle, BACKEND_LABEL,
+} from './dom.js';
 
 /** 播放走同源代理：一次解决上游缺 CORS 头与明文 HTTP 混合内容两个问题。 */
 const proxied = (url) => `/media?url=${encodeURIComponent(url)}`;
@@ -747,10 +711,12 @@ function renderResult(data) {
       ].filter(Boolean).join(' · ')),
     t.overview ? el('p', { class: 'overview' }, t.overview) : null,
   );
-  card.replaceChildren(
+  // 没海报时不能直接传 null 进去：replaceChildren/append 是原生 DOM 接口，
+  // 会把 null 当成文本节点，标题左边就会多出一个 "null"。
+  card.replaceChildren(...[
     t.poster ? img({ src: t.poster, alt: '' }) : null,
     info,
-  );
+  ].filter(Boolean));
 
   // 推荐位：前 3 直接可播，第 4/5 正版订阅/付费
   const recs = data.recommendations || [];
@@ -830,68 +796,6 @@ function renderResult(data) {
   $('results').classList.remove('hidden');
 }
 
-/* ---------------- 优先来源（固定模块） ---------------- */
-
-function renderPriority() {
-  const pr = SOURCES.config?.priority;
-  if (!pr) return;
-  $('priorityEnabled').checked = pr.enabled !== false;
-  $('priorityDomains').value = (pr.domains || []).join('\n');
-  $('priorityLimit').value = String(pr.limitPerDomain ?? 10);
-  $('priorityShots').checked = Boolean(pr.captureScreenshots);
-
-  const n = (pr.domains || []).length;
-  $('prioritySummary').textContent = pr.enabled === false
-    ? '已关闭'
-    : `${n} 个站点：${(pr.domains || []).join('、')}`;
-}
-
-function readPriorityForm() {
-  return {
-    enabled: $('priorityEnabled').checked,
-    domains: $('priorityDomains').value.split('\n').map((x) => x.trim()).filter(Boolean),
-    limitPerDomain: Number($('priorityLimit').value) || 10,
-    captureScreenshots: $('priorityShots').checked,
-  };
-}
-
-function bindPriorityPanel() {
-  $('priorityToggle').addEventListener('click', (e) => {
-    const body = $('priorityBody');
-    const open = body.classList.toggle('hidden') === false;
-    e.currentTarget.textContent = open ? '收起设置' : '展开设置';
-    e.currentTarget.setAttribute('aria-expanded', String(open));
-  });
-
-  $('priorityEnabled').addEventListener('change', () => {
-    $('prioritySaveState').textContent = '有未保存的改动';
-  });
-  for (const id of ['priorityDomains', 'priorityLimit', 'priorityShots']) {
-    $(id).addEventListener('change', () => { $('prioritySaveState').textContent = '有未保存的改动'; });
-  }
-
-  $('prioritySave').addEventListener('click', async () => {
-    const state = $('prioritySaveState');
-    state.textContent = '保存中…';
-    try {
-      SOURCES.config.priority = readPriorityForm();
-      const res = await fetch('/api/sources', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ config: SOURCES.config }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-      SOURCES = { config: data.config, catalog: data.catalog };
-      renderPriority();
-      renderSources();
-      state.textContent = data.warning || '已保存，下次检索按新配置跑';
-    } catch (err) {
-      state.textContent = `保存失败：${err.message}`;
-    }
-  });
-}
-
 /** 检索结果里的优先来源命中。这里是取证记录，不给播放/下载按钮。 */
 function renderPriorityHits(stage) {
   const box = $('priorityResult');
@@ -935,219 +839,172 @@ function renderPriorityHits(stage) {
   }
 }
 
-/* ---------------- 检索来源配置 ---------------- */
+/* ---------------- 检索前的状态条 ---------------- */
 
 /**
- * 来源面板。这里是"哪些源参与检索、每个取多少条"的唯一入口——
- * 代码里没有写死的源列表，全部读自 /api/sources。
+ * 一眼看清"这次检索会拿什么去搜"。
+ *
+ * 存在的理由是踩过的坑：检索后端没配好时，五个引擎会被整体跳过，
+ * 界面上却只是安静地返回一个空结果——用户看到的是"这软件搜不出东西"，
+ * 而不是"有个开关没打开"。所以把后端状态放在检索框正下方，配不对就红着。
  */
-let SOURCES = { config: null, catalog: null };
+function renderReadyBar() {
+  const bar = $('readyBar');
+  bar.replaceChildren();
 
-const ENGINE_LABELS = { google: 'Google', bing: 'Bing', baidu: '百度', yandex: 'Yandex', duckduckgo: 'DuckDuckGo' };
-const engineLabel = (engine) => ENGINE_LABELS[engine]
-  || (engine ? engine[0].toUpperCase() + engine.slice(1) : engine);
-/** 中文名后不加空格（「百度搜索」），西文名后加（「Google 搜索」）。 */
-const engineTitle = (engine) => {
-  const n = engineLabel(engine);
-  return `${n}${/[一-龥]$/.test(n) ? '' : ' '}搜索`;
-};
+  const serp = CONFIG.serp || null;
+  const adapters = CONFIG.adapters || [];
+  const engines = adapters.filter((a) => a.id.startsWith('engine:'));
+  const usable = adapters.filter((a) => a.available);
 
-/** 一行来源：勾选框 + 名称 + 取数输入框。 */
-function sourceRow(src, { title, note, removable }) {
-  const cb = el('input', { type: 'checkbox' });
-  cb.checked = src.enabled !== false;
-  cb.addEventListener('change', () => { src.enabled = cb.checked; markDirty(); });
+  const gear = el('a', { class: 'ghost-btn tiny', href: '/settings.html' }, '⚙️ 设置');
 
-  const num = el('input', { type: 'number', min: '1', max: '1000', class: 'limit-input' });
-  num.value = String(src.limit ?? SOURCES.config.defaults.limit);
-  num.addEventListener('change', () => {
-    const v = Math.max(1, Math.min(1000, Math.round(Number(num.value) || 0)));
-    num.value = String(v);
-    src.limit = v;
-    markDirty();
-  });
+  if (serp && !serp.available) {
+    bar.className = 'ready-bar bad';
+    bar.append(
+      el('span', { class: 'chip warn' }, '引擎检索不可用'),
+      el('span', { class: 'ready-text' }, serp.reason || '检索后端未配置'),
+      el('span', { class: 'spacer' }),
+      gear,
+    );
+    return;
+  }
 
-  return el('div', { class: 'source-row' },
-    el('label', { class: 'row-pick' }, cb, el('span', { class: 'row-title' }, title)),
-    note ? el('span', { class: 'row-note' }, note) : null,
+  bar.className = 'ready-bar';
+  const backend = serp?.backend ? (BACKEND_LABEL[serp.backend] || serp.backend) : '—';
+  bar.append(
+    el('span', { class: 'chip ok' }, `后端 ${serp?.backend || '—'}`),
+    el('span', { class: 'ready-text' },
+      `${backend}${serp?.auto ? '（自动选的）' : ''}`
+      + `　·　${usable.length}/${adapters.length} 个来源就绪`
+      + (engines.length ? `　·　引擎 ${engines.map((e) => engineTitle(e.id.slice(7))).join('、')}` : '')),
     el('span', { class: 'spacer' }),
-    el('label', { class: 'row-limit' }, '取前', num, '条'),
-    removable
-      ? el('button', {
-          class: 'toggle', type: 'button', title: '移除这个来源',
-          onclick: () => {
-            SOURCES.config.sources = SOURCES.config.sources.filter((s) => s.id !== src.id);
-            renderSources();
-            markDirty();
-          },
-        }, '移除')
-      : null,
-  );
-}
-
-function markDirty() {
-  $('sourceSaveState').textContent = '有未保存的改动';
-  renderSourceSummary();
-}
-
-function renderSourceSummary() {
-  const cfg = SOURCES.config;
-  if (!cfg) return;
-  const on = cfg.sources.filter((s) => s.enabled);
-  const engines = on.filter((s) => s.type === 'engine');
-  const parts = [`已选 ${on.length} 个来源`];
-  if (engines.length) {
-    parts.push(engines.map((s) => `${engineLabel(s.engine)} 前 ${s.limit}`).join(' · '));
-  }
-  $('sourceSummary').textContent = parts.join('｜');
-}
-
-function renderSources() {
-  const cfg = SOURCES.config;
-  const catalog = SOURCES.catalog || {};
-  $('defaultLimit').value = String(cfg.defaults.limit);
-
-  // 引擎行：出厂四个 + 用户自己加的
-  const engineBox = $('engineList');
-  engineBox.replaceChildren();
-  const engineSources = cfg.sources.filter((s) => s.type === 'engine');
-  if (engineSources.length === 0) {
-    engineBox.append(el('p', { class: 'field-note' }, '没有启用任何搜索引擎来源。'));
-  }
-  const known = new Set((catalog.engines || []).map((e) => e.engine));
-  for (const s of engineSources) {
-    const pageSize = (catalog.engines || []).find((e) => e.engine === s.engine)?.pageSize;
-    const pages = pageSize ? Math.ceil((s.limit || 0) / pageSize) : null;
-    engineBox.append(sourceRow(s, {
-      title: engineTitle(s.engine),
-      note: pages ? `单页 ${pageSize} 条，需翻 ${pages} 页` : '自定义引擎，经 SERP 服务转发',
-      removable: !known.has(s.engine) || engineSources.length > 1,
-    }));
-  }
-
-  // 专用源行
-  const builtinBox = $('builtinList');
-  builtinBox.replaceChildren();
-  for (const b of catalog.builtins || []) {
-    let src = cfg.sources.find((s) => s.id === b.id);
-    if (!src) {
-      // 配置里没有这条（用户删过），补一条禁用的占位，让它还能被勾回来
-      src = { id: b.id, type: 'builtin', enabled: false, limit: cfg.defaults.limit };
-      cfg.sources.push(src);
-    }
-    builtinBox.append(sourceRow(src, {
-      title: b.label,
-      note: b.available ? (b.kind === 'metadata' ? '只出元数据与正版渠道' : null) : `未配置：${b.reason}`,
-      removable: false,
-    }));
-  }
-
-  // 引擎下拉：出厂支持的几个
-  const sel = $('addEngineSelect');
-  sel.replaceChildren(
-    el('option', { value: '' }, '选择引擎…'),
-    ...(catalog.engines || []).map((e) => el('option', { value: e.engine }, engineLabel(e.engine))),
+    gear,
   );
 
-  $('siteScope').value = (cfg.siteScope || []).join('\n');
-
-  const serp = $('serpState');
-  serp.textContent = catalog.serpConfigured
-    ? ''
-    : '⚠ 尚未配置 SERP 服务，引擎来源会被跳过（四大引擎都没有可直接用的免费官方 API，需设 CINEROUTE_SERP_PROVIDER / CINEROUTE_SERP_KEY）';
-  serp.classList.toggle('warn-text', !catalog.serpConfigured);
-
-  renderSourceSummary();
-}
-
-function addEngine() {
-  const cfg = SOURCES.config;
-  const engine = ($('addEngineName').value.trim() || $('addEngineSelect').value).toLowerCase();
-  if (!engine) { alert('先选一个引擎，或填引擎名。'); return; }
-  const id = `engine:${engine}`;
-  if (cfg.sources.some((s) => s.id === id)) { alert(`${engineLabel(engine)} 已经在来源里了。`); return; }
-  cfg.sources.push({
-    id, type: 'engine', engine, enabled: true,
-    limit: Math.max(1, Math.min(1000, Number($('addEngineLimit').value) || cfg.defaults.limit)),
-  });
-  $('addEngineName').value = '';
-  $('addEngineSelect').value = '';
-  renderSources();
-  markDirty();
-}
-
-async function saveSources(payload) {
-  const state = $('sourceSaveState');
-  state.textContent = '保存中…';
-  try {
-    const res = await fetch('/api/sources', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    SOURCES = { config: data.config, catalog: data.catalog };
-    renderSources();
-    state.textContent = data.warning || '已保存，下次检索按新配置跑';
-  } catch (err) {
-    state.textContent = `保存失败：${err.message}`;
+  const blocked = adapters.filter((a) => !a.available);
+  if (blocked.length) {
+    bar.append(el('p', { class: 'ready-note' },
+      `未启用：${blocked.map((a) => `${a.label}（${a.reason}）`).join('；')}`));
   }
-}
-
-function bindSourcePanel() {
-  $('sourceToggle').addEventListener('click', (e) => {
-    const body = $('sourceBody');
-    const open = body.classList.toggle('hidden') === false;
-    e.currentTarget.textContent = open ? '收起设置' : '展开设置';
-    e.currentTarget.setAttribute('aria-expanded', String(open));
-  });
-
-  $('defaultLimit').addEventListener('change', (e) => {
-    const v = Math.max(1, Math.min(1000, Math.round(Number(e.target.value) || 0)));
-    e.target.value = String(v);
-    SOURCES.config.defaults.limit = v;
-    markDirty();
-  });
-
-  $('addEngineBtn').addEventListener('click', addEngine);
-
-  $('siteScope').addEventListener('change', (e) => {
-    SOURCES.config.siteScope = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean);
-    markDirty();
-  });
-
-  $('sourceSave').addEventListener('click', () => {
-    // 提交前把文本框里的最新内容也带上（用户可能没触发 change 就点了保存）
-    SOURCES.config.siteScope = $('siteScope').value.split('\n').map((s) => s.trim()).filter(Boolean);
-    saveSources({ config: SOURCES.config });
-  });
-
-  $('sourceReset').addEventListener('click', () => saveSources({ reset: true }));
 }
 
 /* ---------------- 事件绑定 ---------------- */
 
-async function runSearch(q) {
+/* ---------------- 检索进度 ---------------- */
+
+const MARK = { ok: '✓', warn: '!', err: '✗', info: '·' };
+
+function resetProgress() {
+  const box = $('progress');
+  box.className = 'progress-panel';
+  box.classList.remove('hidden');
+  $('progressBar').style.width = '0%';
+  $('progressPct').textContent = '0%';
+  $('progressElapsed').textContent = '';
+  $('progressPhase').textContent = '准备中…';
+  $('progressDetail').textContent = '';
+  $('progressLog').replaceChildren();
+}
+
+/**
+ * 一条进度消息。
+ *
+ * 阶段切换写进标题，阶段内的每一步追加进日志——日志才是用户真正想看的：
+ * "现在卡在哪个源"、"哪个源已经回来了、拿到几条"。
+ */
+function onProgressEvent(ev) {
+  const pct = Math.max(0, Math.min(100, ev.pct ?? 0));
+  $('progressBar').style.width = `${pct}%`;
+  $('progressPct').textContent = `${pct}%`;
+  $('progressElapsed').textContent = ev.elapsedMs != null ? `${(ev.elapsedMs / 1000).toFixed(1)}s` : '';
+
+  if (ev.type === 'phase') {
+    $('progressPhase').textContent = ev.label;
+    $('progressDetail').textContent = ev.detail || '';
+    return;
+  }
+  if (ev.type === 'done') {
+    $('progress').classList.add('done');
+    $('progressPhase').textContent = '完成';
+    $('progressDetail').textContent = ev.detail || '';
+    return;
+  }
+  if (ev.type === 'failed') {
+    $('progress').classList.add('failed');
+    $('progressPhase').textContent = ev.label || '失败';
+    $('progressDetail').textContent = ev.detail || '';
+    return;
+  }
+
+  // step / note：进日志
+  const log = $('progressLog');
+  const status = ev.status && MARK[ev.status] ? ev.status : 'info';
+  log.append(el('li', { class: status },
+    el('span', { class: 'mark' }, MARK[status]),
+    el('span', { class: 'what' },
+      ev.label + (ev.detail ? ` —— ${ev.detail}` : '')),
+    ev.total > 1 ? el('span', { class: 'at' }, `${ev.done}/${ev.total}`) : null,
+  ));
+  log.scrollTop = log.scrollHeight;
+  if (ev.label) $('progressDetail').textContent = ev.label;
+}
+
+let searchStream = null;
+
+function runSearch(q) {
   const btn = $('searchBtn');
   const status = $('status');
   btn.disabled = true;
-  status.className = 'status';
-  status.textContent = `正在向各数据源并发检索「${q}」…`;
+  status.classList.add('hidden');
   $('results').classList.add('hidden');
+  resetProgress();
 
-  try {
-    const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-    renderResult(data);
-    status.classList.add('hidden');
-  } catch (err) {
-    status.className = 'status error';
-    status.textContent = `检索失败：${err.message}`;
-  } finally {
+  // 上一次没关干净的流先掐掉，否则两次检索的进度会串在一起
+  if (searchStream) { searchStream.close(); searchStream = null; }
+
+  const finish = () => {
+    if (searchStream) { searchStream.close(); searchStream = null; }
     btn.disabled = false;
-  }
+  };
+
+  const es = new EventSource(`/api/search?stream=1&q=${encodeURIComponent(q)}`);
+  searchStream = es;
+
+  es.addEventListener('progress', (e) => {
+    try { onProgressEvent(JSON.parse(e.data)); } catch { /* 坏帧跳过，不打断检索 */ }
+  });
+
+  es.addEventListener('result', (e) => {
+    finish();
+    try {
+      renderResult(JSON.parse(e.data));
+      // 进度条留在页面上，它本身就是这次检索的过程记录
+      $('progress').classList.add('done');
+      $('progressPhase').textContent = '完成';
+    } catch (err) {
+      status.className = 'status error';
+      status.textContent = `结果解析失败：${err.message}`;
+    }
+  });
+
+  es.addEventListener('failed', (e) => {
+    finish();
+    let msg = '未知错误';
+    try { msg = JSON.parse(e.data).error || msg; } catch { /* 用默认文案 */ }
+    $('progress').classList.add('failed');
+    status.className = 'status error';
+    status.textContent = `检索失败：${msg}`;
+  });
+
+  // EventSource 断流会自己重连，这里必须显式收掉，否则会不停重新发起检索
+  es.onerror = () => {
+    if (!searchStream) return;          // 正常收尾时也会触发一次，忽略
+    finish();
+    $('progress').classList.add('failed');
+    status.className = 'status error';
+    status.textContent = '与服务端的连接中断了，检索未完成。';
+  };
 }
 
 $('searchForm').addEventListener('submit', (e) => {
@@ -1180,15 +1037,7 @@ $('batchDownload').addEventListener('click', () => {
 
   bindTabs();
   $('deepRun').addEventListener('click', runDeepVerify);
-  bindPriorityPanel();
-  bindSourcePanel();
-  try {
-    SOURCES = await (await fetch('/api/sources')).json();
-    renderPriority();
-    renderSources();
-  } catch {
-    $('sourceSummary').textContent = '来源配置读取失败，本次按出厂默认检索';
-  }
+  renderReadyBar();
 
   // 地址栏带 ?q= 时直接开检索（可分享的检索链接）。
   const initialQ = new URLSearchParams(location.search).get('q')

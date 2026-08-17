@@ -53,6 +53,7 @@ export function buildAdapters(config = defaultConfig()) {
       adapter: createPriorityAdapter({
         domains: priority.domains,
         limitPerDomain: priority.limitPerDomain,
+        serp: config?.serp ?? null,
       }),
       source: { id: 'priority', type: 'priority', enabled: true },
       limit: priority.limitPerDomain,
@@ -72,7 +73,11 @@ export function buildAdapters(config = defaultConfig()) {
 
     // engine：每条配置造一个独立适配器，站点范围优先用源自己的，没有就用全局的。
     plan.push({
-      adapter: createEngineAdapter({ ...s, siteScope: s.siteScope || config.siteScope }),
+      adapter: createEngineAdapter({
+        ...s,
+        siteScope: s.siteScope || config.siteScope,
+        serp: config.serp ?? null,
+      }),
       source: s,
       limit: s.limit ?? fallbackLimit,
     });
@@ -103,17 +108,25 @@ export function getAdapter(id) {
  * 适配器可以自带 checkConfig() 自查（引擎适配器就是这么做的）；
  * 没自带的走下面这几条内置判断。
  *
- * @returns {{available: boolean, reason: string|null}}
+ * @param {object} adapter
+ * @param {object} [env]
+ * @param {{hasChrome?: boolean}} [opts] 透传给适配器的自查，主要给测试用
+ * @returns {{available: boolean, reason: string|null, backend?: string|null}}
  */
-export function adapterAvailability(adapter, env = process.env) {
+export function adapterAvailability(adapter, env = process.env, opts = {}) {
   if (!adapter) return { available: false, reason: '未知的源' };
   if (!adapter.requiresConfig) return { available: true, reason: null };
 
   if (typeof adapter.checkConfig === 'function') {
-    const verdict = adapter.checkConfig(env);
+    const verdict = adapter.checkConfig(env, opts);
+    // backend/auto/why 只有引擎类源会给。带出来是为了界面上能显示
+    // 「这次走的是哪条路、是自动挑的还是手动指定的」。
+    const extra = verdict.backend !== undefined
+      ? { backend: verdict.backend, backendAuto: verdict.auto ?? false, backendWhy: verdict.why ?? null }
+      : {};
     return verdict.available
-      ? { available: true, reason: null }
-      : { available: false, reason: verdict.reason || adapter.configHint };
+      ? { available: true, reason: null, ...extra }
+      : { available: false, reason: verdict.reason || adapter.configHint, ...extra };
   }
 
   if (adapter.id === 'tmdb') {

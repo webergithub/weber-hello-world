@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { searchAll, dedupeSources, buildRecommendations } from '../src/core/pipeline.js';
-import { createFixtureFetch, createFixtureProbe } from '../src/core/fixtureFetch.js';
+import { createFixtureFetch, createFixtureProbe, FIXTURE_SERP_CONFIG } from '../src/core/fixtureFetch.js';
 
 const offline = () => ({
   fetchJson: createFixtureFetch(),
@@ -343,20 +343,45 @@ test('引擎搜到但没有解析器的域名，只作为线索列出，不产�
   });
 });
 
-test('未配置 SERP 服务时引擎被跳过，其余来源照常出结果', async () => {
-  const prev = process.env.CINEROUTE_SERP_PROVIDER;
-  delete process.env.CINEROUTE_SERP_PROVIDER;
+test('检索后端不可用时引擎被跳过，其余来源照常出结果', async () => {
+  // 显式指一个配不齐的后端（cli 没给命令模板）。
+  // 不用"什么都不配"来构造这个场景：那种情况下 backend=auto 会去看本机
+  // 有没有 Chromium，测试结果就跟着跑测试的机器摇摆了。
+  const prev = { ...process.env };
+  for (const k of Object.keys(process.env)) if (k.startsWith('CINEROUTE_SERP')) delete process.env[k];
   try {
-    const r = await searchAll('Night of the Living Dead', { ...offline(), config: defaultConfig() });
+    const config = { ...defaultConfig(), serp: { ...defaultConfig().serp, backend: 'cli', cmd: '' } };
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
     const engines = r.providers.filter((p) => p.id.startsWith('engine:'));
     assert.equal(engines.length, 5, '五个引擎都应出现在数据源列表里');
     for (const e of engines) {
       assert.equal(e.status, 'skipped');
-      assert.match(e.reason, /SERP/);
+      assert.match(e.reason, /命令模板/);
     }
     assert.ok(r.top.length > 0, '引擎不可用不影响其他来源');
   } finally {
-    if (prev !== undefined) process.env.CINEROUTE_SERP_PROVIDER = prev;
+    for (const k of Object.keys(process.env)) if (k.startsWith('CINEROUTE_SERP')) delete process.env[k];
+    Object.assign(process.env, prev);
+  }
+});
+
+test('配置里的检索后端能直接驱动引擎源，不必设环境变量', async () => {
+  // 这是"搜索结果永远是空的"那个问题的回归用例：以前后端只认环境变量，
+  // clone 下来直接跑，五个引擎全部因为"未配置检索后端"被跳过。
+  const prev = { ...process.env };
+  for (const k of Object.keys(process.env)) if (k.startsWith('CINEROUTE_SERP')) delete process.env[k];
+  try {
+    const config = { ...defaultConfig(), serp: { ...FIXTURE_SERP_CONFIG } };
+    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+    const engines = r.providers.filter((p) => p.id.startsWith('engine:'));
+    assert.equal(engines.filter((e) => e.status === 'skipped').length, 0, '不该再有引擎被跳过');
+    assert.ok(
+      engines.some((e) => (e.stats?.returned ?? 0) > 0),
+      '至少要有一个引擎真的返回了结果',
+    );
+  } finally {
+    for (const k of Object.keys(process.env)) if (k.startsWith('CINEROUTE_SERP')) delete process.env[k];
+    Object.assign(process.env, prev);
   }
 });
 

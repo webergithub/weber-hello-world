@@ -9,7 +9,9 @@
  */
 
 import { searchAll } from './src/core/pipeline.js';
-import { createFixtureFetch, createFixtureProbe, applyFixtureSerpEnv } from './src/core/fixtureFetch.js';
+import {
+  createFixtureFetch, createFixtureProbe, applyFixtureSerpEnv, FIXTURE_SERP_CONFIG,
+} from './src/core/fixtureFetch.js';
 
 const HELP = `
 CineRoute 影路 — 公有领域 / 自由许可 / 自有媒体库的影视片源聚合检索
@@ -191,7 +193,7 @@ async function main() {
   if (offline) applyFixtureSerpEnv();
 
   const offlineOpts = offline
-    ? { fetchJson: createFixtureFetch(), probeFn: createFixtureProbe() }
+    ? { fetchJson: createFixtureFetch(), probeFn: createFixtureProbe(), serp: FIXTURE_SERP_CONFIG }
     : {};
 
   if (serve) {

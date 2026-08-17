@@ -62,6 +62,33 @@ export const DEFAULT_PRIORITY = {
 };
 
 /**
+ * 检索后端配置。
+ *
+ * 这一块**以前只能靠环境变量**，结果是：clone 下来直接跑，五个引擎全部
+ * 因为「未配置检索后端」被跳过，搜索结果永远是空的。现在它进配置文件、
+ * 进设置页，并且默认值是 `auto`——自己按现场情况挑一条能走的路：
+ *
+ *   配了 SERP 服务商 → api ；配了命令行工具 → cli ；本机有 Chromium → browser
+ *
+ * 三条都不通才报「没有可用的后端」，并说清楚缺什么。
+ * 环境变量仍然有效，作用是给配置里留空的字段兜底（部署时不想把 key 写进文件）。
+ */
+export const SERP_BACKEND_CHOICES = ['auto', 'api', 'cli', 'browser'];
+export const SERP_CMD_FORMATS = ['json', 'jsonl', 'lines'];
+
+export const DEFAULT_SERP = {
+  backend: 'auto',
+  provider: '',        // serper / brave / custom
+  key: '',             // API key。存本地配置文件，接口返回时会打码
+  urlTemplate: '',     // provider=custom 或 browser 指向自建 SearXNG 时用
+  cmd: '',             // cli 后端的命令模板，如 `ddgr --json -n {limit} {query}`
+  cmdFormat: 'json',
+  chromePath: '',      // 留空则按常见路径自动找
+  timeoutMs: 25000,    // browser 后端打开结果页的超时
+  settleMs: 800,       // load 之后再等多久取 DOM（结果常是脚本渲染的）
+};
+
+/**
  * 出厂默认源。
  *
  * builtin  —— 有专用适配器，直接解析出结构化片源
@@ -171,8 +198,30 @@ export function normalizeConfig(raw) {
   const probeLimit = clampInt(raw?.probeLimit, DEFAULT_PROBE_LIMIT, 1, 200);
   const verify = normalizeVerify(raw?.verify);
   const priority = normalizePriority(raw?.priority);
+  const serp = normalizeSerpConfig(raw?.serp);
 
-  return { version: 1, defaults, priority, sources, siteScope, expand, probeLimit, verify };
+  return { version: 1, defaults, serp, priority, sources, siteScope, expand, probeLimit, verify };
+}
+
+/**
+ * 规范化检索后端配置。
+ *
+ * 注意与 adapters/serp.js 里的 `normalizeSerp` 不是一回事：那个是把各家 SERP
+ * 服务的**响应**压成统一形状，这个是校验用户填的**设置**。
+ */
+export function normalizeSerpConfig(raw) {
+  const str = (v, max = 500) => String(v ?? '').trim().slice(0, max);
+  return {
+    backend: SERP_BACKEND_CHOICES.includes(raw?.backend) ? raw.backend : 'auto',
+    provider: ['serper', 'brave', 'custom'].includes(raw?.provider) ? raw.provider : '',
+    key: str(raw?.key, 300),
+    urlTemplate: str(raw?.urlTemplate),
+    cmd: str(raw?.cmd),
+    cmdFormat: SERP_CMD_FORMATS.includes(raw?.cmdFormat) ? raw.cmdFormat : 'json',
+    chromePath: str(raw?.chromePath),
+    timeoutMs: clampInt(raw?.timeoutMs, DEFAULT_SERP.timeoutMs, 3000, 120000),
+    settleMs: clampInt(raw?.settleMs, DEFAULT_SERP.settleMs, 0, 15000),
+  };
 }
 
 const clampInt = (v, fallback, lo, hi) => {
@@ -238,6 +287,7 @@ export function normalizeExpand(raw) {
 export function defaultConfig() {
   return normalizeConfig({
     defaults: { limit: DEFAULT_LIMIT },
+    serp: DEFAULT_SERP,
     sources: DEFAULT_SOURCES,
     siteScope: DEFAULT_SITE_SCOPE,
     expand: DEFAULT_EXPAND,

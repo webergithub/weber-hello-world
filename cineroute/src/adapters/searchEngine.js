@@ -185,15 +185,17 @@ export function createEngineAdapter(spec) {
     label,
     kind: 'direct',
     requiresConfig: true,
-    configHint: '设置 CINEROUTE_SERP_BACKEND=api|cli|browser。'
-      + 'api 需配 CINEROUTE_SERP_PROVIDER/KEY；cli 需配 CINEROUTE_SERP_CMD；'
+    configHint: '到设置页「检索后端」里选 api / cli / browser。'
+      + 'api 需填服务商与 key；cli 需填命令模板；'
       + 'browser 免配置，但依赖本机 Chromium 且会被引擎反自动化检测',
     engine,
     siteScope: spec.siteScope || null,
+    // 设置页里配的检索后端。跟着适配器走，这样每个引擎理论上可以配不同后端。
+    serp: spec.serp || null,
 
     /** 自查配置。三种后端只要有一种配齐就算可用。 */
-    checkConfig(env = process.env) {
-      return checkBackend(env);
+    checkConfig(env = process.env, opts = {}) {
+      return checkBackend(env, spec.serp, opts);
     },
 
     /**
@@ -222,7 +224,7 @@ export function createEngineAdapter(spec) {
         const q = buildScopedQuery(t.term, scope);
         let results;
         try {
-          const r = await runSerp(engine, q, { ...opts, limit: perTerm });
+          const r = await runSerp(engine, q, { ...opts, serp: spec.serp, limit: perTerm });
           results = r.results;
           related.push(...r.related);
           if (r.notes?.length) backendNotes.push(...r.notes);

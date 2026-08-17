@@ -48,7 +48,7 @@ function evidence({ domain, url, title, snippet, rank, term, termKind, query, vi
  * 不为这个模块单独写爬虫。
  */
 async function probeDomain(domain, query, terms, opts) {
-  const { limit = 10, signal, fetchJson = httpJson, env, browser } = opts;
+  const { limit = 10, signal, fetchJson = httpJson, env, serp, browser } = opts;
   const found = [];
   const errors = [];
 
@@ -56,7 +56,7 @@ async function probeDomain(domain, query, terms, opts) {
     const q = `${t.term} site:${domain}`;
     try {
       const { results } = await runSerp('google', q, {
-        limit, signal, fetchJson, env, browser,
+        limit, signal, fetchJson, env, serp, browser,
       });
       for (const r of results) {
         // 只收确实落在该域名下的结果——引擎偶尔会带回别的站
@@ -129,14 +129,15 @@ export function createPriorityAdapter(spec) {
     kind: 'evidence',
     domains,
     requiresConfig: true,
-    configHint: '需要可用的检索后端（CINEROUTE_SERP_BACKEND=api|cli|browser）才能查这些站点',
+    configHint: '需要可用的检索后端（设置页「检索后端」）才能查这些站点',
+    serp: spec.serp || null,
 
-    checkConfig(env = process.env) {
+    checkConfig(env = process.env, opts = {}) {
       if (domains.length === 0) {
-        return { available: false, reason: '优先来源列表为空，去「优先来源」面板里填域名' };
+        return { available: false, reason: '优先来源列表为空，去设置页「优先来源」里填域名' };
       }
       // 查站点靠的是同一套检索后端，所以配置要求与引擎源完全一致
-      return checkBackend(env);
+      return checkBackend(env, spec.serp, opts);
     },
 
     async search(query, opts = {}) {
@@ -148,7 +149,9 @@ export function createPriorityAdapter(spec) {
       // 按配置顺序逐个域名查——"优先"体现在顺序上，前面的先出结果
       const perDomain = [];
       for (const domain of domains) {
-        perDomain.push(await probeDomain(domain, query, terms, { ...opts, limit: limitPerDomain }));
+        perDomain.push(await probeDomain(domain, query, terms, {
+          ...opts, serp: spec.serp, limit: limitPerDomain,
+        }));
       }
 
       const leads = perDomain.flatMap((d) => d.found);

@@ -16,8 +16,10 @@ import {
 import {
   loadConfig, saveConfig, normalizeConfig, defaultConfig,
   ENGINE_PAGE_SIZE, DEFAULT_SITE_SCOPE, CONFIG_PATH,
+  SERP_BACKEND_CHOICES, SERP_CMD_FORMATS, DEFAULT_SERP,
 } from '../core/sourceConfig.js';
 import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
+import { checkBackend } from '../adapters/serp.js';
 import { DownloadManager } from './downloader.js';
 import { launch, findChrome } from '../browser/cdp.js';
 import { verifyWithRounds } from '../verify/deepVerify.js';
@@ -167,6 +169,75 @@ export async function startServer(options = {}) {
     return browserLaunching;
   }
 
+  /**
+   * 检索后端的当前判定。设置页和主页状态条都用它。
+   *
+   * `envOnly` 说明哪些字段是环境变量在兜底——设置页要据此提示"这一栏留空
+   * 也能跑，因为环境变量里已经有了"，否则用户会以为没配。
+   */
+  function serpState() {
+    const v = checkBackend(process.env, effectiveSerp());
+    return {
+      backend: v.backend,
+      auto: v.auto,
+      why: v.why,
+      available: v.available,
+      reason: v.reason,
+      choices: SERP_BACKEND_CHOICES,
+      providers: SERP_PROVIDERS,
+      cmdFormats: SERP_CMD_FORMATS,
+      envOnly: {
+        provider: Boolean(process.env.CINEROUTE_SERP_PROVIDER),
+        key: Boolean(process.env.CINEROUTE_SERP_KEY),
+        urlTemplate: Boolean(process.env.CINEROUTE_SERP_URL),
+        cmd: Boolean(process.env.CINEROUTE_SERP_CMD),
+        chromePath: Boolean(process.env.CINEROUTE_CHROME),
+      },
+    };
+  }
+
+  /** 离线夹具模式下强制走夹具 SERP，否则用配置里的。 */
+  function effectiveSerp() {
+    return offline && offlineOpts.serp ? offlineOpts.serp : sourceConfig.serp;
+  }
+
+  /**
+   * 组一次检索的参数。
+   *
+   * 关键在于**按需把无头浏览器一起交下去**：browser 后端要靠它打开结果页，
+   * 以前这条线没接上，配成 browser 也只会拿到"需要调用方传入浏览器连接"的错误。
+   * 只在真的要用时才启动（开一次两秒多），启动失败也不让整次检索崩掉——
+   * 那样至少专用数据源还能出结果。
+   */
+  async function searchOpts(extra = {}) {
+    const serp = effectiveSerp();
+    const base = {
+      ...(offline ? offlineOpts : {}),
+      config: sourceConfig,
+      ...(offline && offlineOpts.serp ? { serp: offlineOpts.serp } : {}),
+      ...extra,
+    };
+    const needsBrowser = checkBackend(process.env, serp).backend === 'browser';
+    if (!needsBrowser) return base;
+    try {
+      return { ...base, browser: await getBrowser() };
+    } catch (err) {
+      console.warn(`[cineroute] 无头浏览器启动失败，引擎来源本次会跳过：${String(err?.message || err)}`);
+      return base;
+    }
+  }
+
+  /**
+   * 配置往外发之前把 API key 打码。
+   *
+   * 这是个本机工具，但 key 没有任何理由离开服务端：设置页只需要知道
+   * "填过没有"，改的时候留空即表示"保持原样"。
+   */
+  function publicConfig() {
+    const { serp, ...rest } = sourceConfig;
+    return { ...rest, serp: { ...serp, key: '', keySet: Boolean(serp?.key) } };
+  }
+
   /** 把"系统里有哪些源可选"告诉前端，用来渲染勾选面板。 */
   function sourceCatalog() {
     const enabledIds = new Set(sourceConfig.sources.map((s) => s.id));
@@ -185,9 +256,11 @@ export async function startServer(options = {}) {
         engine, pageSize, id: `engine:${engine}`, inConfig: enabledIds.has(`engine:${engine}`),
       })),
       serpProviders: SERP_PROVIDERS,
-      serpConfigured: Boolean(process.env.CINEROUTE_SERP_PROVIDER),
+      serp: serpState(),
+      serpDefaults: DEFAULT_SERP,
       defaultSiteScope: DEFAULT_SITE_SCOPE,
       configPath: CONFIG_PATH,
+      offline,
     };
   }
 
@@ -205,12 +278,13 @@ export async function startServer(options = {}) {
         sendJson(res, 200, {
           offline,
           downloadDir,
+          serp: serpState(),
           // 这次配置下真正会跑的源
-          adapters: buildAdapters(sourceConfig).map(({ adapter, limit }) => {
+          adapters: buildAdapters({ ...sourceConfig, serp: effectiveSerp() }).map(({ adapter, limit }) => {
             const av = adapterAvailability(adapter);
             return {
               id: adapter.id, label: adapter.label, kind: adapter.kind, limit,
-              available: av.available, reason: av.reason,
+              available: av.available, reason: av.reason, backend: av.backend ?? null,
             };
           }),
         });
@@ -219,7 +293,7 @@ export async function startServer(options = {}) {
 
       // 数据源配置：读 / 改。改完立即生效，下一次检索就按新配置跑。
       if (pathname === '/api/sources' && req.method === 'GET') {
-        sendJson(res, 200, { config: sourceConfig, catalog: sourceCatalog() });
+        sendJson(res, 200, { config: publicConfig(), catalog: sourceCatalog() });
         return;
       }
 
@@ -232,19 +306,24 @@ export async function startServer(options = {}) {
           return;
         }
         // reset:true 用来一键恢复出厂设置
-        const next = incoming?.reset ? defaultConfig() : (incoming?.config ?? incoming);
+        let next = incoming?.reset ? defaultConfig() : (incoming?.config ?? incoming);
+        // key 出去时被打码了，回来自然是空的——空就当作"保持原样"，
+        // 否则用户每保存一次设置页就会把已经填好的 key 清掉一次。
+        if (!incoming?.reset && next?.serp && !String(next.serp.key || '').trim()) {
+          next = { ...next, serp: { ...next.serp, key: sourceConfig.serp?.key || '' } };
+        }
         try {
           sourceConfig = await saveConfig(next);
         } catch (err) {
           // 磁盘不可写时不该让配置面板整个失灵：内存里先生效，同时如实说明没落盘。
           sourceConfig = normalizeConfig(next);
           sendJson(res, 200, {
-            config: sourceConfig, catalog: sourceCatalog(),
+            config: publicConfig(), catalog: sourceCatalog(),
             warning: `配置已在本次运行中生效，但写入 ${CONFIG_PATH} 失败（重启后会丢）：${String(err?.message || err)}`,
           });
           return;
         }
-        sendJson(res, 200, { config: sourceConfig, catalog: sourceCatalog() });
+        sendJson(res, 200, { config: publicConfig(), catalog: sourceCatalog() });
         return;
       }
 
@@ -281,7 +360,8 @@ export async function startServer(options = {}) {
         }
 
         const browser = await getBrowser();
-        const baseUrl = `http://127.0.0.1:${port}`;
+        // 同样要问 server 要真实端口：port 可能是 0（让系统分配）
+        const baseUrl = `http://127.0.0.1:${server.address()?.port ?? port}`;
         const out = await verifyWithRounds(
           allowed,
           { topN: vcfg.topN, maxRounds: vcfg.maxRounds },
@@ -299,11 +379,43 @@ export async function startServer(options = {}) {
       if (pathname === '/api/search') {
         const q = (url.searchParams.get('q') || '').trim();
         if (!q) { sendJson(res, 400, { error: '缺少查询参数 q' }); return; }
-        const result = await searchAll(q, {
-          ...(offline ? offlineOpts : {}),
-          config: sourceConfig,
+
+        // stream=1 走 SSE：一边跑一边推进度，最后推一帧完整结果。
+        // 不流式的调用（脚本、curl）保持原样返回一个 JSON，不必改。
+        if (url.searchParams.get('stream') !== '1') {
+          const result = await searchAll(q, await searchOpts());
+          sendJson(res, 200, result);
+          return;
+        }
+
+        res.writeHead(200, {
+          'content-type': 'text/event-stream; charset=utf-8',
+          'cache-control': 'no-cache',
+          connection: 'keep-alive',
+          // 放在 Nginx 后面时这个头能挡住缓冲；不加的话进度会攒到最后一起来
+          'x-accel-buffering': 'no',
         });
-        sendJson(res, 200, result);
+
+        const send = (event, data) => {
+          if (res.writableEnded) return;
+          res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+        };
+        send('progress', { type: 'phase', phase: 'start', label: '开始检索', pct: 0, elapsedMs: 0 });
+
+        // 用户关页面/点取消就中止在途请求，别让检索空跑到底
+        const ac = new AbortController();
+        req.on('close', () => ac.abort());
+
+        try {
+          const result = await searchAll(q, await searchOpts({
+            signal: ac.signal,
+            onProgress: (ev) => send('progress', ev),
+          }));
+          send('result', result);
+        } catch (err) {
+          send('failed', { error: String(err?.message || err) });
+        }
+        res.end();
         return;
       }
 
@@ -372,9 +484,12 @@ export async function startServer(options = {}) {
   server.on('close', shutdown);
 
   await new Promise((resolve) => server.listen(port, host, resolve));
+  // port 传 0 表示"随便给个空闲端口"，真实端口要问 server 要——
+  // 直接打印入参会打出 http://localhost:0 这种没法点的地址。
+  const boundPort = server.address()?.port ?? port;
 
   console.log(`\n🎬  CineRoute 影路 已启动`);
-  console.log(`    http://localhost:${port}${host === '127.0.0.1' ? '  （仅本机可访问）' : ''}`);
+  console.log(`    http://localhost:${boundPort}${host === '127.0.0.1' ? '  （仅本机可访问）' : ''}`);
   console.log(`    下载目录：${downloadDir}`);
   if (offline) console.log('    ⚠️  离线夹具模式：仅 Night of the Living Dead / Metropolis 有数据，媒体代理与下载不可用');
   console.log('');

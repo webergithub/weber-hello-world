@@ -12,8 +12,11 @@
 
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
+import { accessSync, constants } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+
+const { X_OK } = constants;
 
 /** 常见的 Chromium 位置。找不到就让调用方显式给路径。 */
 const CANDIDATES = [
@@ -28,11 +31,29 @@ const CANDIDATES = [
 ];
 
 /** 找一个能用的 Chromium。找不到返回 null，由调用方决定怎么降级。 */
-export async function findChrome() {
-  for (const p of CANDIDATES) {
+export async function findChrome(preferred = null) {
+  for (const p of [preferred, ...CANDIDATES]) {
     if (!p) continue;
     try {
       await fs.access(p, (await import('node:fs')).constants.X_OK);
+      return p;
+    } catch { /* 试下一个 */ }
+  }
+  return null;
+}
+
+/**
+ * 同步版本。
+ *
+ * 存在的理由：判断「这台机器能不能用 browser 后端」的地方（checkBackend、
+ * 适配器自查可用性）全是同步函数，为了一次 stat 把它们整条链改成 async
+ * 不划算。查的是本地文件属性，开销可以忽略。
+ */
+export function findChromeSync(preferred = null) {
+  for (const p of [preferred, ...CANDIDATES]) {
+    if (!p) continue;
+    try {
+      accessSync(p, X_OK);
       return p;
     } catch { /* 试下一个 */ }
   }
