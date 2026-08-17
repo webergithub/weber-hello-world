@@ -40,6 +40,10 @@ CHARSETS = {
 class Options:
     strategy: str = "standard"          # fast | standard | deep | custom
     extra_passwords: List[str] = field(default_factory=list)   # 第 0 级
+    # ---- 掩码（知道密码"结构"时最有效，紧跟用户猜测之后优先跑）----
+    mask: str = ""                      # 如 love?d?d?d?d、?u?l?l?l?d?d?d?d
+    mask_custom1: str = ""              # ?1 对应的自定义字符集
+    mask_custom2: str = ""              # ?2 对应的自定义字符集
     # ---- 第 1 级：关键数字与字母 ----
     use_key_lib: bool = True
     include_dates: bool = True
@@ -135,6 +139,62 @@ def _digits(max_len: int) -> Iterator[str]:
             yield str(n).zfill(length)
 
 
+# --------------------------------------------------------------------------- 掩码
+# 与 hashcat 一致：?d 数字 ?l 小写 ?u 大写 ?s 符号 ?a 全部 ?1/?2 自定义 ?? 字面问号
+MASK_SYMBOLS = " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~"
+
+
+def mask_charsets(mask: str, c1: str = "", c2: str = "") -> List[str]:
+    """把掩码解析成"每个位置的字符集"列表。字面字符是长度 1 的集合。"""
+    sets: List[str] = []
+    i, n = 0, len(mask)
+    while i < n:
+        ch = mask[i]
+        if ch == "?" and i + 1 < n:
+            t = mask[i + 1]
+            i += 2
+            if t == "d":
+                sets.append(_DIGITS)
+            elif t == "l":
+                sets.append(_LOWER)
+            elif t == "u":
+                sets.append(_UPPER)
+            elif t == "s":
+                sets.append(MASK_SYMBOLS)
+            elif t == "a":
+                sets.append(_LOWER + _UPPER + _DIGITS + MASK_SYMBOLS)
+            elif t == "1":
+                sets.append(c1)
+            elif t == "2":
+                sets.append(c2)
+            elif t == "?":
+                sets.append("?")
+            else:
+                sets.append(t)          # 未知占位符按字面处理
+        else:
+            sets.append(ch)
+            i += 1
+    return sets
+
+
+def mask_iter(mask: str, c1: str = "", c2: str = "") -> Iterator[str]:
+    sets = mask_charsets(mask, c1, c2)
+    if not sets or any(len(s) == 0 for s in sets):
+        return                          # 空掩码或未提供自定义字符集 -> 不产出
+    for tup in itertools.product(*sets):
+        yield "".join(tup)
+
+
+def mask_count(mask: str, c1: str = "", c2: str = "") -> int:
+    sets = mask_charsets(mask, c1, c2)
+    if not sets or any(len(s) == 0 for s in sets):
+        return 0
+    total = 1
+    for s in sets:
+        total *= len(s)
+    return total
+
+
 def resolve_charset(o: Options) -> str:
     if o.brute_charset == "custom":
         return o.brute_custom or ""
@@ -175,6 +235,10 @@ def iter_candidates(opts: Options) -> Iterator[str]:
     # 第 0 级：用户自己的猜测
     yield from stage(o.extra_passwords, dedup=True)
 
+    # 掩码：知道结构时最精准，紧跟猜测之后优先跑
+    if o.mask:
+        yield from stage(mask_iter(o.mask, o.mask_custom1, o.mask_custom2), dedup=False)
+
     # 第 1 级：关键数字与字母
     if o.use_key_lib:
         yield from stage(keylib.key_library(o.year_from, o.year_to), dedup=True)
@@ -209,6 +273,8 @@ def _count_lines(path: str) -> int:
 def estimate_total(opts: Options) -> int:
     o = opts.resolved()
     total = len(o.extra_passwords)
+    if o.mask:
+        total += mask_count(o.mask, o.mask_custom1, o.mask_custom2)
     if o.use_key_lib:
         total += keylib.estimate_count(o.year_from, o.year_to)
     if o.include_dates:

@@ -79,6 +79,30 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(seq[0], "1234")                  # 第 1 级最前是高频 PIN
         self.assertIn("1qaz2wsx", seq)                    # 键盘走位（第 1 级）确实出现
 
+    def test_mask(self):
+        from recovery.candidates import mask_iter, mask_count
+        # ?l?d -> 26*10=260，均为 1 小写 + 1 数字
+        got = list(mask_iter("?l?d"))
+        self.assertEqual(len(got), 260)
+        self.assertEqual(mask_count("?l?d"), 260)
+        self.assertTrue(all(len(w) == 2 and w[0].islower() and w[1].isdigit() for w in got))
+        # 字面 + 占位：ab?d?d -> ab00..ab99
+        got2 = list(mask_iter("ab?d?d"))
+        self.assertEqual(len(got2), 100)
+        self.assertIn("ab00", got2)
+        self.assertIn("ab42", got2)
+        self.assertIn("ab99", got2)
+        # 自定义 ?1
+        self.assertEqual(sorted(mask_iter("?1?1", "ab")), ["aa", "ab", "ba", "bb"])
+        # 掩码在候选流里紧跟猜测之后
+        opts = Options(strategy="custom", extra_passwords=["myguess"], mask="?d?d",
+                       use_key_lib=False, use_industry=False, include_dates=False,
+                       wordcombos=False, digits_max=0)
+        seq = list(iter_candidates(opts))
+        self.assertEqual(seq[0], "myguess")
+        self.assertEqual(seq[1], "00")
+        self.assertIn("99", seq)
+
     def test_brute_scope(self):
         # 暴力范围可控：只要 lower 长度 2..2 -> 恰好 26*26=676 个，且都是 2 位小写
         opts = Options(strategy="custom", use_key_lib=False, use_industry=False,

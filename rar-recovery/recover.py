@@ -38,6 +38,10 @@ def main() -> int:
                     default="standard", help="搜索强度（默认 standard；custom=完全按你给的参数）")
     ap.add_argument("--wordlist", help="额外字典文件（如 rockyou.txt）")
     ap.add_argument("--guess", nargs="*", default=[], help="你自己记得的候选密码，优先尝试")
+    ap.add_argument("--mask", default="", help="掩码（知道结构就填）：?d数字 ?l小写 ?u大写 ?s符号 ?a全部 ?1/?2自定义，"
+                                               "字面字符原样。例：love?d?d?d?d")
+    ap.add_argument("--mask-custom1", default="", help="?1 对应的自定义字符集")
+    ap.add_argument("--mask-custom2", default="", help="?2 对应的自定义字符集")
     ap.add_argument("--digits-max", type=int, default=None, help="纯数字穷举最大位数")
     ap.add_argument("--workers", type=int, default=0, help="并行线程数（0=自动，按 CPU 核数）")
     ap.add_argument("--no-dates", action="store_true", help="不尝试生日/日期")
@@ -71,7 +75,9 @@ def main() -> int:
             strategy = "custom"
 
     opts = Options(strategy=strategy, wordlist=args.wordlist,
-                   extra_passwords=list(args.guess), include_dates=not args.no_dates,
+                   extra_passwords=list(args.guess),
+                   mask=args.mask, mask_custom1=args.mask_custom1, mask_custom2=args.mask_custom2,
+                   include_dates=not args.no_dates,
                    use_key_lib=not args.no_keylib, use_industry=not args.no_industry,
                    wordcombos=not args.no_combos,
                    brute_charset=args.brute_charset, brute_custom=args.brute_custom,

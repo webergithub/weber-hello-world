@@ -46,6 +46,16 @@
             <textarea id="guesses" rows="3" placeholder="常用的密码&#10;生日&#10;手机号"></textarea>
           </label>
 
+          <label>🎯 掩码（记得<b>结构</b>就填，紧跟猜测之后优先跑）
+            <input id="mask" type="text" placeholder="例：love?d?d?d?d 或 ?u?l?l?l?d?d?d?d" />
+            <span class="hint" id="maskHint"></span>
+            <span class="masklegend">?d 数字 · ?l 小写 · ?u 大写 · ?s 符号 · ?a 全部 · ?1/?2 自定义 · 其它字符原样</span>
+          </label>
+          <div id="maskCustomWrap" class="hidden lenrow">
+            <label>?1 = <input id="maskCustom1" type="text" placeholder="如 abcABC" /></label>
+            <label>?2 = <input id="maskCustom2" type="text" placeholder="如 !@#_" /></label>
+          </div>
+
           <fieldset class="tier">
             <legend>第 1 级 · 关键数字与字母库</legend>
             <label class="ckline"><input id="keylib" type="checkbox" checked /> 关键组合（顺子/重复/键盘走位/吉利数）</label>

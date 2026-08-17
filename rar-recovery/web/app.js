@@ -85,6 +85,9 @@ async function start() {
     path: currentPath,
     strategy: "custom",
     guesses,
+    mask: $("mask").value.trim(),
+    mask_custom1: $("maskCustom1").value,
+    mask_custom2: $("maskCustom2").value,
     use_key_lib: $("keylib").checked,
     include_dates: $("dates").checked,
     use_industry: $("industry").checked,
@@ -255,5 +258,37 @@ function onBruteChange() {
 }
 ["bruteCharset", "bruteMin", "bruteMax", "bruteCustom"].forEach((id) =>
   $(id).addEventListener("input", onBruteChange));
+
+// —— 掩码：即时估算组合数（与后端 mask_charsets 一致）——
+const MASK_SETS = { d: 10, l: 26, u: 26, s: 33, a: 95 };
+function maskCharsetSizes(mask, c1, c2) {
+  const sizes = [];
+  let i = 0;
+  while (i < mask.length) {
+    const ch = mask[i];
+    if (ch === "?" && i + 1 < mask.length) {
+      const t = mask[i + 1]; i += 2;
+      if (t in MASK_SETS) sizes.push(MASK_SETS[t]);
+      else if (t === "1") sizes.push((c1 || "").length);
+      else if (t === "2") sizes.push((c2 || "").length);
+      else sizes.push(1);               // ?? 或字面
+    } else { sizes.push(1); i += 1; }
+  }
+  return sizes;
+}
+function onMaskChange() {
+  const mask = $("mask").value.trim();
+  const c1 = $("maskCustom1").value, c2 = $("maskCustom2").value;
+  const usesCustom = /\?[12]/.test(mask);
+  $("maskCustomWrap").classList.toggle("hidden", !usesCustom);
+  if (!mask) { $("maskHint").textContent = ""; return; }
+  const sizes = maskCharsetSizes(mask, c1, c2);
+  if (sizes.some((n) => n === 0)) { $("maskHint").textContent = "（?1/?2 还没填字符集）"; return; }
+  let total = 1;
+  for (const n of sizes) total *= n;
+  $("maskHint").textContent = `≈ ${Math.round(total).toLocaleString()} 个组合（约 ${fmtTime(total / 300)}）`;
+}
+["mask", "maskCustom1", "maskCustom2"].forEach((id) =>
+  $(id).addEventListener("input", onMaskChange));
 
 applyPreset("standard");   // 初始与默认策略一致
