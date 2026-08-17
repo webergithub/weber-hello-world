@@ -1,7 +1,10 @@
-"""密码候选生成。
+"""候选密码生成 —— 三级优先级。
 
-按"最可能命中"的顺序产出候选密码：
-  用户自己的猜测 -> 常见弱密码 -> 生日/日期 -> 常见词+数字 -> 纯数字 -> 暴力小字符集
+  第 0 级：用户自己记得的候选（最优先）
+  第 1 级：关键数字与字母库（keylib：顺子/重复/键盘走位/吉利数/生日…）
+  第 2 级：行业常用密码库（内置高频库 common.txt + 外部字典如 rockyou）
+  第 3 级：暴力生成（纯数字 + 通用字符集，长度区间可控，范围每次自定）
+
 生成器逐个 yield，配合 job 显示进度与预估。
 """
 from __future__ import annotations
@@ -13,41 +16,57 @@ import os
 from dataclasses import dataclass, field
 from typing import Iterable, Iterator, List
 
+from . import keylib
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMMON_TXT = os.path.join(_HERE, "..", "wordlists", "common.txt")
 
+_LOWER = "abcdefghijklmnopqrstuvwxyz"
+_UPPER = _LOWER.upper()
+_DIGITS = "0123456789"
 CHARSETS = {
     "none": "",
-    "digits": "0123456789",
-    "lower": "abcdefghijklmnopqrstuvwxyz",
-    "loweralnum": "abcdefghijklmnopqrstuvwxyz0123456789",
-    "alnum": "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789",
+    "digits": _DIGITS,
+    "lower": _LOWER,
+    "upper": _UPPER,
+    "alpha": _LOWER + _UPPER,
+    "loweralnum": _LOWER + _DIGITS,
+    "alnum": _LOWER + _UPPER + _DIGITS,
+    "alnumsym": _LOWER + _UPPER + _DIGITS + "!@#$%^&*",
 }
 
 
 @dataclass
 class Options:
     strategy: str = "standard"          # fast | standard | deep | custom
-    extra_passwords: List[str] = field(default_factory=list)
-    wordlist: str | None = None         # 额外字典文件（如 rockyou.txt）
-    use_common: bool = True             # 是否尝试内置常见弱密码字典
+    extra_passwords: List[str] = field(default_factory=list)   # 第 0 级
+    # ---- 第 1 级：关键数字与字母 ----
+    use_key_lib: bool = True
     include_dates: bool = True
     year_from: int = 1940
     year_to: int = 0                    # 0 = 今年
-    digits_max: int = 6                 # 纯数字最大长度
-    wordcombos: bool = True             # 常见词 + 数字后缀
-    brute_charset: str = "none"         # none|digits|lower|loweralnum|alnum
-    brute_maxlen: int = 0
-    workers: int = 0                    # 并行线程数，0=自动(按 CPU 核数)
+    # ---- 第 2 级：行业常用密码库 ----
+    use_industry: bool = True           # 内置 common.txt
+    wordlist: str | None = None         # 外部行业字典（rockyou 等）
+    wordcombos: bool = True             # 高频词 + 数字后缀
+    # ---- 第 3 级：暴力生成（范围可控）----
+    digits_max: int = 6                 # 纯数字长度 1..N（0=关闭）
+    brute_charset: str = "none"         # none|digits|lower|upper|alpha|loweralnum|alnum|alnumsym|custom
+    brute_custom: str = ""              # brute_charset=custom 时的自定义字符集
+    brute_minlen: int = 1              # 暴力最小长度
+    brute_maxlen: int = 0              # 暴力最大长度（0=关闭）
+    # ---- 执行 ----
+    workers: int = 0                    # 并行线程数，0=自动
 
     def resolved(self) -> "Options":
         o = Options(**self.__dict__)
         if o.year_to == 0:
             o.year_to = datetime.date.today().year
         presets = {
-            "fast":     dict(digits_max=4, wordcombos=False, brute_charset="none", brute_maxlen=0),
-            "standard": dict(digits_max=6, wordcombos=True,  brute_charset="none", brute_maxlen=0),
-            "deep":     dict(digits_max=8, wordcombos=True,  brute_charset="loweralnum", brute_maxlen=5),
+            "fast":     dict(wordcombos=False, digits_max=4, brute_charset="none", brute_maxlen=0),
+            "standard": dict(wordcombos=True,  digits_max=6, brute_charset="none", brute_maxlen=0),
+            "deep":     dict(wordcombos=True,  digits_max=8, brute_charset="loweralnum",
+                             brute_minlen=1, brute_maxlen=5),
         }
         if self.strategy in presets:
             for k, v in presets[self.strategy].items():
@@ -77,23 +96,19 @@ def _iter_wordlist_file(path: str) -> Iterator[str]:
 
 
 def _dates(year_from: int, year_to: int) -> Iterator[str]:
-    # 4 位：出生年 / 年份
-    for y in range(year_from, year_to + 1):
+    for y in range(year_from, year_to + 1):          # 4 位年份
         yield f"{y:04d}"
-    # 4 位：月日 MMDD
-    for m in range(1, 13):
+    for m in range(1, 13):                            # 4 位月日 MMDD
         for d in range(1, calendar.monthrange(2000, m)[1] + 1):
             yield f"{m:02d}{d:02d}"
-    # 8 位：YYYYMMDD（真实有效日期）
-    for y in range(year_from, year_to + 1):
+    for y in range(year_from, year_to + 1):           # 8 位 YYYYMMDD
         for m in range(1, 13):
             for d in range(1, calendar.monthrange(y, m)[1] + 1):
                 yield f"{y:04d}{m:02d}{d:02d}"
 
 
 def _dates_6(year_from: int, year_to: int) -> Iterator[str]:
-    # 6 位：YYMMDD
-    for y in range(year_from, year_to + 1):
+    for y in range(year_from, year_to + 1):           # 6 位 YYMMDD
         yy = y % 100
         for m in range(1, 13):
             for d in range(1, calendar.monthrange(y, m)[1] + 1):
@@ -120,19 +135,24 @@ def _digits(max_len: int) -> Iterator[str]:
             yield str(n).zfill(length)
 
 
-def _brute(charset: str, max_len: int) -> Iterator[str]:
-    cs = CHARSETS.get(charset, "")
-    if not cs:
+def resolve_charset(o: Options) -> str:
+    if o.brute_charset == "custom":
+        return o.brute_custom or ""
+    return CHARSETS.get(o.brute_charset, "")
+
+
+def _brute(charset: str, min_len: int, max_len: int) -> Iterator[str]:
+    if not charset:
         return
-    for length in range(1, max_len + 1):
-        for tup in itertools.product(cs, repeat=length):
+    min_len = max(1, min_len)
+    for length in range(min_len, max_len + 1):
+        for tup in itertools.product(charset, repeat=length):
             yield "".join(tup)
 
 
 # --------------------------------------------------------------------------- 主入口
 def iter_candidates(opts: Options) -> Iterator[str]:
     o = opts.resolved()
-    common = load_common()
     seen: set[str] = set()
     SEEN_CAP = 3_000_000
 
@@ -148,33 +168,34 @@ def iter_candidates(opts: Options) -> Iterator[str]:
             if dedup:
                 if not fresh(pw):
                     continue
-            else:
-                if pw in seen:
-                    continue
+            elif pw in seen:
+                continue
             yield pw
 
-    # 1) 用户自己的猜测（最优先）
+    # 第 0 级：用户自己的猜测
     yield from stage(o.extra_passwords, dedup=True)
-    # 2) 常见弱密码
-    if o.use_common:
-        yield from stage(common, dedup=True)
-    # 3) 生日 / 日期
+
+    # 第 1 级：关键数字与字母
+    if o.use_key_lib:
+        yield from stage(keylib.key_library(o.year_from, o.year_to), dedup=True)
     if o.include_dates:
         yield from stage(_dates(o.year_from, o.year_to), dedup=True)
-        if o.digits_max >= 6 or o.strategy in ("standard", "deep"):
-            yield from stage(_dates_6(o.year_from, o.year_to), dedup=True)
-    # 4) 额外字典文件（如 rockyou.txt）
+        yield from stage(_dates_6(o.year_from, o.year_to), dedup=True)
+
+    # 第 2 级：行业常用密码库
+    if o.use_industry:
+        yield from stage(load_common(), dedup=True)
     if o.wordlist and os.path.exists(o.wordlist):
         yield from stage(_iter_wordlist_file(o.wordlist), dedup=False)
-    # 5) 常见词 + 数字后缀
     if o.wordcombos:
-        yield from stage(_wordcombos(common, o.year_from, o.year_to), dedup=True)
-    # 6) 纯数字穷举
+        yield from stage(_wordcombos(load_common(), o.year_from, o.year_to), dedup=True)
+
+    # 第 3 级：暴力生成（范围可控）
     if o.digits_max > 0:
         yield from stage(_digits(o.digits_max), dedup=False)
-    # 7) 暴力小字符集（很慢，建议改用 hashcat）
     if o.brute_charset != "none" and o.brute_maxlen > 0:
-        yield from stage(_brute(o.brute_charset, o.brute_maxlen), dedup=False)
+        cs = resolve_charset(o)
+        yield from stage(_brute(cs, o.brute_minlen, o.brute_maxlen), dedup=False)
 
 
 def _count_lines(path: str) -> int:
@@ -187,16 +208,16 @@ def _count_lines(path: str) -> int:
 
 def estimate_total(opts: Options) -> int:
     o = opts.resolved()
-    total = 0
-    total += len(o.extra_passwords)
-    if o.use_common:
-        total += len(load_common())
+    total = len(o.extra_passwords)
+    if o.use_key_lib:
+        total += keylib.estimate_count(o.year_from, o.year_to)
     if o.include_dates:
         years = max(0, o.year_to - o.year_from + 1)
-        total += years + 366                     # 4 位年份 + MMDD
-        total += years * 365                     # 8 位 YYYYMMDD（近似）
-        if o.digits_max >= 6 or o.strategy in ("standard", "deep"):
-            total += years * 365                 # 6 位 YYMMDD（近似）
+        total += years + 366           # 4 位年份 + MMDD
+        total += years * 365           # 8 位 YYYYMMDD（近似）
+        total += years * 365           # 6 位 YYMMDD（近似）
+    if o.use_industry:
+        total += len(load_common())
     if o.wordlist and os.path.exists(o.wordlist):
         try:
             total += _count_lines(o.wordlist)
@@ -207,7 +228,8 @@ def estimate_total(opts: Options) -> int:
     if o.digits_max > 0:
         total += sum(10 ** k for k in range(1, o.digits_max + 1))
     if o.brute_charset != "none" and o.brute_maxlen > 0:
-        cs = len(CHARSETS.get(o.brute_charset, ""))
+        cs = len(resolve_charset(o))
         if cs:
-            total += sum(cs ** k for k in range(1, o.brute_maxlen + 1))
+            mn = max(1, o.brute_minlen)
+            total += sum(cs ** k for k in range(mn, o.brute_maxlen + 1))
     return total

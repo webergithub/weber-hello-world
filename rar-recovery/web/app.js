@@ -78,13 +78,23 @@ async function uploadFile(file) {
 // ---------------------------------------------------------------- 破解
 async function start() {
   if (!currentPath) return;
-  const strategy = document.querySelector('input[name=strategy]:checked').value;
   const guesses = $("guesses").value.split("\n").map((s) => s.trim()).filter(Boolean);
   const wordlist = $("wordlist").value.trim();
+  // 始终发 custom + 明确字段：所见即所跑（策略单选只是把这些高级项预设好）
   const body = {
-    path: currentPath, strategy, guesses,
-    wordlist: wordlist || null,
+    path: currentPath,
+    strategy: "custom",
+    guesses,
+    use_key_lib: $("keylib").checked,
     include_dates: $("dates").checked,
+    use_industry: $("industry").checked,
+    wordcombos: $("combos").checked,
+    wordlist: wordlist || null,
+    digits_max: parseInt($("digitsMax").value, 10) || 0,
+    brute_charset: $("bruteCharset").value,
+    brute_custom: $("bruteCustom").value.trim(),
+    brute_minlen: parseInt($("bruteMin").value, 10) || 1,
+    brute_maxlen: parseInt($("bruteMax").value, 10) || 0,
     auto_extract: true,
   };
   try {
@@ -203,3 +213,47 @@ if (IN_ELECTRON) {
   const label = $("fileLabel");
   if (label) label.childNodes[0].nodeValue = "浏览…";
 }
+
+// —— 策略预设：选中 fast/standard/deep 时，把第3级高级项预设好（所见即所跑）——
+const PRESETS = {
+  fast:     { digitsMax: 4, combos: false, bruteCharset: "none", bruteMin: 1, bruteMax: 0 },
+  standard: { digitsMax: 6, combos: true,  bruteCharset: "none", bruteMin: 1, bruteMax: 0 },
+  deep:     { digitsMax: 8, combos: true,  bruteCharset: "loweralnum", bruteMin: 1, bruteMax: 5 },
+};
+function applyPreset(name) {
+  const p = PRESETS[name];
+  if (!p) return;
+  $("digitsMax").value = p.digitsMax;
+  $("combos").checked = p.combos;
+  $("bruteCharset").value = p.bruteCharset;
+  $("bruteMin").value = p.bruteMin;
+  $("bruteMax").value = p.bruteMax;
+  onBruteChange();
+}
+document.querySelectorAll('input[name=strategy]').forEach((r) =>
+  r.addEventListener("change", () => applyPreset(r.value)));
+
+// —— 第3级暴力：字符集切换 + 组合数即时估算（帮你把控每次范围）——
+const CHARSET_SIZE = { none: 0, digits: 10, lower: 26, upper: 26, alpha: 52,
+  loweralnum: 36, alnum: 62, alnumsym: 70 };
+function charsetSize(name) {
+  if (name === "custom") return ($("bruteCustom").value || "").length;
+  return CHARSET_SIZE[name] || 0;
+}
+function onBruteChange() {
+  const name = $("bruteCharset").value;
+  $("bruteCustomWrap").classList.toggle("hidden", name !== "custom");
+  const n = charsetSize(name);
+  const mn = parseInt($("bruteMin").value, 10) || 1;
+  const mx = parseInt($("bruteMax").value, 10) || 0;
+  if (!n || mx < mn) { $("bruteHint").textContent = ""; return; }
+  let total = 0;
+  for (let L = mn; L <= mx; L++) total += Math.pow(n, L);
+  const rate = 300; // 粗略按 300 次/秒估时
+  $("bruteHint").textContent =
+    `≈ ${Math.round(total).toLocaleString()} 个组合（约 ${fmtTime(total / rate)}）`;
+}
+["bruteCharset", "bruteMin", "bruteMax", "bruteCustom"].forEach((id) =>
+  $(id).addEventListener("input", onBruteChange));
+
+applyPreset("standard");   // 初始与默认策略一致

@@ -84,29 +84,58 @@ python3 recover.py secret.rar --digits-max 8
 
 参数：
 
+参数：
+
 | 参数 | 说明 |
 | --- | --- |
-| `--strategy fast\|standard\|deep` | 搜索强度，默认 `standard` |
-| `--guess A B C` | 你自己记得的候选密码，最优先尝试 |
-| `--wordlist 文件` | 追加外部字典（每行一个密码） |
-| `--digits-max N` | 纯数字穷举最大位数 |
-| `--workers N` | 并行线程数（0=自动，按 CPU 核数） |
+| `--strategy fast\|standard\|deep\|custom` | 搜索强度，默认 `standard`（给了暴力参数会自动转 custom） |
+| `--guess A B C` | 你自己记得的候选密码，**最优先**尝试 |
+| **第 1 级** | |
+| `--no-keylib` | 跳过"关键数字字母库" |
 | `--no-dates` | 不尝试生日/日期 |
-| `--out 目录` | 解压输出目录 |
-| `--no-extract` | 只找密码，不自动解压 |
+| **第 2 级** | |
+| `--no-industry` | 跳过内置行业常用库 |
+| `--no-combos` | 跳过"常见词+数字"组合 |
+| `--wordlist 文件` | 追加外部行业字典（rockyou 等，每行一个） |
+| **第 3 级（暴力，范围可控）** | |
+| `--digits-max N` | 纯数字穷举最大位数（0=关闭） |
+| `--brute-charset` | `digits/lower/upper/alpha/loweralnum/alnum/alnumsym/custom` |
+| `--brute-custom 串` | 自定义字符集（配合 `--brute-charset custom`） |
+| `--brute-min N` / `--brute-max N` | 暴力长度区间（`--brute-max 0` = 不暴力） |
+| `--workers N` | 并行线程数（0=自动，按 CPU 核数） |
+| `--out 目录` / `--no-extract` | 解压目录 / 只找密码不解压 |
 
 ---
 
-## 搜索强度说明
+## 三级优先级（命中最快的先跑）
 
-| 强度 | 尝试内容 | 大致耗时 |
+工具按"最可能命中"的顺序分三级产出候选，找到即停：
+
+| 级别 | 内容 | 说明 |
 | --- | --- | --- |
-| **快速** | 常见密码 + 生日/日期 + ≤4 位数字 | 几秒 ~ 几分钟 |
-| **标准**（默认） | 再加 6 位数字 + 常见词加数字 | 几分钟 ~ 几十分钟 |
-| **深度** | 再加 8 位数字 + 小字符集暴力 | 很慢，见下方 GPU 方案 |
+| 🔑 **第 0 级** | 你自己的候选（`--guess`） | 永远最先试 |
+| 1️⃣ **第 1 级：关键数字与字母** | 顺子、重复、键盘走位（qwerty/1qaz2wsx）、吉利数（520/1314）、生日日期 | 真人最常设的"关键组合"，秒级覆盖 |
+| 2️⃣ **第 2 级：行业常用密码库** | 内置高频库 + 常见词加数字 + 你挂的外部字典（rockyou/SecLists） | 安全行业沉淀的常用密码 |
+| 3️⃣ **第 3 级：暴力生成（范围可控）** | 纯数字穷举 + 通用字符集×长度区间 | **每次可自定范围**：选字符集 + 定长度 `min~max`，分批推进 |
 
-**多核并行**：工具会自动按 CPU 核数开多个线程并行测试（每次尝试彼此独立），
-实测 4 核约 4× 提速（38→155 次/秒）；8 核可到 ~300 次/秒。用 `--workers N` 可手动指定。
+**范围可控的暴力示例**（每次只跑一个可控的空间，便于分批）：
+
+```bash
+# 只跑 6~8 位纯数字（手机号/长日期）
+python3 recover.py x.rar --strategy custom --no-keylib --no-industry --no-combos \
+  --brute-charset digits --brute-min 6 --brute-max 8
+
+# 只跑 4~5 位小写字母
+python3 recover.py x.rar --brute-charset lower --brute-min 4 --brute-max 5
+
+# 自定义字符集：只在这些字符里暴力，长度 3~6
+python3 recover.py x.rar --brute-charset custom --brute-custom 'abc123!@' --brute-min 3 --brute-max 6
+```
+
+网页/桌面版里，第 3 级会**实时显示这一批的组合数与预计耗时**，方便你把控每次范围。
+
+**多核并行**：自动按 CPU 核数开多线程（每次尝试彼此独立），实测 4 核约 4×（38→155 次/秒），
+8 核可到 ~300 次/秒。`--workers N` 手动指定。
 
 即便如此，RAR/7z 受慢哈希限制，单机每秒也就几百次量级，所以**大范围暴力仍建议用 GPU 加速**（见下）。
 

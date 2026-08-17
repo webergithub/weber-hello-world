@@ -163,17 +163,24 @@ class Handler(BaseHTTPRequestHandler):
             wordlist=(data.get("wordlist") or None),
             extra_passwords=[g for g in (data.get("guesses") or []) if g],
             include_dates=bool(data.get("include_dates", True)),
+            use_key_lib=bool(data.get("use_key_lib", True)),
+            use_industry=bool(data.get("use_industry", True)),
+            wordcombos=bool(data.get("wordcombos", True)),
+            brute_charset=data.get("brute_charset", "none") or "none",
+            brute_custom=data.get("brute_custom", "") or "",
         )
-        if data.get("digits_max") is not None:
-            try:
-                opts.digits_max = int(data["digits_max"])
-            except (TypeError, ValueError):
-                pass
-        if data.get("workers") is not None:
-            try:
-                opts.workers = int(data["workers"])
-            except (TypeError, ValueError):
-                pass
+
+        def _as_int(key, target):
+            if data.get(key) is not None:
+                try:
+                    setattr(opts, target, int(data[key]))
+                except (TypeError, ValueError):
+                    pass
+
+        _as_int("digits_max", "digits_max")
+        _as_int("brute_minlen", "brute_minlen")
+        _as_int("brute_maxlen", "brute_maxlen")
+        _as_int("workers", "workers")
         auto = bool(data.get("auto_extract", True))
         job = MANAGER.start(p, opts, auto_extract=auto)
         return self._json(200, {"job_id": job.id})

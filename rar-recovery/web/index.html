@@ -40,15 +40,54 @@
       </div>
 
       <details class="adv">
-        <summary>高级选项（记得点什么就填什么，命中率更高）</summary>
+        <summary>高级选项 · 三级优先级（记得什么就填什么，命中率更高）</summary>
         <div class="advbody">
-          <label>你还记得的候选密码（每行一个，会最优先尝试）
+          <label>🔑 你还记得的候选密码（每行一个，<b>最优先</b>尝试）
             <textarea id="guesses" rows="3" placeholder="常用的密码&#10;生日&#10;手机号"></textarea>
           </label>
-          <label>额外字典文件路径（可选，如 rockyou.txt）
-            <input id="wordlist" type="text" placeholder="/path/to/rockyou.txt" />
-          </label>
-          <label class="ckline"><input id="dates" type="checkbox" checked /> 尝试生日/日期组合</label>
+
+          <fieldset class="tier">
+            <legend>第 1 级 · 关键数字与字母库</legend>
+            <label class="ckline"><input id="keylib" type="checkbox" checked /> 关键组合（顺子/重复/键盘走位/吉利数）</label>
+            <label class="ckline"><input id="dates" type="checkbox" checked /> 生日 / 日期组合</label>
+          </fieldset>
+
+          <fieldset class="tier">
+            <legend>第 2 级 · 行业常用密码库</legend>
+            <label class="ckline"><input id="industry" type="checkbox" checked /> 内置高频密码库</label>
+            <label class="ckline"><input id="combos" type="checkbox" checked /> 常见词 + 数字组合</label>
+            <label>外部字典文件（可选，如 rockyou.txt）
+              <input id="wordlist" type="text" placeholder="/path/to/rockyou.txt" />
+            </label>
+          </fieldset>
+
+          <fieldset class="tier">
+            <legend>第 3 级 · 暴力生成（每次可控范围）</legend>
+            <label>纯数字最大位数
+              <input id="digitsMax" type="number" min="0" max="12" value="6" />
+            </label>
+            <label>通用暴力字符集
+              <select id="bruteCharset">
+                <option value="none" selected>不暴力</option>
+                <option value="digits">纯数字 0-9</option>
+                <option value="lower">小写字母 a-z</option>
+                <option value="upper">大写字母 A-Z</option>
+                <option value="alpha">大小写字母</option>
+                <option value="loweralnum">小写+数字</option>
+                <option value="alnum">大小写+数字</option>
+                <option value="alnumsym">大小写+数字+符号</option>
+                <option value="custom">自定义…</option>
+              </select>
+            </label>
+            <label id="bruteCustomWrap" class="hidden">自定义字符集
+              <input id="bruteCustom" type="text" placeholder="例如 abc123!@" />
+            </label>
+            <div class="lenrow">
+              <label>长度从 <input id="bruteMin" type="number" min="1" max="12" value="1" /></label>
+              <label>到 <input id="bruteMax" type="number" min="0" max="12" value="0" /></label>
+              <span class="hint" id="bruteHint"></span>
+            </div>
+          </fieldset>
         </div>
       </details>
 

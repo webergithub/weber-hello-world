@@ -55,6 +55,7 @@ class TestDetect(unittest.TestCase):
 class TestCandidates(unittest.TestCase):
     def test_order_and_dedup(self):
         opts = Options(strategy="custom", extra_passwords=["myguess", "myguess"],
+                       use_key_lib=False, use_industry=False,
                        include_dates=False, digits_max=2, wordcombos=False)
         got = list(iter_candidates(opts))
         self.assertEqual(got[0], "myguess")               # 用户猜测最优先
@@ -64,6 +65,30 @@ class TestCandidates(unittest.TestCase):
 
     def test_estimate_positive(self):
         self.assertGreater(estimate_total(Options(strategy="fast")), 1000)
+
+    def test_tier_priority(self):
+        # 关键库(第1级) 必须排在 行业库(第2级) 之前
+        opts = Options(strategy="custom", use_key_lib=True, use_industry=True,
+                       include_dates=False, wordcombos=False, digits_max=0)
+        seq = []
+        for i, pw in enumerate(iter_candidates(opts)):
+            seq.append(pw)
+            if i > 5000:
+                break
+        # keylib 顶部是高频 PIN "1234"；键盘走位也属于第 1 级，应出现在序列里
+        self.assertEqual(seq[0], "1234")                  # 第 1 级最前是高频 PIN
+        self.assertIn("1qaz2wsx", seq)                    # 键盘走位（第 1 级）确实出现
+
+    def test_brute_scope(self):
+        # 暴力范围可控：只要 lower 长度 2..2 -> 恰好 26*26=676 个，且都是 2 位小写
+        opts = Options(strategy="custom", use_key_lib=False, use_industry=False,
+                       include_dates=False, wordcombos=False, digits_max=0,
+                       brute_charset="lower", brute_minlen=2, brute_maxlen=2)
+        got = list(iter_candidates(opts))
+        self.assertEqual(len(got), 26 * 26)
+        self.assertTrue(all(len(w) == 2 and w.isalpha() and w.islower() for w in got))
+        self.assertIn("aa", got)
+        self.assertIn("zz", got)
 
 
 class _EngineCase:
@@ -91,9 +116,10 @@ class _EngineCase:
         self.assertGreaterEqual(len(s["extracted_files"]), 1)
 
     def _check_exhausted(self, path):
-        # 候选集不含真实密码 -> 必须报 exhausted，绝不 found（关掉内置字典）
+        # 候选集不含真实密码 -> 必须报 exhausted，绝不 found（关掉所有内置来源）
         opts = Options(strategy="custom", extra_passwords=["nope1", "nope2", "nope3"],
-                       use_common=False, include_dates=False, digits_max=0, wordcombos=False)
+                       use_key_lib=False, use_industry=False, include_dates=False,
+                       wordcombos=False, digits_max=0, brute_charset="none")
         job = JobManager().start(path, opts, auto_extract=False)
         s = wait(job)
         self.assertEqual(s["status"], "exhausted")
