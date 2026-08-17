@@ -22,14 +22,54 @@ import { httpRequest, httpProbeHeaders } from '../core/http.js';
 const CHUNK_SIZE = Number(process.env.CINEROUTE_CHUNK_BYTES || 8 * 1024 * 1024);
 const CHUNK_CONCURRENCY = Number(process.env.CINEROUTE_CHUNK_CONCURRENCY || 4);
 
-/** 把不安全的文件名压成可落盘的形式，防目录穿越。 */
+/**
+ * 文件名的字节上限。
+ *
+ * 常见文件系统（ext4 / APFS / NTFS）单个文件名的上限是 255 字节——**字节**不是字符，
+ * 一个汉字 3 字节，八十来个字就撞线了，归档站的长条目名很容易超。超了不是
+ * "名字难看"，是 open() 直接 ENAMETOOLONG，整个下载失败。
+ *
+ * 这里留 240 而不是 255：同一个任务还要写两个伴生文件，后缀最长的是
+ * `.cineroute.json`（15 字节）。只卡主文件名的话，正片能落盘、续传记录
+ * 却写不进去，而那个写入是 catch 掉的——断点续传会**静默**失效。
+ */
+const MAX_FILENAME_BYTES = 240;
+
+/** 按字节截断，且不把一个多字节字符切成两半，同时保住扩展名。 */
+function capBytes(name, max = MAX_FILENAME_BYTES) {
+  if (Buffer.byteLength(name, 'utf8') <= max) return name;
+  const rawExt = path.extname(name);
+  // 扩展名本身也可能是垃圾（有人把整串塞在最后一个点后面），太长就不要了
+  const ext = Buffer.byteLength(rawExt, 'utf8') <= 16 ? rawExt : '';
+  const stem = rawExt ? name.slice(0, name.length - rawExt.length) : name;
+  const budget = Math.max(1, max - Buffer.byteLength(ext, 'utf8'));
+  // subarray 切在多字节字符中间时，toString 会在末尾留一个 U+FFFD，去掉它
+  const cut = Buffer.from(stem, 'utf8').subarray(0, budget).toString('utf8').replace(/\uFFFD+$/, '');
+  return `${cut}${ext}`;
+}
+
+/** 把不安全的文件名压成可落盘的形式，防目录穿越、防超长。 */
 export function safeFilename(name, fallback = 'video.mp4') {
   const base = path.basename(String(name || '').trim());
-  // 控制字符 + Windows 非法字符。注意不要写成 [ -<] 这种区间：
+  // 控制字符 + Windows 非法字符。注意不要写成 [\u0020-\u003c] 这种区间：
   // 0x20..0x3C 会连数字 0-9 一起吃掉，把 1080p 变成 ____p。
   const cleaned = base.replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_').replace(/^\.+/, '');
-  return cleaned || fallback;
+  return capBytes(cleaned) || fallback;
 }
+
+/** 名字被占了就加 `(2)`、`(3)`…，加完仍要守住字节上限。 */
+function uniqueFilename(name, taken) {
+  if (!taken.has(name)) return name;
+  const ext = path.extname(name);
+  const stem = name.slice(0, name.length - ext.length);
+  for (let i = 2; i < 1000; i += 1) {
+    const suffix = ` (${i})${ext}`;
+    const candidate = capBytes(stem, MAX_FILENAME_BYTES - Buffer.byteLength(suffix, 'utf8')) + suffix;
+    if (!taken.has(candidate)) return candidate;
+  }
+  return `${Date.now()}${ext}`;
+}
+
 
 /**
  * 单个下载任务。
@@ -37,11 +77,14 @@ export function safeFilename(name, fallback = 'video.mp4') {
  *                              ↘ failed / canceled
  */
 class DownloadJob extends EventEmitter {
-  constructor({ id, url, filename, bytes, checksums, dir }) {
+  constructor({ id, url, filename, requestedFilename, bytes, checksums, dir }) {
     super();
     this.id = id;
     this.url = url;
     this.filename = filename;
+    // 用户/前端请求的原始名字（已清洗，未错开）。判"是不是同一个任务"用它，
+    // 因为 filename 可能已经被错开成 `video (2).mp4` 了。
+    this.requestedFilename = requestedFilename ?? filename;
     this.dir = dir;
     this.targetPath = path.join(dir, filename);
     this.partPath = `${this.targetPath}.part`;
@@ -288,10 +331,29 @@ export class DownloadManager extends EventEmitter {
    * @param {{url: string, filename: string, bytes?: number|null, checksums?: object}} spec
    */
   enqueue(spec) {
+    // 还活着的任务：已取消/已失败的不再占用文件名
+    const live = [...this.jobs.values()].filter((j) => !['canceled', 'failed'].includes(j.status));
+
+    const requested = safeFilename(spec.filename);
+
+    // 同一个地址 + 同一个文件名重复提交就是同一个任务，把原来的还回去。
+    // 不这么做的话两个任务会同时往同一个 .part 里写，分块互相盖掉，
+    // 最后校验和还对不上——查起来像是上游给了坏文件。
+    // 注意判据是**地址 + 文件名**：同一个地址存成两个不同的名字是合法的
+    //（两个文件、两条路径，不会互相踩），不该被并成一个。
+    const existing = live.find((j) => j.url === spec.url && j.requestedFilename === requested);
+    if (existing) return existing;
+
+    // 不同地址撞了同一个文件名（`video.mp4` 这种太常见了，或者两个源
+    // 恰好同名）：错开，否则一样是互相踩，连续传记录都会串。
+    const taken = new Set(live.map((j) => path.basename(j.targetPath)));
+    const filename = uniqueFilename(requested, taken);
+
     const job = new DownloadJob({
       id: randomUUID(),
       url: spec.url,
-      filename: safeFilename(spec.filename),
+      filename,
+      requestedFilename: requested,
       bytes: spec.bytes ?? null,
       checksums: spec.checksums ?? {},
       dir: this.dir,
