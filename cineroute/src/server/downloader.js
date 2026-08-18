@@ -77,10 +77,13 @@ function uniqueFilename(name, taken) {
  *                              ↘ failed / canceled
  */
 class DownloadJob extends EventEmitter {
-  constructor({ id, url, filename, requestedFilename, bytes, checksums, dir }) {
+  constructor({ id, url, filename, requestedFilename, bytes, checksums, dir, checkRedirect = null }) {
     super();
     this.id = id;
     this.url = url;
+    // 逐跳校验跳转目标。下载器本身不认识"白名单"这件事——那是产品策略，
+    // 由服务端注入进来，这样下载器还是通用的。
+    this.checkRedirect = checkRedirect;
     this.filename = filename;
     // 用户/前端请求的原始名字（已清洗，未错开）。判"是不是同一个任务"用它，
     // 因为 filename 可能已经被错开成 `video (2).mp4` 了。
@@ -176,6 +179,7 @@ class DownloadJob extends EventEmitter {
           signal: this._abort.signal,
           timeoutMs: 60000,
           retries: 3,
+          checkRedirect: this.checkRedirect,
         });
         if (res.status !== 206 && res.status !== 200) {
           throw new Error(`分块 ${index} 返回 HTTP ${res.status}`);
@@ -203,6 +207,7 @@ class DownloadJob extends EventEmitter {
       signal: this._abort.signal,
       timeoutMs: 60000,
       retries: 1,
+      checkRedirect: this.checkRedirect,
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     if (!this.totalBytes) {
@@ -256,7 +261,9 @@ class DownloadJob extends EventEmitter {
       await fs.mkdir(this.dir, { recursive: true });
 
       // 先探测：拿真实体积，并确认能不能分块。
-      const probe = await httpProbeHeaders(this.url, { signal: this._abort.signal, timeoutMs: 15000 });
+      const probe = await httpProbeHeaders(this.url, {
+        signal: this._abort.signal, timeoutMs: 15000, checkRedirect: this.checkRedirect,
+      });
       if (probe) {
         const cr = probe.headers?.get?.('content-range');
         const total = cr?.match(/\/(\d+)\s*$/);
@@ -315,10 +322,12 @@ class DownloadJob extends EventEmitter {
 
 /** 下载队列：限制同时进行的任务数，其余排队。 */
 export class DownloadManager extends EventEmitter {
-  constructor({ dir, concurrency = 2 } = {}) {
+  constructor({ dir, concurrency = 2, checkRedirect = null } = {}) {
     super();
     this.dir = dir || path.resolve(process.cwd(), 'downloads');
     this.concurrency = concurrency;
+    // 交给每个任务，用来逐跳校验跳转目标（见 DownloadJob）
+    this.checkRedirect = checkRedirect;
     /** @type {Map<string, DownloadJob>} */
     this.jobs = new Map();
     this._running = 0;
@@ -357,6 +366,7 @@ export class DownloadManager extends EventEmitter {
       bytes: spec.bytes ?? null,
       checksums: spec.checksums ?? {},
       dir: this.dir,
+      checkRedirect: this.checkRedirect,
     });
     job.on('update', () => this.emit('update', job.toJSON()));
     this.jobs.set(job.id, job);

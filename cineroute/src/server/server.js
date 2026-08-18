@@ -98,7 +98,10 @@ async function proxyMedia(req, res, target) {
 
   let upstream;
   try {
-    upstream = await httpRequest(target, { headers, timeoutMs: 30000, retries: 1 });
+    // 逐跳校验：白名单只管得住第一个地址，跳转必须一跳一跳地查
+    upstream = await httpRequest(target, {
+      headers, timeoutMs: 30000, retries: 1, checkRedirect: isAllowedMediaUrl,
+    });
   } catch (err) {
     sendJson(res, 502, { error: `上游请求失败：${String(err?.message || err)}` });
     return;
@@ -160,7 +163,11 @@ export async function startServer(options = {}) {
     quiet = false,
   } = options;
 
-  const downloads = new DownloadManager({ dir: downloadDir, concurrency: 2 });
+  // checkRedirect：下载同样要逐跳校验，否则上游一个 302 就能把内网内容
+  // 拉到磁盘上。白名单是产品策略，从这里注入，下载器本身保持通用。
+  const downloads = new DownloadManager({
+    dir: downloadDir, concurrency: 2, checkRedirect: isAllowedMediaUrl,
+  });
   /** @type {Set<import('node:http').ServerResponse>} */
   const sseClients = new Set();
 

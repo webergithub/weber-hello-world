@@ -69,42 +69,81 @@ export async function httpRequest(url, opts = {}) {
     timeoutMs = 8000,
     retries = 2,
     signal,
+    // 给定时改为**手动跟随跳转**，每一跳都先过一遍这个校验。
+    // 不给则行为与从前一致（交给 fetch 自己 follow）。
+    checkRedirect = null,
+    maxRedirects = 5,
   } = opts;
 
-  let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt += 1) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
-    const onAbort = () => controller.abort(signal?.reason);
-    signal?.addEventListener('abort', onAbort, { once: true });
+  /** 对单个地址发一次请求（含重试）。 */
+  const attemptFetch = async (target) => {
+    let lastErr;
+    for (let attempt = 0; attempt <= retries; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(new Error('timeout')), timeoutMs);
+      const onAbort = () => controller.abort(signal?.reason);
+      signal?.addEventListener('abort', onAbort, { once: true });
 
-    try {
-      const res = await gate.run(() =>
-        fetch(url, {
-          method,
-          headers: { 'user-agent': DEFAULT_UA, ...headers },
-          signal: controller.signal,
-          redirect: 'follow',
-        }),
-      );
+      try {
+        const res = await gate.run(() =>
+          fetch(target, {
+            method,
+            headers: { 'user-agent': DEFAULT_UA, ...headers },
+            signal: controller.signal,
+            redirect: checkRedirect ? 'manual' : 'follow',
+          }),
+        );
 
-      if ((res.status >= 500 || res.status === 429) && attempt < retries) {
-        lastErr = new Error(`upstream ${res.status}`);
-        await sleep(backoffDelay(attempt));
-        continue;
+        if ((res.status >= 500 || res.status === 429) && attempt < retries) {
+          lastErr = new Error(`upstream ${res.status}`);
+          await sleep(backoffDelay(attempt));
+          continue;
+        }
+        return res;
+      } catch (err) {
+        lastErr = err;
+        // 调用方主动取消，不重试。
+        if (signal?.aborted) throw err;
+        if (attempt < retries) await sleep(backoffDelay(attempt));
+      } finally {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
       }
-      return res;
-    } catch (err) {
-      lastErr = err;
-      // 调用方主动取消，不重试。
-      if (signal?.aborted) throw err;
-      if (attempt < retries) await sleep(backoffDelay(attempt));
-    } finally {
-      clearTimeout(timer);
-      signal?.removeEventListener('abort', onAbort);
     }
+    throw lastErr ?? new Error(`request failed: ${target}`);
+  };
+
+  if (!checkRedirect) return attemptFetch(url);
+
+  /* 逐跳校验。
+   *
+   * 存在的理由：白名单只看得见**第一个**地址。上游只要回一个 302，
+   * fetch 自己就把请求带到任意主机上去了——内网、云元数据服务
+   *（169.254.169.254）全都够得着，而响应体会被原样转回客户端。
+   * 归档站本身也确实在用跳转（archive.org → iaNNNN.us.archive.org），
+   * 所以不能一刀切禁掉，只能一跳一跳地查。 */
+  let target = url;
+  for (let hop = 0; hop <= maxRedirects; hop += 1) {
+    const res = await attemptFetch(target);
+    const location = res.status >= 300 && res.status < 400 ? res.headers.get('location') : null;
+    if (!location) return res;
+
+    let next;
+    try {
+      next = new URL(location, target).toString();
+    } catch {
+      throw new Error(`跳转地址无法解析：${location}`);
+    }
+
+    const verdict = checkRedirect(next);
+    if (!verdict?.ok) {
+      throw new Error(`拒绝跳转到 ${next}：${verdict?.reason ?? '不在允许范围内'}`);
+    }
+    // 上一跳的响应体要主动丢掉，否则连接会挂着
+    await res.body?.cancel().catch(() => {});
+    target = next;
   }
-  throw lastErr ?? new Error(`request failed: ${url}`);
+  throw new Error(`跳转次数超过上限（${maxRedirects} 跳）`);
 }
 
 /**

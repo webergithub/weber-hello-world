@@ -183,9 +183,12 @@ export function isAllowedMediaUrl(url) {
   if (ALLOWED_MEDIA_HOSTS.some((re) => re.test(host))) return { ok: true };
 
   // 用户自己配置的 Jellyfin 服务器视为已授权。
+  // 比的是 origin（协议 + 主机 + 端口）而不是只比主机名：授权
+  // `http://192.168.1.50:8096` 不等于把那台机器上的 22、6379、
+  // 各种内部管理口一起放行了。
   if (process.env.JELLYFIN_URL) {
     try {
-      if (new URL(process.env.JELLYFIN_URL).hostname === host) return { ok: true };
+      if (new URL(process.env.JELLYFIN_URL).origin === parsed.origin) return { ok: true };
     } catch { /* 配置格式不对，忽略 */ }
   }
 

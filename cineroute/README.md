@@ -340,7 +340,7 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     249 个用例，全部离线可跑
+  test/                     255 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本
@@ -444,6 +444,21 @@ filename 是客户端传的，而客户端拿到的又是上游归档站的文�
 同时中文与 `&` `*` 全角标点原样显示。这一轮**没有查出产品 bug**——全程
 `createElement + textContent` 的约定确实没有例外；三处返工都在测试本身
 （断言打错了字段、载荷落位不确定、读检索框时抢在异步启动之前）。
+
+最后一层是**媒体白名单**（`mediaGuard.test.js`）——`/media`、`/api/download`、
+`/api/verify` 都会拿用户给的地址去服务端发请求，这是整个产品唯一的安全边界。
+URL 解析那些花招（`evil-archive.org`、`archive.org.evil.com`、
+`archive.org@evil.com`、西里尔同形字、`file://`、内网地址）本来就全挡住了，
+但另外两条没有：
+
+| 问题 | 后果 |
+|---|---|
+| 白名单只校验**第一个**地址，跳转交给 `fetch` 自己 follow | 上游一个 302 就把代理带到任意主机上，内网与云元数据（169.254.169.254）的内容会被原样转回客户端 |
+| `JELLYFIN_URL` 只比对主机名 | 授权 `http://192.168.1.50:8096` 等于把那台机器的 22、6379、各种内部管理口一起放行 |
+
+跳转不能一刀切禁掉——archive.org 正常就会 302 到 `iaNNNN.us.archive.org`，
+所以改成**逐跳校验**：`httpRequest` 收到 `checkRedirect` 时改为手动跟随，
+每一跳都先过一遍白名单，最多 5 跳。代理和下载器两条出口都接上了。
 
 断言尽量写成**性质**而不是硬编码期望值（「同一部片的不同写法要能对上」「不同的片子
 不能对上」「清单里的片名不该被判成预告片」），所以往清单里加新片不用改测试。
