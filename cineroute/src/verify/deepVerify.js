@@ -17,7 +17,8 @@ import { simulateBatch } from './simDownload.js';
  *
  * @param {object[]} candidates 第四步选出的片源（按名次排好）
  * @param {{browser: object, baseUrl: string, threads?: number, marks?: object[],
- *          probeBytes?: number, signal?: AbortSignal, concurrency?: number}} opts
+ *          probeBytes?: number, signal?: AbortSignal, concurrency?: number,
+ *          checkRedirect?: Function}} opts
  */
 export async function verifyCandidates(candidates, opts) {
   const {
@@ -25,6 +26,9 @@ export async function verifyCandidates(candidates, opts) {
     probeBytes, signal, concurrency = 2,
     // 与项目其余部分一致：网络出口可注入，测试才能不依赖真实网络
     requestFn,
+    // 模拟下载是直连上游的，得自己带白名单校验；
+    // 播放嗅探走本机 /media 代理，那边已经有了。
+    checkRedirect,
   } = opts;
   const started = Date.now();
 
@@ -52,7 +56,11 @@ export async function verifyCandidates(candidates, opts) {
 
   const download = await simulateBatch(
     candidates.map((c) => ({ url: c.url, bytes: c.bytes, filename: c.filename })),
-    { threads, probeBytes, signal, ...(requestFn ? { requestFn } : {}) },
+    {
+      threads, probeBytes, signal,
+      ...(requestFn ? { requestFn } : {}),
+      ...(checkRedirect ? { checkRedirect } : {}),
+    },
   );
 
   // 把两边按地址对起来，一条候选一个结论

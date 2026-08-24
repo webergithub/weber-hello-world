@@ -19,6 +19,7 @@ import { isAllowedMediaUrl } from '../src/adapters/registry.js';
 import { startServer } from '../src/server/server.js';
 import { defaultConfig } from '../src/core/sourceConfig.js';
 import { DownloadManager } from '../src/server/downloader.js';
+import { simulateDownload } from '../src/verify/simDownload.js';
 
 /* ── URL 解析花招 ─────────────────────────────────────────── */
 
@@ -197,6 +198,40 @@ test('下载同样逐跳校验：上游 302 到白名单外时不能把内容拉
     await close(inside);
     await close(outside);
     await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('第五步的模拟下载也逐跳校验：它是直连上游的，/media 那道闸管不到', async () => {
+  // 模拟下载不走本机代理，自己拿着片源地址发 Range 请求。
+  // 不校验的话，返回的状态码和响应头就是一个"某端口开着没有"的探针。
+  const SECRET = 'INTERNAL-ONLY';
+  const outside = await serve((req, res) => {
+    res.writeHead(206, { 'content-range': 'bytes 0-1/999999', 'content-type': 'video/mp4' });
+    res.end(SECRET);
+  });
+  const outsideUrl = `http://127.0.0.1:${outside.address().port}/secret`;
+  const inside = await serve((req, res) => {
+    res.writeHead(302, { location: outsideUrl });
+    res.end();
+  });
+
+  try {
+    const allowed = `http://127.0.0.1:${inside.address().port}`;
+    const out = await simulateDownload(`${allowed}/movie.mp4`, {
+      threads: 2,
+      probeBytes: 1024,
+      checkRedirect: (u) => (u.startsWith(allowed)
+        ? { ok: true }
+        : { ok: false, reason: '不在白名单内' }),
+    });
+    assert.equal(out.ok, false, '跳出白名单之后不该报成功');
+    assert.ok(
+      !JSON.stringify(out).includes(SECRET),
+      '跳转后的内容出现在了结果里',
+    );
+  } finally {
+    await close(inside);
+    await close(outside);
   }
 });
 

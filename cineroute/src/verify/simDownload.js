@@ -33,7 +33,12 @@ export async function simulateDownload(url, opts = {}) {
     totalBytes = null,
     signal,
     requestFn = httpRequest,
+    // 逐跳校验跳转目标。这一步是直连上游发 Range 请求，不走本机的 /media 代理，
+    // 所以那道闸管不到它——上游一个 302 就能把请求带进内网，
+    // 返回的状态码和响应头会变成一个"某端口开着没有"的探针。
+    checkRedirect = null,
   } = opts;
+  const guard = checkRedirect ? { checkRedirect } : {};
 
   const started = Date.now();
 
@@ -43,7 +48,9 @@ export async function simulateDownload(url, opts = {}) {
   let headStatus = null;
   let contentType = null;
   try {
-    const head = await requestFn(url, { headers: { range: 'bytes=0-1' }, timeoutMs: 10000, retries: 0, signal });
+    const head = await requestFn(url, {
+      headers: { range: 'bytes=0-1' }, timeoutMs: 10000, retries: 0, signal, ...guard,
+    });
     headStatus = head.status;
     acceptRanges = head.headers.get('accept-ranges');
     contentType = head.headers.get('content-type');
@@ -113,7 +120,7 @@ export async function simulateDownload(url, opts = {}) {
     try {
       const res = await requestFn(url, {
         headers: { range: `bytes=${job.start}-${job.end}` },
-        timeoutMs: 20000, retries: 0, signal,
+        timeoutMs: 20000, retries: 0, signal, ...guard,
       });
       if (res.status !== 206) {
         if (res.body) await res.body.cancel().catch(() => {});

@@ -340,7 +340,7 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     255 个用例，全部离线可跑
+  test/                     256 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本
@@ -458,7 +458,12 @@ URL 解析那些花招（`evil-archive.org`、`archive.org.evil.com`、
 
 跳转不能一刀切禁掉——archive.org 正常就会 302 到 `iaNNNN.us.archive.org`，
 所以改成**逐跳校验**：`httpRequest` 收到 `checkRedirect` 时改为手动跟随，
-每一跳都先过一遍白名单，最多 5 跳。代理和下载器两条出口都接上了。
+每一跳都先过一遍白名单，最多 5 跳。
+
+出网的口子一共三个，都接上了：媒体代理、下载器、第五步的模拟下载。
+第三个容易漏——它不走本机 `/media` 代理，自己拿着片源地址直连上游发 Range
+请求，那道闸管不到它。播放嗅探反而是安全的：它是在页面里把
+`<video src="/media?url=…">` 指回本机代理，等于已经过了闸。
 
 断言尽量写成**性质**而不是硬编码期望值（「同一部片的不同写法要能对上」「不同的片子
 不能对上」「清单里的片名不该被判成预告片」），所以往清单里加新片不用改测试。

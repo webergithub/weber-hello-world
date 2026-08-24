@@ -389,6 +389,8 @@ export async function startServer(options = {}) {
             threads: vcfg.threads,
             probeBytes: vcfg.probeBytes,
             concurrency: vcfg.concurrency,
+            // 模拟下载直连上游，跳转要自己查；播放嗅探走 /media 代理，那边已有
+            checkRedirect: isAllowedMediaUrl,
           },
         );
         sendJson(res, 200, { ...out, rejected, config: vcfg });
