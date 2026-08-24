@@ -189,6 +189,10 @@ export async function analyze(suspectPath, opts = {}) {
     ok: true,
     format: container.format || 'isobmff',
     matroska: container.matroska ?? null,
+    // MKV 扫描没走完整个文件时的实情。和 track.parseWarnings 一个道理：
+    // 帧表残缺而报告不说，等于把一个不可靠的码率当成取证结论呈现。
+    incomplete: Boolean(container.incomplete),
+    warnings: container.warnings ?? [],
     ftyp: container.ftyp,
     durationSec: container.movie ? container.movie.duration / container.movie.timescale : null,
     hasFragments: container.hasFragments || Boolean(container.fragmented),
@@ -385,6 +389,7 @@ export function renderText(report) {
   if (report.container.format === 'matroska') {
     const mk = report.container.matroska;
     L.push(`容器：Matroska / WebM${mk ? `（${mk.clusterCount} 个 Cluster · ${mk.blockCount} 个块）` : ''}`);
+    for (const w of report.container.warnings ?? []) L.push(`  ⚠ ${w}`);
   } else {
     // ftyp 是 MP4 特有的，MKV 没有这个概念，不要在那里显示"未知"
     L.push(`封装品牌：${report.container.ftyp

@@ -48,6 +48,9 @@ const ID = {
   ReferenceBlock: 0xfb,
 };
 
+/** 规范默认的时间刻度：1,000,000 纳秒（1 毫秒）。 */
+const DEFAULT_TIMESTAMP_SCALE = 1_000_000;
+
 /** 需要往里钻的容器元素，其余一律跳过。 */
 const MASTER = new Set([
   ID.Segment, ID.Info, ID.Tracks, ID.TrackEntry, ID.Video, ID.Cluster, ID.BlockGroup,
@@ -160,6 +163,18 @@ export async function parseMatroska(filePath, opts = {}) {
     let clusterCount = 0;
     let blockCount = 0;
     let truncated = false;
+    /**
+     * 扫描中途放弃的地方。
+     *
+     * MKV 没有集中索引，扫到坏字节就停是合理的做法——但**停了必须说出来**。
+     * 停了还报 ok、还给出一份残缺的帧表，下游据此算出的码率、帧率、时长
+     * 就是错的，而且看不出来。这跟 MP4 那边样本表被截短是同一类问题。
+     * @type {Array<{at: number, expectedEnd: number, why: string}>}
+     */
+    const abandoned = [];
+    const giveUp = (pos, expectedEnd, why) => {
+      if (pos < expectedEnd) abandoned.push({ at: pos, expectedEnd, why });
+    };
 
     /** 当前正在解析的 TrackEntry / BlockGroup 上下文 */
     let curTrack = null;
@@ -176,22 +191,32 @@ export async function parseMatroska(filePath, opts = {}) {
       while (pos < end && !truncated) {
         // 元素头最长 8+8=16 字节
         const need = Math.min(16, fileSize - pos);
-        if (need < 2) return;
+        if (need < 2) { giveUp(pos, end, '文件在这里就结束了，连一个元素头都读不全'); return; }
         let base;
         try {
           base = await r.ensure(pos, need);
-        } catch { return; }
+        } catch { giveUp(pos, end, '读文件失败'); return; }
 
         const idv = readVint(r.buf, base, false);
-        if (!idv) return;
+        if (!idv) { giveUp(pos, end, '元素 ID 不是合法的变长整数'); return; }
         const sizev = readVint(r.buf, base + idv.length, true);
-        if (!sizev) return;
+        if (!sizev) { giveUp(pos, end, '长度字段不是合法的变长整数'); return; }
 
         const headerLen = idv.length + sizev.length;
         const contentStart = pos + headerLen;
         // 未知长度（流式封装常见）：一直延伸到父元素结尾
-        const contentEnd = sizev.unknown ? end : Math.min(end, contentStart + sizev.value);
+        const declaredEnd = contentStart + sizev.value;
+        const contentEnd = sizev.unknown ? end : Math.min(end, declaredEnd);
         const id = idv.value;
+
+        // 元素声称的长度被父元素/文件末尾截断了 —— 这才是"文件不完整"最常见的
+        // 表现形式，而不是解析中途放弃：下载断在半路时，外层元素的长度字段
+        // 仍然写着完整值，扫描却会在 pos == end 处正常收尾，什么都不报。
+        // 未知长度的元素本来就延伸到父元素结尾，不算数。
+        if (!sizev.unknown && declaredEnd > end) {
+          giveUp(pos, declaredEnd, `元素 0x${id.toString(16)} 声称到第 ${declaredEnd} 字节，`
+            + `但可读范围只到第 ${end} 字节，文件像是被截断了`);
+        }
 
         if (MASTER.has(id)) {
           if (id === ID.Cluster) { clusterCount += 1; clusterTs = 0; }
@@ -279,8 +304,24 @@ export async function parseMatroska(filePath, opts = {}) {
     await walk(0, fileSize, 0);
 
     // 组装成与 MP4 一致的 track 结构
-    // MKV 的时间戳单位是 TimestampScale 纳秒，换算成"每秒多少刻度"
-    const timescale = Math.round(1e9 / info.timestampScale);
+    // MKV 的时间戳单位是 TimestampScale 纳秒，换算成"每秒多少刻度"。
+    //
+    // 这个值是**除数**，文件里写个 0 就直接把 timescale 变成 Infinity，
+    // 再一路污染帧率（timescale / 帧间隔）、时长（duration / timescale）——
+    // 报告上会出现一堆 Infinity 和 0，而且看不出根因在哪。
+    // 写个 8 字节的天文数字则相反，timescale 被压成 0，同样是除零。
+    // 规范的默认值是 1,000,000 纳秒（1 毫秒），非法就退回它并留一条记录。
+    const warnings = [];
+    const rawScale = info.timestampScale;
+    let scale = rawScale;
+    if (!Number.isFinite(scale) || scale <= 0 || 1e9 / scale < 1) {
+      scale = DEFAULT_TIMESTAMP_SCALE;
+      warnings.push(
+        `TimestampScale 是 ${rawScale}，不是个能用的时间刻度，`
+        + `已退回规范默认值 ${DEFAULT_TIMESTAMP_SCALE} 纳秒；基于时间的统计只能作参考`,
+      );
+    }
+    const timescale = Math.round(1e9 / scale);
     const outTracks = [];
 
     for (const [trackNumber, meta] of tracks) {
@@ -319,13 +360,28 @@ export async function parseMatroska(filePath, opts = {}) {
       });
     }
 
-    const durationSec = info.duration
-      ? (info.duration * info.timestampScale) / 1e9
+    const durationSec = Number.isFinite(info.duration) && info.duration > 0
+      ? (info.duration * scale) / 1e9
       : null;
+
+    if (abandoned.length > 0) {
+      const first = abandoned[0];
+      warnings.push(
+        `${first.why}（第 ${first.at} 字节处）`
+        + `${abandoned.length > 1 ? `，另有 ${abandoned.length - 1} 处同样情况` : ''}；`
+        + '这之后的帧没有进入统计，码率与帧率只能作参考',
+      );
+    }
+    if (truncated) {
+      warnings.push(`块数超过上限 ${maxBlocks}，其余未统计`);
+    }
 
     return {
       ok: true,
       format: 'matroska',
+      // 解析没走完整个文件。下游据此知道"这份帧表是残缺的"。
+      incomplete: abandoned.length > 0 || truncated,
+      warnings,
       ftyp: null,
       movie: {
         timescale,
