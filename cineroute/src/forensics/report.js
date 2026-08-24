@@ -204,6 +204,10 @@ export async function analyze(suspectPath, opts = {}) {
       durationSec: t.media ? t.media.duration / t.media.timescale : null,
       sampleCount: t.sampleCount,
       editList: t.editList,
+      // 解析时发现的"文件自己说的和实际对不上"。必须一路带到报告里：
+      // 码率、帧率、时长都是从样本表算的，表被截短过而报告不说，
+      // 等于把一个不可靠的数字当成取证结论呈现。
+      parseWarnings: t.parseWarnings ?? [],
     })),
     audioTrackCount: audioTracks.length,
     tags: container.tags,
@@ -397,6 +401,7 @@ export function renderText(report) {
     L.push(`  轨 ${t.trackId} [${t.type}] ${t.codecs.join('/') || '?'} ${dims} · ${t.sampleCount} 样本`
       + `${t.handlerName ? ` · handler="${t.handlerName}"` : ''}`);
     if (t.editList?.length) L.push(`      编辑列表：${JSON.stringify(t.editList)}`);
+    for (const w of t.parseWarnings ?? []) L.push(`      ⚠ ${w}`);
   }
   if (Object.keys(report.container.tags || {}).length) {
     L.push('  标签：');

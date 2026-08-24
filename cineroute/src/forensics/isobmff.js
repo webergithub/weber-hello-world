@@ -100,53 +100,83 @@ export function findAll(boxes, type) {
   return boxes.filter((b) => b.type === type);
 }
 
-/** 读 FullBox 头，返回 {version, flags, offset}（offset 指向实际负载）。 */
+/**
+ * 盒内可读到哪儿为止。
+ *
+ * 这些解析器面对的是**从归档站下下来的文件**，截断的下载、坏掉的转码、
+ * 恶意构造的样本长得一模一样：盒头对得上，里面什么都没有。
+ * 所有的读都必须先问一句"还有这么多字节吗"，越界就当没有，
+ * 不能让一个空盒把整个取证流程用 RangeError 打断。
+ */
+const boxLimit = (buf, box) => Math.min(box.dataEnd, buf.length);
+
+/** 盒内安全读 u32：读不到就当 0，不抛。 */
+const u32At = (buf, p, limit) => (p >= 0 && p + 4 <= limit ? buf.readUInt32BE(p) : 0);
+
+/** 盒内安全读 i32。 */
+const i32At = (buf, p, limit) => (p >= 0 && p + 4 <= limit ? buf.readInt32BE(p) : 0);
+
+/** 一次解压出来的样本数上限。见 parseStts 里的说明。 */
+const MAX_SAMPLES = 5_000_000;
+
+/** 读 FullBox 头，返回 {version, flags, offset, limit}（offset 指向实际负载）。 */
 function readFullHeader(buf, box) {
+  const limit = boxLimit(buf, box);
+  // 连 4 字节的 version+flags 都装不下：当成 version 0、flags 0，
+  // 后面的读会因为 offset 越过 limit 而各自返回 0
+  if (box.dataStart + 4 > limit) {
+    return { version: 0, flags: 0, offset: box.dataStart + 4, limit };
+  }
   const version = buf.readUInt8(box.dataStart);
   const flags = (buf.readUInt8(box.dataStart + 1) << 16)
     | (buf.readUInt8(box.dataStart + 2) << 8)
     | buf.readUInt8(box.dataStart + 3);
-  return { version, flags, offset: box.dataStart + 4 };
+  return { version, flags, offset: box.dataStart + 4, limit };
 }
 
 /** mvhd：全局时间刻度与时长。 */
 export function parseMvhd(buf, box) {
-  const { version, offset } = readFullHeader(buf, box);
+  const { version, offset, limit } = readFullHeader(buf, box);
   if (version === 1) {
-    const timescale = buf.readUInt32BE(offset + 16);
-    const hi = buf.readUInt32BE(offset + 20);
-    const lo = buf.readUInt32BE(offset + 24);
-    return { timescale, duration: hi * 2 ** 32 + lo };
+    return {
+      timescale: u32At(buf, offset + 16, limit),
+      duration: u32At(buf, offset + 20, limit) * 2 ** 32 + u32At(buf, offset + 24, limit),
+    };
   }
   return {
-    timescale: buf.readUInt32BE(offset + 8),
-    duration: buf.readUInt32BE(offset + 12),
+    timescale: u32At(buf, offset + 8, limit),
+    duration: u32At(buf, offset + 12, limit),
   };
 }
 
 /** tkhd：轨道 ID 与显示尺寸（16.16 定点）。 */
 export function parseTkhd(buf, box) {
-  const { version, offset } = readFullHeader(buf, box);
+  const { version, offset, limit } = readFullHeader(buf, box);
   const base = version === 1 ? offset + 16 : offset + 8;
-  const trackId = buf.readUInt32BE(base);
-  // 尺寸位于盒尾部
-  const width = buf.readUInt32BE(box.dataEnd - 8) / 65536;
-  const height = buf.readUInt32BE(box.dataEnd - 4) / 65536;
-  return { trackId, width, height };
+  // 尺寸位于盒尾部。盒子被截短时这两个位置会跑到盒头之前，
+  // 那就当尺寸未知（0），而不是去读别的盒子的字节。
+  const wPos = limit - 8;
+  const hPos = limit - 4;
+  const sizeOk = wPos >= box.dataStart;
+  return {
+    trackId: u32At(buf, base, limit),
+    width: sizeOk ? u32At(buf, wPos, limit) / 65536 : 0,
+    height: sizeOk ? u32At(buf, hPos, limit) / 65536 : 0,
+  };
 }
 
 /** mdhd：轨道自身的时间刻度与时长。 */
 export function parseMdhd(buf, box) {
-  const { version, offset } = readFullHeader(buf, box);
+  const { version, offset, limit } = readFullHeader(buf, box);
   if (version === 1) {
-    const timescale = buf.readUInt32BE(offset + 16);
-    const hi = buf.readUInt32BE(offset + 20);
-    const lo = buf.readUInt32BE(offset + 24);
-    return { timescale, duration: hi * 2 ** 32 + lo };
+    return {
+      timescale: u32At(buf, offset + 16, limit),
+      duration: u32At(buf, offset + 20, limit) * 2 ** 32 + u32At(buf, offset + 24, limit),
+    };
   }
   return {
-    timescale: buf.readUInt32BE(offset + 8),
-    duration: buf.readUInt32BE(offset + 12),
+    timescale: u32At(buf, offset + 8, limit),
+    duration: u32At(buf, offset + 12, limit),
   };
 }
 
@@ -157,22 +187,22 @@ export function parseMdhd(buf, box) {
  * "L-SMASH Video Handler"、"Bento4 Video"、"ISO Media file ... HandBrake" 等。
  */
 export function parseHdlr(buf, box) {
-  const { offset } = readFullHeader(buf, box);
-  const handlerType = buf.toString('latin1', offset + 4, offset + 8);
+  const { offset, limit } = readFullHeader(buf, box);
+  const handlerType = offset + 8 <= limit ? buf.toString('latin1', offset + 4, offset + 8) : '????';
   // name 从 offset+20 起，可能是以 NUL 结尾的 C 串，也可能是带长度前缀的 Pascal 串
-  let name = buf.toString('utf8', offset + 20, box.dataEnd).replace(/\0.*$/s, '').trim();
+  let name = buf.toString('utf8', Math.min(offset + 20, limit), limit).replace(/\0.*$/s, '').trim();
   if (name && name.charCodeAt(0) < 0x20) name = name.slice(1).trim();
   return { handlerType, name };
 }
 
 /** stsd：取样本描述里的编码 fourcc（avc1 / hev1 / mp4a …）。 */
 export function parseStsd(buf, box) {
-  const { offset } = readFullHeader(buf, box);
-  const entryCount = buf.readUInt32BE(offset);
+  const { offset, limit } = readFullHeader(buf, box);
+  const entryCount = u32At(buf, offset, limit);
   const formats = [];
   let p = offset + 4;
-  for (let i = 0; i < entryCount && p + 8 <= box.dataEnd; i += 1) {
-    const size = buf.readUInt32BE(p);
+  for (let i = 0; i < entryCount && p + 8 <= limit; i += 1) {
+    const size = u32At(buf, p, limit);
     formats.push(buf.toString('latin1', p + 4, p + 8));
     if (size < 8) break;
     p += size;
@@ -182,46 +212,68 @@ export function parseStsd(buf, box) {
 
 /** stts：时间-样本表 → 每个样本的时长（解压成数组）。 */
 export function parseStts(buf, box) {
-  const { offset } = readFullHeader(buf, box);
-  const entryCount = buf.readUInt32BE(offset);
+  const { offset, limit } = readFullHeader(buf, box);
+  const entryCount = u32At(buf, offset, limit);
   const deltas = [];
+  let declared = 0;
   let p = offset + 4;
-  for (let i = 0; i < entryCount && p + 8 <= box.dataEnd; i += 1) {
-    const count = buf.readUInt32BE(p);
-    const delta = buf.readUInt32BE(p + 4);
-    // 防御畸形文件里的超大 count 撑爆内存
-    const safeCount = Math.min(count, 5_000_000);
-    for (let j = 0; j < safeCount; j += 1) deltas.push(delta);
+
+  for (let i = 0; i < entryCount && p + 8 <= limit; i += 1) {
+    const count = u32At(buf, p, limit);
+    const delta = u32At(buf, p + 4, limit);
+    declared += count;
+    // 上限卡的是**累计**样本数，不是单条。
+    // 原来只卡单条（每条最多 5,000,000），可条数本身是由盒子大小决定的：
+    // 一个 16KB 的 stts 能塞 2000 条，每条都声称有 40 亿个样本，
+    // 乘出来就是一百亿次 push —— 实测烧掉 20 秒然后抛
+    // "Invalid array length"。稍微改小一点的数字则是直接把内存吃光。
+    const room = MAX_SAMPLES - deltas.length;
+    if (room <= 0) break;
+    const n = Math.min(count, room);
+    for (let j = 0; j < n; j += 1) deltas.push(delta);
     p += 8;
   }
+
+  // 取证工具不能默默给一份被截短的数据当完整结果用：把实情挂上去，
+  // 由 parseContainer 变成 track 上的一条警告。
+  deltas.declaredSamples = declared;
+  deltas.truncated = declared > deltas.length;
   return deltas;
 }
 
 /** stsz：样本大小表。sampleSize 非 0 表示所有样本等长。 */
 export function parseStsz(buf, box) {
-  const { offset } = readFullHeader(buf, box);
-  const sampleSize = buf.readUInt32BE(offset);
-  const sampleCount = buf.readUInt32BE(offset + 4);
+  const { offset, limit } = readFullHeader(buf, box);
+  const sampleSize = u32At(buf, offset, limit);
+  const sampleCount = u32At(buf, offset + 4, limit);
+
   if (sampleSize !== 0) {
-    return new Array(Math.min(sampleCount, 5_000_000)).fill(sampleSize);
+    const sizes = new Array(Math.min(sampleCount, MAX_SAMPLES)).fill(sampleSize);
+    sizes.declaredSamples = sampleCount;
+    sizes.truncated = sampleCount > sizes.length;
+    return sizes;
   }
+
   const sizes = [];
   let p = offset + 8;
-  for (let i = 0; i < sampleCount && p + 4 <= box.dataEnd; i += 1) {
-    sizes.push(buf.readUInt32BE(p));
+  for (let i = 0; i < sampleCount && p + 4 <= limit && sizes.length < MAX_SAMPLES; i += 1) {
+    sizes.push(u32At(buf, p, limit));
     p += 4;
   }
+  sizes.declaredSamples = sampleCount;
+  // 表里根本没这么多字节也算"说了谎"，一样要报出来
+  sizes.truncated = sampleCount > sizes.length;
   return sizes;
 }
 
 /** stss：同步样本表（关键帧），样本号从 1 开始。返回 Set。 */
 export function parseStss(buf, box) {
-  const { offset } = readFullHeader(buf, box);
-  const entryCount = buf.readUInt32BE(offset);
+  const { offset, limit } = readFullHeader(buf, box);
+  const entryCount = u32At(buf, offset, limit);
   const keys = new Set();
   let p = offset + 4;
-  for (let i = 0; i < entryCount && p + 4 <= box.dataEnd; i += 1) {
-    keys.add(buf.readUInt32BE(p));
+  for (let i = 0; i < entryCount && p + 4 <= limit && keys.size < MAX_SAMPLES; i += 1) {
+    keys.add(u32At(buf, p, limit));
     p += 4;
   }
   return keys;
@@ -229,27 +281,23 @@ export function parseStss(buf, box) {
 
 /** elst：编辑列表。存在非平凡的编辑列表 = 有过裁剪/位移。 */
 export function parseElst(buf, box) {
-  const { version, offset } = readFullHeader(buf, box);
-  const entryCount = buf.readUInt32BE(offset);
+  const { version, offset, limit } = readFullHeader(buf, box);
+  const entryCount = u32At(buf, offset, limit);
   const entries = [];
   let p = offset + 4;
   for (let i = 0; i < entryCount; i += 1) {
     if (version === 1) {
-      if (p + 20 > box.dataEnd) break;
-      const durHi = buf.readUInt32BE(p);
-      const durLo = buf.readUInt32BE(p + 4);
-      const mtHi = buf.readInt32BE(p + 8);
-      const mtLo = buf.readUInt32BE(p + 12);
+      if (p + 20 > limit) break;
       entries.push({
-        segmentDuration: durHi * 2 ** 32 + durLo,
-        mediaTime: mtHi * 2 ** 32 + mtLo,
+        segmentDuration: u32At(buf, p, limit) * 2 ** 32 + u32At(buf, p + 4, limit),
+        mediaTime: i32At(buf, p + 8, limit) * 2 ** 32 + u32At(buf, p + 12, limit),
       });
       p += 20;
     } else {
-      if (p + 12 > box.dataEnd) break;
+      if (p + 12 > limit) break;
       entries.push({
-        segmentDuration: buf.readUInt32BE(p),
-        mediaTime: buf.readInt32BE(p + 4),
+        segmentDuration: u32At(buf, p, limit),
+        mediaTime: i32At(buf, p + 4, limit),
       });
       p += 12;
     }
@@ -338,6 +386,8 @@ export function parseContainer(buf) {
       sizes: [],
       deltas: [],
       syncSamples: null,
+      // 解析过程中发现的"文件自己说的和实际对不上"，供报告如实呈现
+      parseWarnings: [],
     };
 
     if (stbl) {
@@ -351,6 +401,18 @@ export function parseContainer(buf) {
       if (stszBox) track.sizes = parseStsz(buf, stszBox);
       if (stssBox) track.syncSamples = parseStss(buf, stssBox);
       track.sampleCount = Math.min(track.sizes.length, track.deltas.length) || track.sizes.length;
+
+      // 表里声称的样本数与实际解析出来的对不上时如实报出来。
+      // 取证结论建立在这些数字上，默默用一份被截短的表算出来的码率、
+      // 帧率、时长都是错的，而且错得看不出来。
+      for (const [what, table] of [['stts', track.deltas], ['stsz', track.sizes]]) {
+        if (table?.truncated) {
+          track.parseWarnings.push(
+            `${what} 声称 ${table.declaredSamples} 个样本，实际只解析出 ${table.length} 个`
+            + '（超出上限或文件里根本没这么多字节），基于样本表的统计只能作参考',
+          );
+        }
+      }
       // 没有 stss 表示所有样本都是同步样本（全 I 帧或音频）。
       track.allSync = !stssBox;
     }
