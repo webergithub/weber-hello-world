@@ -28,9 +28,12 @@ function syncBackendFields() {
   const picked = $('serpBackend').value;
   const actual = SOURCES.catalog?.serp?.backend || null;
   const show = (id, on) => $(id).classList.toggle('inactive', !on);
-  show('apiFields', picked === 'api' || (picked === 'auto' && actual === 'api'));
-  show('cliFields', picked === 'cli' || (picked === 'auto' && actual === 'cli'));
-  show('browserFields', picked === 'browser' || (picked === 'auto' && actual === 'browser'));
+  const on = (name) => picked === name || (picked === 'auto' && actual === name);
+  // 阶梯把 http 和 browser 两级都用上，所以两组字段都算相关
+  show('httpFields', on('http') || on('ladder') || picked === 'ladder');
+  show('apiFields', on('api'));
+  show('cliFields', on('cli'));
+  show('browserFields', on('browser') || on('ladder') || picked === 'ladder');
 }
 
 function renderBackendState() {

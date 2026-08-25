@@ -206,20 +206,57 @@ npm test                                              # 203 个用例，全部�
 
 **一、这五个引擎都没有能直接用的免费官方 API。** Google 的 Web Search API 早已停用，
 Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Yandex 的不对外。
-所以检索做成**三种可插拔后端**，在设置页「🔌 检索后端」里选（也可用环境变量）：
+所以自己做了一套检索框架（`src/adapters/serp/`），**不依赖任何付费服务也能出结果**。
+可选的路有五条，在设置页「🔌 检索后端」里选（也可用环境变量）：
 
 | 后端 | 怎么工作 | 代价 |
 |---|---|---|
+| `http` | **直接请求结果页，自己解析 HTML** | 免费、不用装东西、快一到两个数量级，但更容易被认出来是脚本 |
+| `ladder` | 先 `http`，被拦截了自动升级到 `browser` | 兼顾快和稳，是有 Chromium 时的默认 |
 | `api` | 调 SERP 服务（serper / brave / 自定义 URL 模板） | 稳，但按次收费 |
 | `cli` | 调本机命令行工具，如 `ddgr --json -n {limit} {query}` | 免费，但要机器上装了才有 |
-| `browser` | 无头 Chromium 打开结果页，从 DOM 里取 | 免费、不用装东西，但**脆** |
+| `browser` | 无头 Chromium 打开结果页，从 DOM 里取 | 免费，但慢（每页两三秒），且引擎会查反自动化 |
 
-默认是 `auto`：按**现场已经配好了什么**自动挑，顺序 `api` → `cli` → `browser`。
-所以机器上有 Chromium 的话，clone 下来什么都不配就能搜——走无头浏览器那条路。
+默认是 `auto`：配了 SERP 服务走 `api`，配了命令行工具走 `cli`，
+**什么都没配也能搜**——有 Chromium 走 `ladder`，没有就走纯 `http`。
 
-> 这里以前是个坑：后端只认环境变量，没设就把五个引擎**整体跳过**，
-> 界面上只会安静地返回一个空结果，看着像"这软件搜不出东西"。现在
-> 后端进了配置和设置页，默认 `auto`，主页状态条也会红着告诉你配没配上。
+> 这里前后踩过两次坑。第一次：后端只认环境变量，没设就把五个引擎**整体跳过**，
+> 界面上只会安静地返回一个空结果。第二次：改成 `auto` 之后仍然要求
+> "三条路至少配通一条"，一台没装 Chromium 又没买 SERP 服务的机器上还是搜不了。
+> 加了 `http` 这条路之后才真正做到零配置可用。
+
+### 自有检索框架
+
+`src/adapters/serp/` 下面这几件事是这套框架的全部内容：
+
+**引擎配方表**（`engines.js`）。一个引擎能不能被抓，要知道的远不止结果页地址：
+翻页参数各家算法都不同（Google 用 `start=偏移`、Bing 用 `first=偏移+1`、
+百度用 `pn=偏移`、Yandex 用 `p=页码-1`）；跳转包装各有各的包法
+（`/url?q=`、`/link?url=`、`/l/?uddg=`）；同意页要靠特定 cookie 跳过。
+加一个引擎 = 加一条配方，不用改别处。
+
+**抽取不依赖 class 名**（`html.js`）。零依赖的 HTML 扫描器，把所有锚点捞出来
+再按规则筛：还原跳转包装 → 只留 http(s) → 排掉引擎自家域名 → 去重。
+这比写死选择器抗改版——引擎换了 class 名照样能出结果，因为结果链接
+本身的形态是不变的。有一条用例专门把结果页的 class 全改掉来验这件事。
+
+**别让对方一眼看出是脚本**（`httpSearch.js`）。关键不是把 User-Agent 换得多花哨，
+是**请求头要成套**：真实浏览器发的 `Accept`、`Accept-Language`、`Sec-Fetch-*`
+是一整组，只改 UA 而其余不带反而更可疑。另外两件影响很大但容易被忽略的事：
+带上跳过同意页的 cookie（不带的话欧盟出口拿回来的是一个零结果的中间页，
+HTTP 200、结构完整，你会以为是选择器写错了）；按引擎分别限速并带抖动
+（固定间隔本身就是一种指纹）。
+
+**被挡 ≠ 没结果**（`ladder.js`）。这两件事的处理方式完全不同，混在一起是这类
+框架最常见的毛病——把验证码页当成"这个词搜不到东西"，于是既不重试也不升级，
+安静地给出一个空结果。框架把「被拦截」作为一等结果返回，阶梯据此决定升级；
+而"这一页真的到底了"是正常结束，不该白白再开一次浏览器。
+
+**免费又稳的答案是自建 SearXNG**。它替你去问 Google/Bing/DDG 并聚合成 JSON，
+不用抓 HTML、不会被反自动化拦，也不用给谁付费——代价是你得自己维护一个服务。
+在「检索来源」里加一个名为 `searxng` 的引擎，实例地址填到 URL 模板里即可。
+另外还内置了 **Mojeek**：它有自己的索引（不是转发大厂），而且不排斥抓取，
+别家全被挡住时它往往还能出东西。
 
 优先级是**设置页填的盖过环境变量，留空的字段才回落到环境变量**。
 API key 想只放环境变量、不落到配置文件里也可以，设置页那一栏空着即可。
@@ -321,7 +358,11 @@ cineroute/
     registry.js             按配置装配适配器 + 播放/下载域名白名单
     searchEngine.js         引擎适配器工厂（页面 → 片源解析）
     prioritySource.js       优先来源：站点存在性取证（只出线索，不出片源）
-    serp.js                 三种检索后端：api / cli / browser
+    serp.js                 检索后端调度：api / cli / browser / http / ladder
+    serp/engines.js         引擎配方表：翻页算法 · 跳转包装 · 同意页 cookie · 拦截特征
+    serp/html.js            零依赖 HTML 抽取（不依赖 class 名，抗改版）
+    serp/httpSearch.js      http 策略：成套请求头 · 限速抖动 · 拦截识别
+    serp/ladder.js          策略阶梯：先便宜的，被挡了再升级
     internetArchive.js / wikimediaCommons.js / jellyfin.js / tmdb.js
   src/browser/
     cdp.js                  零依赖 Chrome DevTools Protocol 客户端（用 Node 内置 WebSocket）
@@ -340,7 +381,7 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     287 个用例，全部离线可跑
+  test/                     315 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本

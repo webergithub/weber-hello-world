@@ -34,9 +34,9 @@
   <section id="sec-backend" class="panel">
     <h2>🔌 检索后端</h2>
     <p class="field-note">
-      Google / Bing / 百度 / DuckDuckGo 都没有可直接用的免费官方 API，所以引擎检索走三条可选的路。
-      <strong>没有可用后端时，所有引擎来源会被整体跳过，检索结果就是空的</strong>——这一栏没配好，
-      下面配再多来源也没用。
+      Google / Bing / 百度 / DuckDuckGo 都没有可直接用的免费官方 API，所以引擎检索自己实现了几条路。
+      默认的<strong>「自动」什么都不用配就能搜</strong>——直接请求结果页自己解析；
+      本机有 Chromium 时会自动升格成阶梯，被拦截了再开浏览器重试。
     </p>
 
     <div id="backendState" class="backend-state"></div>
@@ -45,6 +45,8 @@
       <label class="field"><span>后端</span>
         <select id="serpBackend">
           <option value="auto">自动（推荐）</option>
+          <option value="ladder">阶梯 — 先直取，被挡了自动升级到浏览器</option>
+          <option value="http">http — 直接请求结果页并解析</option>
           <option value="api">api — SERP 服务</option>
           <option value="cli">cli — 本机命令行工具</option>
           <option value="browser">browser — 无头浏览器</option>
@@ -54,6 +56,24 @@
         选「自动」时按<strong>已经配好了什么</strong>挑：有 SERP 服务走 api，有命令行工具走 cli，
         本机有 Chromium 走 browser。
       </span>
+    </div>
+
+    <div id="httpFields" class="backend-fields">
+      <h3>http · 直接请求结果页</h3>
+      <p class="field-note">
+        就是「发一个 GET，再从返回的 HTML 里把结果抠出来」。比开浏览器快一到两个数量级，
+        不用装东西也不花钱。抽取<strong>不依赖页面的 class 名</strong>——把所有链接捞出来
+        按规则筛（还原跳转包装、排掉引擎自家域名），所以引擎改版面了照样能出结果。
+      </p>
+      <p class="field-note">
+        代价是更容易被认出来是脚本。框架里做了这几件事来减少被挡：请求头成套发送
+        （只改 User-Agent 反而更可疑）、带上跳过同意页的 cookie、按引擎分别限速并带抖动。
+        真被挡了会<strong>如实报「被拦截」而不是「没搜到」</strong>——这两件事的处理方式完全不同。
+      </p>
+      <p class="field-note">
+        各家的难易程度差别很大：DuckDuckGo 的 html 端点最好抓，Bing、百度、Mojeek 次之，
+        Google 时好时坏，Yandex 几乎必弹验证码（所以它会直接跳过 http 这一级）。
+      </p>
     </div>
 
     <div id="apiFields" class="backend-fields">
@@ -107,6 +127,12 @@
       <p class="field-note">
         不花钱、不用装东西，但<strong>脆</strong>：引擎改版面就得跟着改，量一大会被要求验证码。
         适合小批量调研。也可以把 URL 模板指向自建的 SearXNG，既不付费也不直接爬引擎。
+      </p>
+      <p class="field-note">
+        想要免费又稳的话，最好的答案是<strong>自建 SearXNG</strong>：它替你去问
+        Google/Bing/DDG 并聚合成 JSON，不用抓 HTML、不会被反自动化拦。
+        在「检索来源」里加一个名为 <code>searxng</code> 的引擎，把实例地址填到上面的
+        URL 模板里即可。
       </p>
       <div class="global-row">
         <label class="field wide"><span>Chromium 路径</span>

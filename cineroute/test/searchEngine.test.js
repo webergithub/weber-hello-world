@@ -194,8 +194,11 @@ test('未配置时适配器自报不可用，三种后端各自检查各自的�
   const noChrome = { hasChrome: false };
   const hasChrome = { hasChrome: true };
 
-  assert.equal(adapter.checkConfig({}, noChrome).available, false);
-  assert.match(adapter.checkConfig({}, noChrome).reason, /没有可用的检索后端/);
+  // 什么都没配、也没有 Chromium —— 现在**仍然可用**：退到 http 策略，
+  // 直接请求结果页自己解析。以前这里会整体跳过所有引擎源，
+  // 结果就是"检索结果永远是空的"。
+  assert.equal(adapter.checkConfig({}, noChrome).available, true);
+  assert.equal(adapter.checkConfig({}, noChrome).backend, 'http');
 
   // api
   assert.equal(adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'nope' }, noChrome).available, false);
@@ -241,10 +244,15 @@ test('backend=auto 时按现场情况自己挑一条能走的路', () => {
   v = pick({}, { backend: 'auto', cmd: 'ddgr --json {query}' }, { hasChrome: true });
   assert.equal(v.backend, 'cli');
 
-  // 什么都没配但机器上有 Chromium —— 这是"开箱即用"那条路
+  // 什么都没配但机器上有 Chromium —— 走阶梯：先直取，被挡了再开浏览器
   v = pick({}, { backend: 'auto' }, { hasChrome: true });
-  assert.equal(v.backend, 'browser');
+  assert.equal(v.backend, 'ladder');
   assert.equal(v.available, true);
+
+  // 什么都没配、也没有 Chromium —— 退到纯 http，仍然可用
+  v = pick({}, { backend: 'auto' }, { hasChrome: false });
+  assert.equal(v.backend, 'http');
+  assert.equal(v.available, true, '不该再出现"所有引擎被整体跳过"');
 
   // 显式指定就不再自动挑
   v = pick({}, { backend: 'browser', provider: 'serper', key: 'k' }, { hasChrome: true });
@@ -257,7 +265,8 @@ test('backend=auto 时按现场情况自己挑一条能走的路', () => {
   v = pick({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'x {query}' }, { backend: 'browser' }, { hasChrome: true });
   assert.equal(v.backend, 'browser', '配置里显式指定就盖过环境变量');
 
-  assert.equal(adapter.checkConfig({}, { hasChrome: false }).available, false);
+  // 显式选了一条配不齐的路，才该判不可用
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, { hasChrome: false }).available, false);
 });
 
 test('引擎失败时返回错误而不是抛出，不拖垮其他源', async () => {

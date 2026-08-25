@@ -41,17 +41,38 @@ test('设置页填的盖过环境变量，留空的才回落到环境变量', ()
   assert.equal(s.cmd, 'ddgr {query}', '配置里没填的字段仍然回落到环境变量');
 });
 
-test('auto 的挑选顺序是 api → cli → browser，都不通才报没有后端', () => {
+test('auto 的挑选顺序：配了什么用什么，什么都没配也能搜', () => {
   const pick = (cfg, hasChrome) => resolveBackend(serpSettings({}, cfg), { hasChrome }).backend;
 
+  // 配了的优先用
   assert.equal(pick(normalizeSerpConfig({ provider: 'serper', key: 'k' }), true), 'api');
   assert.equal(pick(normalizeSerpConfig({ cmd: 'ddgr {query}' }), true), 'cli');
-  assert.equal(pick(normalizeSerpConfig({}), true), 'browser');
-  assert.equal(pick(normalizeSerpConfig({}), false), null);
 
-  const v = checkBackend({}, normalizeSerpConfig({}), { hasChrome: false });
-  assert.equal(v.available, false);
-  assert.match(v.reason, /设置页/, '要告诉用户去哪儿改，而不是只说"没配"');
+  // 什么都没配：有浏览器走阶梯，没浏览器走纯 http。
+  // 关键是**两种情况都可用**——以前这里会返回 null，然后所有引擎源被
+  // 整体跳过，用户看到的是一个安静的空结果。
+  assert.equal(pick(normalizeSerpConfig({}), true), 'ladder');
+  assert.equal(pick(normalizeSerpConfig({}), false), 'http');
+
+  for (const hasChrome of [true, false]) {
+    const v = checkBackend({}, normalizeSerpConfig({}), { hasChrome });
+    assert.equal(v.available, true, `hasChrome=${hasChrome} 时应当可用`);
+    assert.ok(v.why, '自动挑的要说明为什么挑它');
+  }
+});
+
+test('显式选了一条配不齐的路，才判不可用', () => {
+  const cases = [
+    [{ backend: 'cli' }, /命令模板/],
+    [{ backend: 'api' }, /服务商/],
+    [{ backend: 'api', provider: 'serper' }, /key/i],
+    [{ backend: 'browser' }, /找不到 Chromium/],
+  ];
+  for (const [cfg, want] of cases) {
+    const v = checkBackend({}, normalizeSerpConfig(cfg), { hasChrome: false });
+    assert.equal(v.available, false, `${JSON.stringify(cfg)} 应当判不可用`);
+    assert.match(v.reason, want);
+  }
 });
 
 test('配置规范化把非法值挡在外面', () => {

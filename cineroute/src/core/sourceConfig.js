@@ -73,7 +73,7 @@ export const DEFAULT_PRIORITY = {
  * 三条都不通才报「没有可用的后端」，并说清楚缺什么。
  * 环境变量仍然有效，作用是给配置里留空的字段兜底（部署时不想把 key 写进文件）。
  */
-export const SERP_BACKEND_CHOICES = ['auto', 'api', 'cli', 'browser'];
+export const SERP_BACKEND_CHOICES = ['auto', 'ladder', 'http', 'api', 'cli', 'browser'];
 export const SERP_CMD_FORMATS = ['json', 'jsonl', 'lines'];
 
 export const DEFAULT_SERP = {
@@ -123,7 +123,12 @@ export const DEFAULT_SOURCES = [
 
 /** 各引擎单次请求能返回的上限，用来提示用户"要翻几页"。 */
 export const ENGINE_PAGE_SIZE = {
-  google: 10, bing: 50, baidu: 10, yandex: 10, duckduckgo: 10,
+  google: 10, bing: 10, baidu: 10, yandex: 10, duckduckgo: 30,
+  // Mojeek 有自己的索引（不是转发大厂），而且不排斥抓取——
+  // 别家全被挡住时它往往还能出东西
+  mojeek: 10,
+  // 自建 SearXNG。地址填在「检索后端」的 URL 模板里
+  searxng: 20,
 };
 
 /**

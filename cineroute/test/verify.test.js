@@ -293,9 +293,9 @@ test('browser 后端不用填配置，但得真有 Chromium；cli 缺命令则�
   assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'browser' }, null, has).available, true);
   assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'browser' }, null, none).available, false);
   assert.equal(checkBackend({ CINEROUTE_SERP_BACKEND: 'cli' }, null, has).available, false);
-  // 什么都没配、机器上也没有 Chromium —— 三条路都不通
-  assert.equal(checkBackend({}, null, none).available, false);
-  // 什么都没配但有 Chromium —— 自动走无头浏览器，这是开箱即用那条路
+  // 什么都没配 —— 两种情况都可用：有浏览器走阶梯，没浏览器走纯 http
+  assert.equal(checkBackend({}, null, none).available, true);
+  assert.equal(checkBackend({}, null, none).backend, 'http');
   assert.equal(checkBackend({}, null, has).available, true);
-  assert.equal(checkBackend({}, null, has).backend, 'browser');
+  assert.equal(checkBackend({}, null, has).backend, 'ladder');
 });

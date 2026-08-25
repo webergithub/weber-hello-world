@@ -15,8 +15,17 @@ import { spawn } from 'node:child_process';
 import { httpJson } from '../core/http.js';
 import { harvestRelated } from '../core/expand.js';
 import { findChromeSync } from '../browser/cdp.js';
+import { httpSearchPage, httpSupported } from './serp/httpSearch.js';
+import { searchWithLadder } from './serp/ladder.js';
+import { recipeFor } from './serp/engines.js';
 
-export const SERP_BACKENDS = ['api', 'cli', 'browser'];
+/**
+ * 可选的检索策略。
+ *
+ * `http` 是新加的：直接请求结果页自己解析，不开浏览器也不花钱。
+ * `ladder` 是它们的组合——先 http，被挡了再升级到浏览器。
+ */
+export const SERP_BACKENDS = ['api', 'cli', 'browser', 'http', 'ladder'];
 /** api 后端下支持的服务商。 */
 export const SERP_PROVIDERS = ['serper', 'brave', 'custom'];
 
@@ -67,9 +76,16 @@ export function resolveBackend(settings, opts = {}) {
   if (settings.backend) return { backend: settings.backend, auto: false, why: null };
   if (settings.provider) return { backend: 'api', auto: true, why: '已配置 SERP 服务商，自动选用 api' };
   if (settings.cmd) return { backend: 'cli', auto: true, why: '已配置命令行工具，自动选用 cli' };
+
+  // 什么都没配也能搜：http 策略直接请求结果页自己解析，不用装东西、不用付费。
+  // 有 Chromium 就用 ladder（http 被挡时升级到浏览器），没有就纯 http。
+  //
+  // 这一条是那个"检索结果永远是空的"问题的最后一块：以前三条路都要配，
+  // 一台没装 Chromium 又没买 SERP 服务的机器上，五个引擎会被整体跳过。
   const hasChrome = opts.hasChrome ?? Boolean(findChromeSync(settings.chrome));
-  if (hasChrome) return { backend: 'browser', auto: true, why: '本机有 Chromium，自动选用无头浏览器打开结果页' };
-  return { backend: null, auto: true, why: null };
+  return hasChrome
+    ? { backend: 'ladder', auto: true, why: '先直接请求结果页解析，被拦截时自动升级到无头浏览器' }
+    : { backend: 'http', auto: true, why: '直接请求结果页并解析（不用装浏览器，也不花钱）' };
 }
 
 /**
@@ -109,6 +125,14 @@ export function checkBackend(env = process.env, cfg = null, opts = {}) {
     if (!s.cmd) {
       return no('cli 后端需要填命令模板，如 `ddgr --json -n {limit} {query}`（CINEROUTE_SERP_CMD）');
     }
+    return yes();
+  }
+  if (backend === 'http') {
+    // 不需要任何配置。唯一的前提是这台机器能出网。
+    return yes();
+  }
+  if (backend === 'ladder') {
+    // 阶梯至少有 http 这一级兜底，所以永远可用；有浏览器时多一级。
     return yes();
   }
   // browser：不用配，但机器上得真有 Chromium
@@ -383,7 +407,8 @@ export async function runSerp(engine, q, opts = {}) {
   if (!verdict.available) throw new Error(verdict.reason);
 
   const backend = verdict.backend;
-  const pageSize = PAGE_SIZE[engine] ?? 10;
+  // 页大小优先用引擎配方里的（各家不一样，DDG 的 html 端点一页能给 30 条）
+  const pageSize = recipeFor(engine).pageSize ?? PAGE_SIZE[engine] ?? 10;
   const pages = Math.min(10, Math.ceil(limit / pageSize));
   const results = [];
   const related = [];
@@ -402,6 +427,43 @@ export async function runSerp(engine, q, opts = {}) {
         items = parseCliOutput(text, settings.cmdFormat);
         // CLI 工具一般一次就把结果给全了，没有翻页概念
         if (items.length > 0) notes.push(`CLI 后端一次返回 ${items.length} 条，不翻页`);
+      } else if (backend === 'http') {
+        const r = await httpSearchPage(engine, q, page, {
+          signal,
+          baseUrl: settings.urlTemplate || '',
+          timeoutMs: opts.timeoutMs ?? 15000,
+        });
+        if (r.blocked) {
+          notes.push(`${engine} 第 ${page} 页被拦截：${r.blocked}`);
+          break;
+        }
+        items = r.results;
+        if (page === 1) related.push(...r.related);
+      } else if (backend === 'ladder') {
+        // 阶梯自己决定用哪级。把浏览器那一级包成回调传进去——
+        // ladder 不该认识 CDP，也不该反过来 import 这个文件。
+        const r = await searchWithLadder(engine, q, page, {
+          signal,
+          baseUrl: settings.urlTemplate || '',
+          timeoutMs: opts.timeoutMs ?? 15000,
+          browserSearch: browser
+            ? (eng, query, pg) => browserSearchPage(browser, eng, query, pg, pageSize, {
+                ...opts,
+                urlTemplate: settings.urlTemplate,
+                timeoutMs: opts.timeoutMs ?? settings.timeoutMs,
+                settleMs: opts.settleMs ?? settings.settleMs,
+              })
+            : null,
+        });
+        if (r.strategy) {
+          // 让用户看得见"这一页是用什么方式拿到的"——取证时这是溯源信息的一部分
+          notes.push(`${engine} 第 ${page} 页走的是 ${r.strategy}`);
+        } else {
+          notes.push(`${engine} 第 ${page} 页拿不到结果：${r.reason}`);
+          break;
+        }
+        items = r.results;
+        if (page === 1) related.push(...(r.related ?? []));
       } else {
         if (!browser) throw new Error('browser 后端需要调用方传入已启动的浏览器连接');
         const r = await browserSearchPage(browser, engine, q, page, pageSize, {
