@@ -18,17 +18,72 @@ import path from 'node:path';
 
 const { X_OK } = constants;
 
-/** 常见的 Chromium 位置。找不到就让调用方显式给路径。 */
-const CANDIDATES = [
-  process.env.CINEROUTE_CHROME,
-  process.env.CHROME_PATH,
-  '/opt/pw-browsers/chromium/chrome',
-  '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-  '/usr/bin/google-chrome',
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-];
+/**
+ * 常见的 Chromium 位置。
+ *
+ * 这里**不只找 Chrome**：Edge、Brave、Chromium 都是同一个内核，
+ * CDP 完全通用，找到哪个用哪个。装了浏览器却报"找不到 Chromium"
+ * 是最没道理的一种失败。
+ *
+ * 三个平台都要覆盖。这一点踩过坑：最早只有 Linux 和 macOS 的路径，
+ * Windows 用户即使装了 Chrome 也永远匹配不上，只会看到
+ * "本机也找不到 Chromium"——而他机器上明明就有。
+ */
+const CANDIDATES = (() => {
+  const env = process.env;
+  const list = [env.CINEROUTE_CHROME, env.CHROME_PATH];
+
+  if (process.platform === 'win32') {
+    const roots = [
+      env['PROGRAMFILES'], env['PROGRAMFILES(X86)'], env.LOCALAPPDATA,
+    ].filter(Boolean);
+    for (const root of roots) {
+      list.push(
+        `${root}\\Google\\Chrome\\Application\\chrome.exe`,
+        `${root}\\Microsoft\\Edge\\Application\\msedge.exe`,
+        `${root}\\BraveSoftware\\Brave-Browser\\Application\\brave.exe`,
+        `${root}\\Chromium\\Application\\chrome.exe`,
+      );
+    }
+    return list;
+  }
+
+  if (process.platform === 'darwin') {
+    const apps = [
+      'Google Chrome.app/Contents/MacOS/Google Chrome',
+      'Chromium.app/Contents/MacOS/Chromium',
+      'Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+      'Brave Browser.app/Contents/MacOS/Brave Browser',
+      'Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
+    ];
+    for (const dir of ['/Applications', `${env.HOME || ''}/Applications`]) {
+      for (const a of apps) list.push(`${dir}/${a}`);
+    }
+    return list;
+  }
+
+  // Linux 及其他 Unix
+  list.push(
+    // 容器里预装的 Playwright 浏览器
+    '/opt/pw-browsers/chromium/chrome',
+    '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/microsoft-edge',
+    '/usr/bin/brave-browser',
+    '/snap/bin/chromium',
+    '/var/lib/flatpak/exports/bin/org.chromium.Chromium',
+    `${env.HOME || ''}/.local/share/flatpak/exports/bin/org.chromium.Chromium`,
+  );
+  return list;
+})();
+
+/** 找过哪些位置。找不到时报给用户看，省得他猜。 */
+export function searchedChromePaths() {
+  return CANDIDATES.filter(Boolean);
+}
 
 /** 找一个能用的 Chromium。找不到返回 null，由调用方决定怎么降级。 */
 export async function findChrome(preferred = null) {
@@ -70,7 +125,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
  */
 export async function launch(opts = {}) {
   const exe = opts.executablePath || await findChrome();
-  if (!exe) throw new Error('找不到 Chromium，可用 CINEROUTE_CHROME 指定路径');
+  if (!exe) {
+    throw new Error(
+      '找不到 Chromium/Chrome/Edge/Brave。装一个，或用 CINEROUTE_CHROME 指定可执行文件路径。'
+      + `已找过：${searchedChromePaths().slice(0, 6).join('、')}…`,
+    );
+  }
 
   const userDataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'cineroute-chrome-'));
   const args = [

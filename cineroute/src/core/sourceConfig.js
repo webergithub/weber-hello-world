@@ -89,6 +89,20 @@ export const DEFAULT_SERP = {
 };
 
 /**
+ * 离线下载存到哪儿。
+ *
+ *   local  —— 存到**你自己的机器**（默认）。浏览器支持就分块并发直接写进
+ *             你选的文件并校验；不支持就退化成普通的浏览器下载。
+ *   server —— 存到服务端的 downloads/ 目录。只有真的在服务器上跑、
+ *             并且就想把文件留在那台机器上时才选这个。
+ *
+ * 默认是 local：按 deploy/ 那套部署到远程机器之后，服务端的下载目录
+ * 对用户毫无用处——文件下到了别人的机器上。
+ */
+export const DOWNLOAD_TARGETS = ['local', 'server'];
+export const DEFAULT_DOWNLOAD_TARGET = 'local';
+
+/**
  * 出厂默认源。
  *
  * builtin  —— 有专用适配器，直接解析出结构化片源
@@ -199,8 +213,14 @@ export function normalizeConfig(raw) {
   const verify = normalizeVerify(raw?.verify);
   const priority = normalizePriority(raw?.priority);
   const serp = normalizeSerpConfig(raw?.serp);
+  const downloadTarget = DOWNLOAD_TARGETS.includes(raw?.downloadTarget)
+    ? raw.downloadTarget
+    : DEFAULT_DOWNLOAD_TARGET;
 
-  return { version: 1, defaults, serp, priority, sources, siteScope, expand, probeLimit, verify };
+  return {
+    version: 1, defaults, serp, priority, sources, siteScope,
+    expand, probeLimit, verify, downloadTarget,
+  };
 }
 
 /**
@@ -294,6 +314,7 @@ export function defaultConfig() {
     probeLimit: DEFAULT_PROBE_LIMIT,
     verify: DEFAULT_VERIFY,
     priority: DEFAULT_PRIORITY,
+    downloadTarget: DEFAULT_DOWNLOAD_TARGET,
   });
 }
 

@@ -20,7 +20,7 @@ import {
 } from '../core/sourceConfig.js';
 import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
 import { checkBackend } from '../adapters/serp.js';
-import { DownloadManager } from './downloader.js';
+import { DownloadManager, safeFilename } from './downloader.js';
 import { launch, findChrome } from '../browser/cdp.js';
 import { verifyWithRounds } from '../verify/deepVerify.js';
 
@@ -86,7 +86,7 @@ async function serveStatic(res, urlPath) {
  * 安全边界：只转发 registry 白名单内的域名。没有这道闸，
  * 这个接口就是一个开放代理，可被用来探测内网（SSRF）。
  */
-async function proxyMedia(req, res, target) {
+async function proxyMedia(req, res, target, opts = {}) {
   const verdict = isAllowedMediaUrl(target);
   if (!verdict.ok) {
     sendJson(res, 403, { error: `媒体代理拒绝该地址：${verdict.reason}` });
@@ -114,6 +114,18 @@ async function proxyMedia(req, res, target) {
     if (v) out[h] = v;
   }
   out['cache-control'] = 'no-store';
+
+  // download=1：让浏览器**存成文件**而不是在标签页里播。
+  // 这是"离线下载"在 Firefox / Safari 上的退化路径——它们没有
+  // File System Access API，只能把流交给浏览器自己写到下载目录。
+  if (opts.asAttachment) {
+    const name = safeFilename(opts.filename || 'video.mp4');
+    // filename* 用 RFC 5987 编码，中文片名才不会变成乱码或被截断
+    out['content-disposition'] = `attachment; filename="${name.replace(/[^\x20-\x7e]/g, '_')}"; `
+      + `filename*=UTF-8''${encodeURIComponent(name)}`;
+    // 别让浏览器按嗅探出来的类型内联显示
+    if (!out['content-type']) out['content-type'] = 'application/octet-stream';
+  }
 
   res.writeHead(upstream.status, out);
   if (!upstream.body) { res.end(); return; }
@@ -279,6 +291,7 @@ export async function startServer(options = {}) {
       serpDefaults: DEFAULT_SERP,
       defaultSiteScope: DEFAULT_SITE_SCOPE,
       configPath: CONFIG_PATH,
+      downloadDir,
       offline,
     };
   }
@@ -297,6 +310,8 @@ export async function startServer(options = {}) {
         sendJson(res, 200, {
           offline,
           downloadDir,
+          // 下载存哪儿。前端据此决定点"离线下载"是走本机还是走服务端队列。
+          downloadTarget: sourceConfig.downloadTarget,
           serp: serpState(),
           // 这次配置下真正会跑的源
           adapters: buildAdapters({ ...sourceConfig, serp: effectiveSerp() }).map(({ adapter, limit }) => {
@@ -485,7 +500,10 @@ export async function startServer(options = {}) {
       if (pathname === '/media') {
         const target = url.searchParams.get('url');
         if (!target) { sendJson(res, 400, { error: '缺少 url' }); return; }
-        await proxyMedia(req, res, target);
+        await proxyMedia(req, res, target, {
+          asAttachment: url.searchParams.get('download') === '1',
+          filename: url.searchParams.get('filename') || '',
+        });
         return;
       }
 

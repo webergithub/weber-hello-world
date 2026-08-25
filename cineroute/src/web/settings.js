@@ -225,6 +225,16 @@ function addEngine() {
 
 /* ---------------- 预算 ---------------- */
 
+function renderDownloadTarget() {
+  const cfg = SOURCES.config;
+  const sel = $('downloadTarget');
+  sel.value = cfg.downloadTarget || 'local';
+  const dir = SOURCES.catalog?.downloadDir;
+  $('downloadTargetNote').textContent = sel.value === 'server'
+    ? `文件会留在服务端：${dir || 'downloads/'}`
+    : '文件存到你正在用的这台机器上';
+}
+
 function renderBudget() {
   const cfg = SOURCES.config;
   const e = cfg.expand || {};
@@ -271,6 +281,7 @@ function renderAll() {
   renderBackend();
   renderPriority();
   renderSources();
+  renderDownloadTarget();
   renderBudget();
   $('configPath').textContent = SOURCES.catalog?.configPath
     ? `配置文件：${SOURCES.catalog.configPath}`
@@ -285,6 +296,7 @@ function collect() {
     defaults: { ...cfg.defaults, limit: Number($('defaultLimit').value) || cfg.defaults.limit },
     serp: readBackend(),
     priority: readPriority(),
+    downloadTarget: $('downloadTarget').value,
     siteScope: linesOf($('siteScope').value),
     ...readBudget(),
   };
@@ -323,6 +335,7 @@ function bind() {
   });
   $('addEngineBtn').addEventListener('click', addEngine);
   $('serpBackend').addEventListener('change', () => { syncBackendFields(); markDirty(); });
+  $('downloadTarget').addEventListener('change', () => { renderDownloadTarget(); markDirty(); });
 
   // 除了"添加引擎"那几个输入框，页面上其他控件一动就标脏
   const skip = new Set(['addEngineName', 'addEngineSelect', 'addEngineLimit']);

@@ -268,7 +268,7 @@ Europeana、荷兰开放影像……），作用是补上还没写专用适配�
 
 ---
 
-## 离线下载
+## 离线下载（存到你自己的机器）
 
 Range 分块并发（默认 8MB × 4 并发）+ 断点续传 + 完成后用上游 md5/sha1 自动校验。
 进度记录在 `<文件名>.cineroute.json`，进程重启能接着下；服务端不支持 Range 时自动退化为单流。
@@ -340,7 +340,7 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     269 个用例，全部离线可跑
+  test/                     287 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本

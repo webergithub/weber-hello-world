@@ -24,6 +24,7 @@
     <a href="#sec-priority">优先来源</a>
     <a href="#sec-sources">检索来源</a>
     <a href="#sec-scope">站点范围</a>
+    <a href="#sec-download">下载去向</a>
     <a href="#sec-budget">检索预算</a>
   </nav>
 
@@ -183,7 +184,33 @@
     <textarea id="siteScope" rows="8" spellcheck="false"></textarea>
   </section>
 
-  <!-- ⑤ 各步预算 -->
+  <!-- ⑤ 下载去向 -->
+  <section id="sec-download" class="panel">
+    <h2>⬇ 离线下载存到哪儿</h2>
+    <p class="field-note">
+      默认存到<strong>你自己的机器</strong>。把服务部署到远程机器之后，
+      服务端的下载目录对你毫无用处——文件下到了别人的机器上。
+    </p>
+
+    <div class="global-row">
+      <label class="field"><span>存放位置</span>
+        <select id="downloadTarget">
+          <option value="local">本机（推荐）</option>
+          <option value="server">服务器目录</option>
+        </select>
+      </label>
+      <span id="downloadTargetNote" class="field-note"></span>
+    </div>
+
+    <p class="field-note">
+      选「本机」时，支持 File System Access 的浏览器（Chrome / Edge，且是
+      https 或 localhost）会让你选保存位置，然后<strong>分块并发直接写进去</strong>，
+      写完再读一遍算校验和。Firefox / Safari 没有这个接口，会退化成普通的
+      浏览器下载——字节不经过本页，所以<strong>校验不了</strong>，界面上会如实标注。
+    </p>
+  </section>
+
+  <!-- ⑥ 各步预算 -->
   <section id="sec-budget" class="panel">
     <h2>⏱ 检索预算</h2>
     <p class="field-note">这几个数字直接决定一次检索发多少请求、花多少时间和钱。</p>

@@ -11,6 +11,10 @@
 import {
   $, el, img, fmtSize, fmtDuration, fmtSpeed, engineTitle, BACKEND_LABEL,
 } from './dom.js';
+import {
+  saveToDisk, pickSaveTarget, pickSaveDirectory, browserDownload,
+  canSaveToPickedFile, canPickDirectory,
+} from './localSave.js';
 
 /** 播放走同源代理：一次解决上游缺 CORS 头与明文 HTTP 混合内容两个问题。 */
 const proxied = (url) => `/media?url=${encodeURIComponent(url)}`;
@@ -157,8 +161,73 @@ function play(s) {
 
 /* ---------------- 下载 ---------------- */
 
-async function startDownload(s, btn) {
-  if (btn) { btn.disabled = true; btn.textContent = '已加入队列'; }
+/**
+ * 离线下载。
+ *
+ * **文件存到你自己的机器上**，不是服务器。以前是让服务端下到它的
+ * `downloads/` 目录，部署到远程机器之后那个目录对用户毫无用处。
+ *
+ * 三条路，按能力自动选：
+ *   picked  —— 你选保存位置，分块并发直接写进去，写完校验（Chromium + 安全上下文）
+ *   browser —— 交给浏览器自己下（Firefox / Safari），**没法校验**，界面上会说明
+ *   server  —— 存到服务器目录（设置里显式选择，给真的在服务器上跑的场景）
+ */
+
+let localJobSeq = 0;
+
+/** 本机下载任务的取消开关，按 job id 存。 */
+const localAborts = new Map();
+
+/** 目前该走哪条路。设置里选了 server 就听设置的，否则看浏览器能力。 */
+function downloadMode() {
+  if (CONFIG.downloadTarget === 'server') return 'server';
+  return canSaveToPickedFile() ? 'picked' : 'browser';
+}
+
+/**
+ * 存到本机。
+ *
+ * `handle` 由调用方先拿好——选文件的弹窗**必须在点击事件里同步弹**，
+ * 中间只要 await 过一次，浏览器就会以"不是用户操作触发的"拒绝掉。
+ */
+async function saveLocally(s, handle) {
+  const id = `local-${++localJobSeq}`;
+  const ac = new AbortController();
+  localAborts.set(id, ac);
+
+  $('downloadPanel').classList.remove('hidden');
+  const base = { id, origin: 'local', filename: handle.name || s.filename, path: '本机' };
+  upsertJob({ ...base, status: 'queued', receivedBytes: 0, totalBytes: s.bytes ?? null, percent: 0 });
+
+  try {
+    await saveToDisk(s, handle, {
+      signal: ac.signal,
+      onUpdate: (state) => upsertJob({ ...base, ...state }),
+    });
+  } finally {
+    localAborts.delete(id);
+  }
+}
+
+/** 交给浏览器自己下。没法校验，如实标出来。 */
+function handOffToBrowser(s) {
+  browserDownload(s);
+  $('downloadPanel').classList.remove('hidden');
+  upsertJob({
+    id: `browser-${++localJobSeq}`,
+    origin: 'browser',
+    filename: s.filename,
+    status: 'done',
+    receivedBytes: s.bytes ?? 0,
+    totalBytes: s.bytes ?? null,
+    percent: 100,
+    path: '浏览器下载目录',
+    verify: { checked: false, reason: '这个浏览器不支持直接写文件，字节没经过本页，校验不了' },
+  });
+}
+
+/** 存到服务器目录（设置里显式选了才走这条）。 */
+async function queueOnServer(s, btn) {
   $('downloadPanel').classList.remove('hidden');
   ensureEvents();
   try {
@@ -174,10 +243,68 @@ async function startDownload(s, btn) {
     });
     const job = await res.json();
     if (!res.ok) throw new Error(job.error || `HTTP ${res.status}`);
-    upsertJob(job);
+    upsertJob({ ...job, origin: 'server' });
   } catch (err) {
     if (btn) { btn.disabled = false; btn.textContent = '⬇ 离线下载'; }
     alert(`加入下载队列失败：${err.message}`);
+  }
+}
+
+/**
+ * 点「离线下载」。
+ *
+ * 注意这个函数**不是 async**：走 picked 那条路时第一件事必须是弹选择框，
+ * 前面不能有任何 await。
+ */
+function startDownload(s, btn) {
+  const mode = downloadMode();
+
+  if (mode === 'server') {
+    if (btn) { btn.disabled = true; btn.textContent = '已加入队列'; }
+    queueOnServer(s, btn);
+    return;
+  }
+
+  if (mode === 'browser') {
+    if (btn) { btn.disabled = true; btn.textContent = '已交给浏览器'; }
+    handOffToBrowser(s);
+    return;
+  }
+
+  // picked：同步弹窗，拿到 handle 之后才开始下载
+  pickSaveTarget(s.filename).then((handle) => {
+    if (!handle) return;                       // 用户取消了，什么都不做
+    if (btn) { btn.disabled = true; btn.textContent = '下载中'; }
+    return saveLocally(s, handle);
+  }).catch((err) => {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇ 离线下载'; }
+    alert(`保存失败：${err.message}`);
+  });
+}
+
+/**
+ * 批量下载：先选一个目录，再往里逐个写。
+ *
+ * 不能对每个文件都弹一次选择框——用户手势只够弹一次，第二次就被浏览器拒了。
+ */
+async function startBatchDownload(sources) {
+  const mode = downloadMode();
+  if (mode === 'server') { for (const s of sources) await queueOnServer(s, null); return; }
+  if (mode === 'browser') { for (const s of sources) handOffToBrowser(s); return; }
+
+  const dir = canPickDirectory() ? await pickSaveDirectory() : null;
+  if (!dir) {
+    // 选不了目录就退化成一个一个来（用户会看到多次弹窗，但至少能用）
+    for (const s of sources) {
+      const handle = await pickSaveTarget(s.filename);
+      if (handle) await saveLocally(s, handle);
+    }
+    return;
+  }
+
+  for (const s of sources) {
+    const handle = await dir.getFileHandle(s.filename || 'video.mp4', { create: true });
+    await saveLocally(s, handle);
   }
 }
 
@@ -221,14 +348,18 @@ function upsertJob(job) {
     el('div', { class: 'job-head' },
       el('span', { class: 'job-name' }, job.filename),
       el('span', { class: `job-state ${job.status}` }, {
-        queued: '排队中', downloading: '下载中', verifying: '校验中',
+        queued: job.origin === 'local' ? '准备中' : '排队中',
+        downloading: '下载中', verifying: '校验中',
         done: '已完成', failed: '失败', canceled: '已取消',
       }[job.status] || job.status),
       el('span', { class: 'spacer' }),
-      job.status === 'downloading' || job.status === 'queued'
+      job.status === 'downloading' || job.status === 'queued' || job.status === 'verifying'
         ? el('button', {
             class: 'toggle', type: 'button',
-            onclick: () => fetch(`/api/downloads/${job.id}/cancel`, { method: 'POST' }),
+            // 本机任务用 AbortController 掐，服务端任务才走接口
+            onclick: () => (job.origin === 'local'
+              ? localAborts.get(job.id)?.abort(new Error('用户取消'))
+              : fetch(`/api/downloads/${job.id}/cancel`, { method: 'POST' })),
           }, '取消')
         : null,
     ),
@@ -238,7 +369,11 @@ function upsertJob(job) {
       el('span', {}, `${fmtSize(job.receivedBytes)} / ${fmtSize(job.totalBytes)}${job.percent != null ? ` · ${job.percent}%` : ''}`),
       el('span', {}, fmtSpeed(job.bytesPerSec)),
       job.resumable ? el('span', {}, '支持断点续传') : null,
-      job.verify?.checked ? el('span', {}, job.verify.ok ? `✓ ${job.verify.algo} 校验通过` : `✗ ${job.verify.algo} 校验失败`) : null,
+      job.verify?.checked
+        ? el('span', {}, job.verify.ok ? `✓ ${job.verify.algo} 校验通过` : `✗ ${job.verify.algo} 校验失败`)
+        : (job.verify?.reason && job.status === 'done'
+            ? el('span', { class: 'no-verify' }, `未校验：${job.verify.reason}`)
+            : null),
       job.status === 'done' ? el('span', {}, `已存至 ${job.path}`) : null,
       job.error ? el('span', {}, `错误：${job.error}`) : null,
     ),
@@ -1017,9 +1152,10 @@ $('searchForm').addEventListener('submit', (e) => {
 });
 
 $('batchDownload').addEventListener('click', () => {
-  for (const s of selected.values()) startDownload(s, null);
+  const picked = [...selected.values()];
   selected.clear();
   updateBatchBar();
+  startBatchDownload(picked).catch((err) => alert(`批量下载失败：${err.message}`));
 });
 
 /* ---------------- 启动 ---------------- */
