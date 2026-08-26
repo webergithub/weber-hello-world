@@ -10,7 +10,7 @@
  * 真实浏览器发的 Accept、Accept-Language、Sec-Fetch-* 是一整组，
  * 只改 UA 而其余不带，反而比不改更可疑。
  *
- * 另外两件容易被忽略但影响很大的事：
+ * 另外三件容易被忽略但影响很大的事：
  *
  *  1) **同意页**。Google/Bing 在欧盟出口会先返回一个只有"我同意"按钮的
  *     中间页，HTTP 200，结构完整，就是一条结果都没有。不带 CONSENT
@@ -19,9 +19,13 @@
  *  2) **限速**。连着打十几个请求是最快让自己被封的方式。这里按引擎
  *     分别记录上次请求时间，强制留出间隔，并且带抖动——固定间隔本身
  *     就是一种指纹。
+ *
+ *  3) **字符编码**。百度返回的常常是 GBK，`res.text()` 按 UTF-8 解出来
+ *     全是乱码，还不报错。所以这里取原始字节自己判编码，见 charset.js。
  */
 
 import { ENGINES, recipeFor, isOwnHost } from './engines.js';
+import { decodeBody } from './charset.js';
 import {
   extractAnchors, snippetAfter, pageTitle, visibleTextLength, absolutize, stripTags,
 } from './html.js';
@@ -188,7 +192,8 @@ export function extractResults(html, baseUrl, recipe) {
  * @param {{fetchFn?: Function, signal?: AbortSignal, timeoutMs?: number,
  *          baseUrl?: string, skipThrottle?: boolean}} [opts]
  * @returns {Promise<{results: object[], related: string[], blocked: string|null,
- *                    status: number, url: string, elapsedMs: number}>}
+ *                    status: number, url: string, elapsedMs: number,
+ *                    charset: string, charsetNote: string|null}>}
  */
 export async function httpSearchPage(engine, query, page = 1, opts = {}) {
   const {
@@ -208,19 +213,26 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
 
   let res;
   let body;
+  let decoded;
   try {
     res = await fetchFn(url, {
       headers: buildHeaders(engine, recipe, url),
       redirect: 'follow',
       signal: ac.signal,
     });
-    body = await res.text();
+    // **不能用 res.text()**：它一律按 UTF-8 解，而百度这类站点返回的是 GBK，
+    // 解出来是一片 "����" 且不报任何错。拿原始字节自己判编码，见 charset.js。
+    decoded = decodeBody(await res.arrayBuffer(), res.headers?.get?.('content-type') || '');
+    body = decoded.text;
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
   }
 
   const elapsedMs = Date.now() - started;
+  // 编码信息一路带上去：取证时"这页是按什么编码读的"是溯源的一部分，
+  // 偏离了声明更要说出来。
+  const charsetInfo = { charset: decoded.charset, charsetNote: decoded.note };
 
   // SearXNG 之类直接给 JSON 的，走另一条解析路径
   if (recipe.json) {
@@ -229,7 +241,7 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
     const blocked = recipe.blocked({ status: res.status, title: '', textLength: body.length, text: body })
       || (data ? null : '返回的不是 JSON，实例地址可能不对或未开放 JSON 输出');
     const parsed = data ? recipe.parseJson(data) : { results: [], related: [] };
-    return { ...parsed, blocked, status: res.status, url, elapsedMs };
+    return { ...parsed, blocked, status: res.status, url, elapsedMs, ...charsetInfo };
   }
 
   const title = pageTitle(body);
@@ -240,10 +252,12 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
 
   // 被挡了就别再去解析——那页上抠出来的东西全是噪音，
   // 混进结果里比没有结果更糟
-  if (blocked) return { results: [], related: [], blocked, status: res.status, url, elapsedMs };
+  if (blocked) {
+    return { results: [], related: [], blocked, status: res.status, url, elapsedMs, ...charsetInfo };
+  }
 
   const { results, related } = extractResults(body, url, recipe);
-  return { results, related, blocked: null, status: res.status, url, elapsedMs };
+  return { results, related, blocked: null, status: res.status, url, elapsedMs, ...charsetInfo };
 }
 
 /** 这家引擎能不能走 http 策略。 */

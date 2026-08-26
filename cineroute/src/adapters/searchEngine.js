@@ -28,8 +28,8 @@ export { normalizeSerp, engineSearchUrl, buildArgv, parseCliOutput } from './ser
 /* ───────────────────── 检索 ───────────────────── */
 
 /**
- * 按配置的后端搜一个词并翻页。后端有三种（api / cli / browser），
- * 具体见 serp.js —— 这里只关心"给我结果"，不关心结果怎么来的。
+ * 按配置的后端搜一个词并翻页。后端见 serp.js（默认 http，也可以选
+ * api / cli / browser / ladder）—— 这里只关心"给我结果"，不关心怎么来的。
  */
 export async function serpSearch(engine, q, opts = {}) {
   const { results } = await runSerp(engine, q, opts);
@@ -185,9 +185,9 @@ export function createEngineAdapter(spec) {
     label,
     kind: 'direct',
     requiresConfig: true,
-    configHint: '到设置页「检索后端」里选 api / cli / browser。'
-      + 'api 需填服务商与 key；cli 需填命令模板；'
-      + 'browser 免配置，但依赖本机 Chromium 且会被引擎反自动化检测',
+    configHint: '默认就能用：直接请求结果页并解析，不用配任何东西。'
+      + '想更稳可以到设置页「检索后端」里换：api 需填服务商与 key；'
+      + 'cli 需填命令模板；browser / ladder 要这台机器上真装了浏览器',
     engine,
     siteScope: spec.siteScope || null,
     // 设置页里配的检索后端。跟着适配器走，这样每个引擎理论上可以配不同后端。

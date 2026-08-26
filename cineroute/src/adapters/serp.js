@@ -1,13 +1,18 @@
 /**
- * 搜索引擎后端：三条路，按可用性选。
+ * 搜索引擎后端：几条路，按可用性选。
  *
+ *   http    —— 自己发请求、自己解析响应页。**默认走这条**：纯代码，
+ *              不依赖任何外部可执行文件，所以在服务器上和在开发机上
+ *              是同一种行为。见 serp/httpSearch.js。
  *   api     —— 调 SERP 服务（serper / brave / 自定义 URL 模板）。稳，但要花钱。
  *   cli     —— 调本机命令行工具（ddgr 之类）。免费，但要机器上装了才有。
- *   browser —— 无头 Chromium 打开结果页，从 DOM 里取。免费、不用装东西，
- *              但**脆**：页面结构一改就得跟着改，而且引擎有反自动化检测，
- *              量一大就会被要求验证码。适合小批量调研，不适合当生产管道。
+ *   browser —— 无头 Chromium 打开结果页，从 DOM 里取。能过大部分反自动化
+ *              检测，代价是慢一到两个数量级、吃内存，而且**要求这台机器上
+ *              真有浏览器**。服务器上一般没有，所以这条路是选了才用，
+ *              不作为默认。
+ *   ladder  —— 前两者的组合：先 http，被挡了再升级到浏览器。同样是选了才用。
  *
- * 三种后端产出同一个形状：{ results: [{url,title,snippet,rank}], related: [...] }，
+ * 所有后端产出同一个形状：{ results: [{url,title,snippet,rank}], related: [...] }，
  * 上层（searchEngine.js）不需要知道结果是怎么来的。
  */
 
@@ -64,28 +69,36 @@ export function serpSettings(env = process.env, cfg = null) {
 /**
  * 决定这次到底走哪条路。
  *
- * 没有显式指定时按「已经配好了什么」自动挑，顺序是 api → cli → browser：
- * 付费服务最稳所以优先；命令行工具次之；无头浏览器免配置但最脆，排最后。
- * 一条都不通就返回 backend=null，由 checkBackend 组织成一句人话。
+ * 没有显式指定时按「已经配好了什么」自动挑：配了 SERP 服务商走 api，
+ * 配了命令行工具走 cli，都没配就走 http。
+ *
+ * **自动挑的时候不去看本机有没有浏览器。** 这一条是刻意的：检索是在
+ * 服务端跑的，服务器上通常就没有图形环境，更没有 Chrome。让默认路径
+ * 取决于"这台机器上能不能找到浏览器可执行文件"，等于让同一份配置在
+ * 开发机上和线上是两种行为——本地测着好好的，一部署就没结果了，
+ * 而且报的错还是"找不到 Chromium"，跟检索本身八竿子打不着。
+ *
+ * 所以默认路径固定是 http：自己发请求、自己解析响应，纯代码，
+ * 不依赖任何外部可执行文件。浏览器降级成**明确选了才用**的一档
+ * （backend=browser 或 backend=ladder），而不是默认前提。
  *
  * @param {object} settings serpSettings() 的产物
- * @param {{hasChrome?: boolean}} [opts] 显式给出 Chromium 是否存在（测试用，
- *        也让调用方在已经启动过浏览器时省掉一次文件探测）
+ * @param {{hasChrome?: boolean}} [opts] 显式给出 Chromium 是否存在。只有
+ *        显式选了 browser 那一档才会用到——自动挑路时不看它。
  */
 export function resolveBackend(settings, opts = {}) {
   if (settings.backend) return { backend: settings.backend, auto: false, why: null };
   if (settings.provider) return { backend: 'api', auto: true, why: '已配置 SERP 服务商，自动选用 api' };
   if (settings.cmd) return { backend: 'cli', auto: true, why: '已配置命令行工具，自动选用 cli' };
 
-  // 什么都没配也能搜：http 策略直接请求结果页自己解析，不用装东西、不用付费。
-  // 有 Chromium 就用 ladder（http 被挡时升级到浏览器），没有就纯 http。
-  //
-  // 这一条是那个"检索结果永远是空的"问题的最后一块：以前三条路都要配，
-  // 一台没装 Chromium 又没买 SERP 服务的机器上，五个引擎会被整体跳过。
-  const hasChrome = opts.hasChrome ?? Boolean(findChromeSync(settings.chrome));
-  return hasChrome
-    ? { backend: 'ladder', auto: true, why: '先直接请求结果页解析，被拦截时自动升级到无头浏览器' }
-    : { backend: 'http', auto: true, why: '直接请求结果页并解析（不用装浏览器，也不花钱）' };
+  // 什么都没配也能搜。这一条是那个"检索结果永远是空的"问题的最后一块：
+  // 以前三条路都要配，一台没装 Chromium 又没买 SERP 服务的机器上，
+  // 五个引擎会被整体跳过，用户看到的是一个安静的空结果。
+  return {
+    backend: 'http',
+    auto: true,
+    why: '直接请求结果页并解析结果——纯代码，不用装浏览器，也不花钱',
+  };
 }
 
 /**
@@ -103,9 +116,10 @@ export function checkBackend(env = process.env, cfg = null, opts = {}) {
   const no = (reason) => ({ available: false, backend, auto, why, reason });
   const yes = () => ({ available: true, backend, auto, why, reason: null });
 
+  // 自动挑路一定会挑到 http，所以这里理论上到不了。留着是防御——
+  // 万一以后有人往 resolveBackend 里加了一条会返回空的分支。
   if (!backend) {
-    return no('没有可用的检索后端：没配 SERP 服务商、没配命令行工具，本机也找不到 Chromium。'
-      + '到设置页「检索后端」里选一种，或装个 Chromium 让它自动走无头浏览器');
+    return no('没有可用的检索后端。到设置页「检索后端」里选一种');
   }
   if (!SERP_BACKENDS.includes(backend)) {
     return no(`不认识的后端 ${backend}，可选：${SERP_BACKENDS.join(' / ')}`);
@@ -128,11 +142,12 @@ export function checkBackend(env = process.env, cfg = null, opts = {}) {
     return yes();
   }
   if (backend === 'http') {
-    // 不需要任何配置。唯一的前提是这台机器能出网。
+    // 不需要任何配置，也不需要机器上装什么。唯一的前提是这台机器能出网。
     return yes();
   }
   if (backend === 'ladder') {
-    // 阶梯至少有 http 这一级兜底，所以永远可用；有浏览器时多一级。
+    // 阶梯至少有 http 这一级兜底，所以判可用；有浏览器时多一级。
+    // 没浏览器也不算配错——它会退化成纯 http，跟默认路径一样。
     return yes();
   }
   // browser：不用配，但机器上得真有 Chromium
@@ -396,7 +411,10 @@ export async function browserSearchPage(browser, engine, q, page, pageSize, opts
  * @param {string} engine
  * @param {string} q 已拼好 site: 限定的查询串
  * @param {{limit?: number, signal?: AbortSignal, fetchJson?: Function, env?: object,
- *          serp?: object, browser?: object, onRelated?: Function}} [opts]
+ *          serp?: object, browser?: object, browserFactory?: Function,
+ *          onRelated?: Function}} [opts]
+ *   `browser` 是已经开好的浏览器连接；`browserFactory` 是一个**按需**开的
+ *   工厂——ladder 只在 http 被挡时才会调它，服务器上开不起来也不影响 http 那级。
  * @returns {Promise<{results: object[], related: string[], backend: string, notes: string[]}>}
  */
 export async function runSerp(engine, q, opts = {}) {
@@ -409,6 +427,24 @@ export async function runSerp(engine, q, opts = {}) {
   const backend = verdict.backend;
   // 页大小优先用引擎配方里的（各家不一样，DDG 的 html 端点一页能给 30 条）
   const pageSize = recipeFor(engine).pageSize ?? PAGE_SIZE[engine] ?? 10;
+
+  /**
+   * 阶梯里浏览器那一级是**懒的**。
+   *
+   * 开一个 Chromium 要两秒多，而阶梯的第一级 http 大多数时候就够了——
+   * 为一个可能用不上的降级方案先付两秒，等于把 http 的速度优势全赔进去。
+   * 所以调用方给的是一个工厂函数，只有 http 真被挡了才会去调它。
+   *
+   * 开不起来（服务器上没装浏览器）也不算错：Promise 连同失败一起缓存，
+   * 后面几页不会一次次重试，阶梯会如实记一笔然后就此打住。
+   */
+  let browserPromise = browser ? Promise.resolve(browser) : null;
+  const openBrowser = (browser || typeof opts.browserFactory === 'function')
+    ? () => {
+      if (!browserPromise) browserPromise = Promise.resolve().then(() => opts.browserFactory());
+      return browserPromise;
+    }
+    : null;
   const pages = Math.min(10, Math.ceil(limit / pageSize));
   const results = [];
   const related = [];
@@ -437,6 +473,8 @@ export async function runSerp(engine, q, opts = {}) {
           notes.push(`${engine} 第 ${page} 页被拦截：${r.blocked}`);
           break;
         }
+        // 编码判错过一次就要说出来，不能默默换掉了事——标题和摘要是取证材料
+        if (r.charsetNote) notes.push(`${engine} 第 ${page} 页：${r.charsetNote}`);
         items = r.results;
         if (page === 1) related.push(...r.related);
       } else if (backend === 'ladder') {
@@ -446,8 +484,8 @@ export async function runSerp(engine, q, opts = {}) {
           signal,
           baseUrl: settings.urlTemplate || '',
           timeoutMs: opts.timeoutMs ?? 15000,
-          browserSearch: browser
-            ? (eng, query, pg) => browserSearchPage(browser, eng, query, pg, pageSize, {
+          browserSearch: openBrowser
+            ? async (eng, query, pg) => browserSearchPage(await openBrowser(), eng, query, pg, pageSize, {
                 ...opts,
                 urlTemplate: settings.urlTemplate,
                 timeoutMs: opts.timeoutMs ?? settings.timeoutMs,
@@ -462,6 +500,7 @@ export async function runSerp(engine, q, opts = {}) {
           notes.push(`${engine} 第 ${page} 页拿不到结果：${r.reason}`);
           break;
         }
+        if (r.charsetNote) notes.push(`${engine} 第 ${page} 页：${r.charsetNote}`);
         items = r.results;
         if (page === 1) related.push(...(r.related ?? []));
       } else {

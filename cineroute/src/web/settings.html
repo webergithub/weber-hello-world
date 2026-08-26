@@ -35,8 +35,9 @@
     <h2>🔌 检索后端</h2>
     <p class="field-note">
       Google / Bing / 百度 / DuckDuckGo 都没有可直接用的免费官方 API，所以引擎检索自己实现了几条路。
-      默认的<strong>「自动」什么都不用配就能搜</strong>——直接请求结果页自己解析；
-      本机有 Chromium 时会自动升格成阶梯，被拦截了再开浏览器重试。
+      默认的<strong>「自动」什么都不用配就能搜</strong>——用代码直接请求结果页、自己解析响应，
+      <strong>不需要这台机器上装浏览器</strong>。检索是在服务端跑的，服务器上通常既没有图形环境
+      也没有 Chrome，所以默认路径刻意不依赖它。
     </p>
 
     <div id="backendState" class="backend-state"></div>
@@ -45,16 +46,17 @@
       <label class="field"><span>后端</span>
         <select id="serpBackend">
           <option value="auto">自动（推荐）</option>
-          <option value="ladder">阶梯 — 先直取，被挡了自动升级到浏览器</option>
           <option value="http">http — 直接请求结果页并解析</option>
           <option value="api">api — SERP 服务</option>
           <option value="cli">cli — 本机命令行工具</option>
-          <option value="browser">browser — 无头浏览器</option>
+          <option value="ladder">阶梯 — 先直取，被挡了升级到浏览器（本机要有浏览器）</option>
+          <option value="browser">browser — 无头浏览器（本机要有浏览器）</option>
         </select>
       </label>
       <span class="field-note">
         选「自动」时按<strong>已经配好了什么</strong>挑：有 SERP 服务走 api，有命令行工具走 cli，
-        本机有 Chromium 走 browser。
+        都没有就走 http。<strong>自动不会挑到浏览器那两档</strong>——它们要这台机器上真装了浏览器，
+        想用请明确选。
       </span>
     </div>
 
@@ -125,8 +127,13 @@
     <div id="browserFields" class="backend-fields">
       <h3>browser · 无头浏览器</h3>
       <p class="field-note">
-        不花钱、不用装东西，但<strong>脆</strong>：引擎改版面就得跟着改，量一大会被要求验证码。
-        适合小批量调研。也可以把 URL 模板指向自建的 SearXNG，既不付费也不直接爬引擎。
+        <strong>这一档要求运行检索的那台机器上真装了浏览器</strong>。放在自己电脑上跑没问题，
+        部署到服务器上就未必——所以它不是默认，是选了才用。选「阶梯」时浏览器是
+        <strong>按需开</strong>的：http 能出结果就根本不会启动它。
+      </p>
+      <p class="field-note">
+        好处是能过大部分反自动化检测；代价是慢一到两个数量级、吃内存，而且引擎改版面就得跟着改。
+        也可以把 URL 模板指向自建的 SearXNG，既不付费也不直接爬引擎。
       </p>
       <p class="field-note">
         想要免费又稳的话，最好的答案是<strong>自建 SearXNG</strong>：它替你去问
@@ -135,8 +142,9 @@
         URL 模板里即可。
       </p>
       <div class="global-row">
-        <label class="field wide"><span>Chromium 路径</span>
-          <input id="serpChrome" type="text" spellcheck="false" placeholder="留空则自动查找常见位置"></label>
+        <label class="field wide"><span>浏览器路径（可选）</span>
+          <input id="serpChrome" type="text" spellcheck="false"
+                 placeholder="留空则在常见位置找 Chrome / Edge / Brave / Chromium"></label>
         <label class="field"><span>打开超时 (ms)</span>
           <input id="serpTimeout" type="number" min="3000" max="120000" step="1000"></label>
         <label class="field"><span>渲染等待 (ms)</span>

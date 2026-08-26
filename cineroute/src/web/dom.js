@@ -65,8 +65,8 @@ export const engineTitle = (engine) => {
 export const BACKEND_LABEL = {
   api: 'SERP 服务（付费接口）',
   cli: '本机命令行工具',
-  browser: '无头浏览器打开结果页',
-  http: '直接请求结果页并解析',
+  browser: '无头浏览器打开结果页（本机要有浏览器）',
+  http: '直接请求结果页并解析（纯代码，不用装浏览器）',
   ladder: '阶梯：先直取，被挡了升级到浏览器',
 };
 

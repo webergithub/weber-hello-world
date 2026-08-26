@@ -373,6 +373,8 @@ export async function searchAll(rawQuery, opts = {}) {
     // browser 后端要用它开结果页。以前这里没传，导致设成 browser 也搜不出东西
     // ——报错停在"browser 后端需要调用方传入已启动的浏览器连接"。
     ...(opts.browser ? { browser: opts.browser } : {}),
+    // ladder 的浏览器那一级是懒的：给工厂而不是实例，被挡了才真去开。
+    ...(opts.browserFactory ? { browserFactory: opts.browserFactory } : {}),
   };
 
   /* ── 第一步：发现 ─────────────────────────────────────────

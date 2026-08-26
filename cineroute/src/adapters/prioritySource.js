@@ -44,11 +44,11 @@ function evidence({ domain, url, title, snippet, rank, term, termKind, query, vi
 /**
  * 用配置的检索后端，在单个域名内查这部片子。
  *
- * 走 `site:` 限定，复用已有的三种后端（api / cli / browser）——
- * 不为这个模块单独写爬虫。
+ * 走 `site:` 限定，复用已有的检索后端（默认 http，也可以是 api / cli /
+ * browser / ladder）——不为这个模块单独写爬虫。
  */
 async function probeDomain(domain, query, terms, opts) {
-  const { limit = 10, signal, fetchJson = httpJson, env, serp, browser } = opts;
+  const { limit = 10, signal, fetchJson = httpJson, env, serp, browser, browserFactory } = opts;
   const found = [];
   const errors = [];
 
@@ -56,7 +56,7 @@ async function probeDomain(domain, query, terms, opts) {
     const q = `${t.term} site:${domain}`;
     try {
       const { results } = await runSerp('google', q, {
-        limit, signal, fetchJson, env, serp, browser,
+        limit, signal, fetchJson, env, serp, browser, browserFactory,
       });
       for (const r of results) {
         // 只收确实落在该域名下的结果——引擎偶尔会带回别的站

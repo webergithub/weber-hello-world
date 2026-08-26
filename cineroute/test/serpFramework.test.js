@@ -22,6 +22,9 @@ import {
 } from '../src/adapters/serp/html.js';
 import { ENGINES, recipeFor, isOwnHost } from '../src/adapters/serp/engines.js';
 import {
+  decodeBody, charsetFromBom, charsetFromContentType, charsetFromMeta, replacementCount,
+} from '../src/adapters/serp/charset.js';
+import {
   httpSearchPage, extractResults, buildHeaders, httpSupported, throttle, resetThrottle,
 } from '../src/adapters/serp/httpSearch.js';
 import { searchWithLadder, describeAttempts } from '../src/adapters/serp/ladder.js';
@@ -80,6 +83,138 @@ test('页面标题与正文长度', () => {
   assert.equal(pageTitle(html), 'Night of the Living Dead - 搜索');
   // 正文长度不能把内联脚本算进去，否则验证码页看起来"内容很多"
   assert.ok(visibleTextLength(html) < 20, `正文长度算错了：${visibleTextLength(html)}`);
+});
+
+/* ── 字符编码 ─────────────────────────────────────────────── */
+
+/**
+ * 一个够用的 GBK 编码器。
+ *
+ * Node 只带 UTF-8 编码器，但测这件事必须有**真的 GBK 字节**——用 UTF-8
+ * 假装一下等于没测。做法是把所有双字节 GBK 序列解一遍反过来建表：
+ * 解码器是现成的，编码器就能从它推出来，不用引第三方库，也不用往仓库里
+ * 塞一个谁也看不懂的二进制夹具。
+ */
+function gbkEncoder() {
+  const dec = new TextDecoder('gb18030');
+  const map = new Map();
+  const buf = new Uint8Array(2);
+  for (let hi = 0x81; hi <= 0xFE; hi += 1) {
+    for (let lo = 0x40; lo <= 0xFE; lo += 1) {
+      if (lo === 0x7F) continue;
+      buf[0] = hi; buf[1] = lo;
+      const ch = dec.decode(buf);
+      if (ch.length === 1 && ch !== '�' && !map.has(ch)) map.set(ch, [hi, lo]);
+    }
+  }
+  return (text) => {
+    const out = [];
+    for (const ch of text) {
+      const code = ch.codePointAt(0);
+      if (code < 0x80) { out.push(code); continue; }
+      const bytes = map.get(ch);
+      if (!bytes) throw new Error(`GBK 里没有这个字：${ch}`);
+      out.push(...bytes);
+    }
+    return Uint8Array.from(out);
+  };
+}
+
+const toGbk = gbkEncoder();
+const utf8 = (s) => new TextEncoder().encode(s);
+
+test('编码声明：响应头、meta、BOM 各认各的', () => {
+  assert.equal(charsetFromContentType('text/html; charset=UTF-8'), 'utf-8');
+  assert.equal(charsetFromContentType('text/html;charset="gbk"'), 'gb18030');
+  assert.equal(charsetFromContentType('text/html'), null);
+  // GB2312/GBK 一律按最宽的 GB18030 解——声明成 GB2312 的页面里经常有
+  // 超出 GB2312 范围的字，按字面解会平白解出乱码
+  assert.equal(charsetFromContentType('text/html; charset=gb2312'), 'gb18030');
+
+  assert.equal(charsetFromMeta(utf8('<html><head><meta charset="Big5">')), 'big5');
+  assert.equal(
+    charsetFromMeta(utf8('<meta http-equiv="Content-Type" content="text/html; charset=gbk">')),
+    'gb18030',
+  );
+  assert.equal(charsetFromMeta(utf8('<html><head><title>没有声明</title>')), null);
+
+  assert.equal(charsetFromBom(Uint8Array.from([0xEF, 0xBB, 0xBF, 0x41])), 'utf-8');
+  assert.equal(charsetFromBom(Uint8Array.from([0xFF, 0xFE, 0x41, 0x00])), 'utf-16le');
+  assert.equal(charsetFromBom(utf8('<html>')), null);
+});
+
+test('GBK 的结果页要按 GBK 解，不能一律当 UTF-8', () => {
+  // 这是纯 HTTP 抓取里最坑的一个点：百度返回的常常是 GBK，
+  // res.text() 一律按 UTF-8 解，出来是一片 "����" 而且**一个错都不报**。
+  const title = '活死人之夜 1968 完整版';
+  const bytes = toGbk(`<html><head><title>${title}</title></head><body>正文</body></html>`);
+
+  // 先确认这个夹具是真的 GBK：按 UTF-8 解必须是乱码，否则这条测试没意义
+  const wrong = new TextDecoder('utf-8').decode(bytes);
+  assert.ok(replacementCount(wrong) > 5, `夹具不是真的 GBK：${wrong}`);
+  assert.ok(!wrong.includes('活死人'), '按 UTF-8 解不该还能读出原文');
+
+  const got = decodeBody(bytes, 'text/html; charset=gbk');
+  assert.equal(got.charset, 'gb18030');
+  assert.equal(got.source, 'header');
+  assert.equal(got.note, null, '按声明解成功就没什么可说的');
+  assert.ok(got.text.includes(title), `没解对：${got.text.slice(0, 80)}`);
+});
+
+test('响应头没说编码时，认页面自己的 meta', () => {
+  const bytes = toGbk('<html><head><meta charset="gb2312"><title>惊魂记</title></head></html>');
+  const got = decodeBody(bytes, 'text/html');
+  assert.equal(got.source, 'meta');
+  assert.equal(got.charset, 'gb18030');
+  assert.ok(got.text.includes('惊魂记'));
+});
+
+test('声明是错的就按字节来，并且**要说出来**', () => {
+  // 有些站点响应头写 utf-8，实际发的是 GBK。浏览器这时也会猜。
+  // 关键是猜完不能默默算了——标题和摘要是取证材料，读它的人有权知道
+  // 这段文字是按什么编码读出来的、跟声明是不是一致。
+  const text = '哥斯拉大战金刚 高清完整版在线观看';
+  const bytes = toGbk(`<html><head><meta charset="gbk"><title>${text}</title></head></html>`);
+
+  const got = decodeBody(bytes, 'text/html; charset=utf-8');
+  assert.ok(got.text.includes(text), `没救回来：${got.text.slice(0, 80)}`);
+  assert.equal(got.charset, 'gb18030');
+  assert.equal(got.source, 'sniff');
+  assert.match(got.note, /声明的是 utf-8/);
+});
+
+test('一个字都没声明、内容又是 GBK 时，按乱码多少挑一个', () => {
+  const bytes = toGbk('<html><body>' + '这是一段没有任何编码声明的中文正文。'.repeat(10) + '</body></html>');
+  const got = decodeBody(bytes, '');
+  assert.ok(got.text.includes('没有任何编码声明'), `没猜对：${got.text.slice(0, 60)}`);
+  assert.match(got.note, /没有编码声明/);
+});
+
+test('正常的 UTF-8 页面不该被瞎猜一通', () => {
+  const bytes = utf8('<html><head><title>Night of the Living Dead 活死人之夜</title></head></html>');
+  const got = decodeBody(bytes, 'text/html; charset=utf-8');
+  assert.equal(got.charset, 'utf-8');
+  assert.equal(got.note, null, '解得好好的就别动它');
+  assert.ok(got.text.includes('活死人之夜'));
+
+  // 连声明都没有的 UTF-8 页面同样不该被改判
+  const bare = decodeBody(bytes, '');
+  assert.equal(bare.charset, 'utf-8');
+  assert.equal(bare.note, null);
+});
+
+test('BOM 说了算，盖过响应头', () => {
+  const bytes = Uint8Array.from([0xEF, 0xBB, 0xBF, ...utf8('<html>中文</html>')]);
+  const got = decodeBody(bytes, 'text/html; charset=gbk');
+  assert.equal(got.source, 'bom');
+  assert.equal(got.charset, 'utf-8');
+  assert.ok(got.text.startsWith('<html>'), `BOM 应当被吃掉：${JSON.stringify(got.text.slice(0, 10))}`);
+});
+
+test('声明了一个解不了的编码，如实说，而不是装作解开了', () => {
+  const got = decodeBody(utf8('<html>x</html>'), 'text/html; charset=x-某种没人听过的编码');
+  assert.equal(got.charset, 'utf-8');
+  assert.match(got.note, /不认识声明的编码/);
 });
 
 /* ── 引擎配方 ─────────────────────────────────────────────── */
@@ -292,6 +427,39 @@ test('抽取不依赖 class 名：引擎改版面之后照样出结果', async (
       fetchFn: localFetch(base), skipThrottle: true,
     });
     assert.equal(r.results.length, 2, `改版面之后抽不出结果了：${JSON.stringify(r.results)}`);
+  });
+});
+
+test('http 策略：百度返回 GBK 时，标题和摘要不能是乱码', async () => {
+  // 端到端把编码这条线跑一遍。这是真会发生的事——百度至今大量出 GBK，
+  // 而 res.text() 按 UTF-8 解出来是一片问号，还不报错，
+  // 排查时会一路怀疑到选择器上去。
+  const title = '活死人之夜 1968 完整版 - 在线观看';
+  const desc = '1968 年的公有领域影片，画质清晰，中文字幕。';
+  const page = `<html><head><meta charset="gbk"><title>${title}_百度搜索</title></head><body>
+    <div id="content_left">
+      <a href="https://archive.org/details/notld">${title}</a>
+      <div class="c-abstract">${desc}</div>
+    </div>
+    <p>${'页面正文填充，让长度足够，别被判成同意页。'.repeat(40)}</p>
+  </body></html>`;
+  const bytes = toGbk(page);
+
+  resetThrottle();
+  await withEngine((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=gbk' });
+    res.end(Buffer.from(bytes));
+  }, async (base) => {
+    const r = await httpSearchPage('baidu', '活死人之夜', 1, {
+      fetchFn: localFetch(base), skipThrottle: true,
+    });
+
+    assert.equal(r.blocked, null, `不该被判成拦截：${r.blocked}`);
+    assert.equal(r.charset, 'gb18030', '应当按 GBK 解');
+    assert.equal(r.results.length, 1, `抽不出结果：${JSON.stringify(r.results)}`);
+    assert.equal(r.results[0].title, title);
+    assert.ok(r.results[0].snippet.includes(desc), `摘要乱码了：${r.results[0].snippet}`);
+    assert.equal(replacementCount(r.results[0].title), 0, '标题里不该有替换字符');
   });
 });
 

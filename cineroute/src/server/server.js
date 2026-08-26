@@ -235,10 +235,15 @@ export async function startServer(options = {}) {
   /**
    * 组一次检索的参数。
    *
-   * 关键在于**按需把无头浏览器一起交下去**：browser 后端要靠它打开结果页，
-   * 以前这条线没接上，配成 browser 也只会拿到"需要调用方传入浏览器连接"的错误。
-   * 只在真的要用时才启动（开一次两秒多），启动失败也不让整次检索崩掉——
-   * 那样至少专用数据源还能出结果。
+   * 关键在于**按需把无头浏览器交下去**，而且两种"按需"是不一样的：
+   *
+   *   backend=browser  这条路没有浏览器就压根跑不了，所以现在就得开，
+   *                    开不起来如实降级（至少专用数据源还能出结果）。
+   *   backend=ladder   浏览器只是被挡之后的降级方案，大多数时候用不上。
+   *                    交一个**工厂**下去，等 http 真被挡了再开——
+   *                    否则每次检索都白白付两秒多的启动开销。
+   *
+   * 默认的 http 后端两样都不需要，一个字节的浏览器代码都不会碰到。
    */
   async function searchOpts(extra = {}) {
     const serp = effectiveSerp();
@@ -248,8 +253,9 @@ export async function startServer(options = {}) {
       ...(offline && offlineOpts.serp ? { serp: offlineOpts.serp } : {}),
       ...extra,
     };
-    const needsBrowser = checkBackend(process.env, serp).backend === 'browser';
-    if (!needsBrowser) return base;
+    const backend = checkBackend(process.env, serp).backend;
+    if (backend === 'ladder') return { ...base, browserFactory: getBrowser };
+    if (backend !== 'browser') return base;
     try {
       return { ...base, browser: await getBrowser() };
     } catch (err) {

@@ -48,10 +48,8 @@ test('auto 的挑选顺序：配了什么用什么，什么都没配也能搜', 
   assert.equal(pick(normalizeSerpConfig({ provider: 'serper', key: 'k' }), true), 'api');
   assert.equal(pick(normalizeSerpConfig({ cmd: 'ddgr {query}' }), true), 'cli');
 
-  // 什么都没配：有浏览器走阶梯，没浏览器走纯 http。
-  // 关键是**两种情况都可用**——以前这里会返回 null，然后所有引擎源被
-  // 整体跳过，用户看到的是一个安静的空结果。
-  assert.equal(pick(normalizeSerpConfig({}), true), 'ladder');
+  // 什么都没配：走纯 http。关键是**它可用**——以前这里会返回 null，
+  // 然后所有引擎源被整体跳过，用户看到的是一个安静的空结果。
   assert.equal(pick(normalizeSerpConfig({}), false), 'http');
 
   for (const hasChrome of [true, false]) {
@@ -59,6 +57,24 @@ test('auto 的挑选顺序：配了什么用什么，什么都没配也能搜', 
     assert.equal(v.available, true, `hasChrome=${hasChrome} 时应当可用`);
     assert.ok(v.why, '自动挑的要说明为什么挑它');
   }
+});
+
+test('自动挑路不看本机有没有浏览器', () => {
+  // 检索最终跑在服务端，那儿通常既没有图形环境也没有 Chrome。让默认路径
+  // 取决于"能不能找到一个浏览器可执行文件"，等于让同一份配置在开发机上
+  // 和线上是两种行为——本地测着好好的，一部署就没结果，报的错还是
+  // "找不到 Chromium"，跟检索本身八竿子打不着。
+  const cfg = normalizeSerpConfig({});
+  const results = [
+    resolveBackend(serpSettings({}, cfg), { hasChrome: true }),
+    resolveBackend(serpSettings({}, cfg), { hasChrome: false }),
+    resolveBackend(serpSettings({}, cfg)),                       // 完全不给这个信号
+    resolveBackend(serpSettings({}, normalizeSerpConfig({ chromePath: '/opt/chrome' }))),
+  ];
+  for (const r of results) {
+    assert.equal(r.backend, 'http', `自动挑路挑到了 ${r.backend}，不该跟浏览器扯上关系`);
+  }
+  assert.deepEqual(results[0], results[1], 'hasChrome 不该改变自动挑路的结果');
 });
 
 test('显式选了一条配不齐的路，才判不可用', () => {
