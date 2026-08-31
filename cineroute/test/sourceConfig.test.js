@@ -14,6 +14,7 @@ import path from 'node:path';
 import {
   normalizeSource, normalizeConfig, defaultConfig, loadConfig, saveConfig,
   limitFor, enabledSources, DEFAULT_LIMIT, DEFAULT_SOURCES, DEFAULT_SITE_SCOPE,
+  SITE_SCOPE_SUGGESTIONS,
 } from '../src/core/sourceConfig.js';
 
 test('出厂默认：五个引擎都在且都已勾选，各取前 100 条', () => {
@@ -95,12 +96,38 @@ test('sources 被清空时回落到出厂源，不会变成"什么都不搜"', (
   assert.equal(cfg.sources.length, DEFAULT_SOURCES.length);
 });
 
-test('站点范围可自定义，留空则用出厂列表', () => {
+test('站点范围出厂不限定；填了才生效，清空就是真的清空', () => {
+  // 出厂空 = 全网搜。以前这里预置了一串归档站，引擎只在那几个站里翻，
+  // 而那几个站本来就有专用适配器——引擎这条线等于什么新东西都发现不了。
+  assert.deepEqual(DEFAULT_SITE_SCOPE, []);
+  assert.deepEqual(normalizeConfig({}).siteScope, []);
+
   const custom = normalizeConfig({ siteScope: ['archive.org', '  ', 'example.org'] });
   assert.deepEqual(custom.siteScope, ['archive.org', 'example.org']);
 
-  const empty = normalizeConfig({ siteScope: [] });
-  assert.deepEqual(empty.siteScope, DEFAULT_SITE_SCOPE);
+  // 空数组就是"不限定"，不能悄悄套回默认列表——设置页上写着"清空即全网搜"，
+  // 以前那句话是假的，用户怎么删都会被存回原样。
+  assert.deepEqual(normalizeConfig({ siteScope: [] }).siteScope, []);
+});
+
+test('已经存过的旧出厂列表当作没配过；动过的原样保留', () => {
+  // 旧版把那九个域名当默认值写进了配置文件。已经在设置页存过一次的人，
+  // 文件里躺着的是一份他从没主动选过的限定——不认这件事，"默认改成全网搜"
+  // 对这些人就等于没改：拉了新代码，行为一模一样。
+  assert.deepEqual(
+    normalizeConfig({ siteScope: [...SITE_SCOPE_SUGGESTIONS] }).siteScope, [],
+    '原封不动的旧列表应当被当作没配过',
+  );
+  // 顺序不同也算同一份
+  assert.deepEqual(
+    normalizeConfig({ siteScope: [...SITE_SCOPE_SUGGESTIONS].reverse() }).siteScope, [],
+  );
+
+  // 只要动过一条，就是用户自己的选择，一个字都不许改
+  const trimmed = SITE_SCOPE_SUGGESTIONS.slice(0, -1);
+  assert.deepEqual(normalizeConfig({ siteScope: trimmed }).siteScope, trimmed, '删过一条就该保留');
+  const added = [...SITE_SCOPE_SUGGESTIONS, 'my-archive.example'];
+  assert.deepEqual(normalizeConfig({ siteScope: added }).siteScope, added, '加过一条就该保留');
 });
 
 test('配置文件损坏或不存在时回落到出厂默认，不抛异常', async (t) => {

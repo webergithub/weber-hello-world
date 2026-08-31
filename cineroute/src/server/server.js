@@ -15,7 +15,7 @@ import {
 } from '../adapters/registry.js';
 import {
   loadConfig, saveConfig, normalizeConfig, defaultConfig,
-  ENGINE_PAGE_SIZE, DEFAULT_SITE_SCOPE, CONFIG_PATH,
+  ENGINE_PAGE_SIZE, SITE_SCOPE_SUGGESTIONS, CONFIG_PATH,
   SERP_BACKEND_CHOICES, SERP_CMD_FORMATS, DEFAULT_SERP,
 } from '../core/sourceConfig.js';
 import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
@@ -295,7 +295,8 @@ export async function startServer(options = {}) {
       serpProviders: SERP_PROVIDERS,
       serp: serpState(),
       serpDefaults: DEFAULT_SERP,
-      defaultSiteScope: DEFAULT_SITE_SCOPE,
+      // 只是设置页输入框的填写建议，不会被自动套用（默认是全网搜）
+      siteScopeSuggestions: SITE_SCOPE_SUGGESTIONS,
       configPath: CONFIG_PATH,
       downloadDir,
       offline,

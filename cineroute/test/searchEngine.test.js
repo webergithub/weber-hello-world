@@ -110,25 +110,54 @@ test('站点范围拼成 site: 条件；范围为空则不加限定', () => {
   assert.equal(buildScopedQuery('Metropolis', []), 'Metropolis');
 });
 
-test('引擎适配器把配置的站点范围带进查询里', async () => {
+/** 跑一次适配器检索，把它真正发出去的查询串抓回来。 */
+async function capturedQuery(spec) {
   let seenQuery = null;
   const fetchJson = async (url, opts) => {
     if (url.includes('serper')) { seenQuery = JSON.parse(opts.body).q; return { organic: [] }; }
     return {};
   };
-  const adapter = createEngineAdapter({
-    id: 'engine:google', engine: 'google', siteScope: ['archive.org'],
-  });
   const prev = { ...process.env };
   Object.assign(process.env, ENV);
   try {
-    await adapter.search({ title: 'Metropolis', year: 1927 }, { limit: 10, fetchJson });
+    await createEngineAdapter(spec).search({ title: 'Metropolis', year: 1927 }, { limit: 10, fetchJson });
   } finally {
     for (const k of Object.keys(ENV)) {
       if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
     }
   }
-  assert.match(seenQuery, /site:archive\.org/);
+  return seenQuery;
+}
+
+test('没配站点范围时，查询串里干干净净，一个 site: 都不加', async () => {
+  // 这是默认行为：引擎全网搜。挂一串 site: 限定的后果是引擎只在那几个站里翻，
+  // 而那几个站本来就有专用解析器——等于引擎这条线什么新东西都发现不了。
+  const q = await capturedQuery({ id: 'engine:google', engine: 'google' });
+  assert.equal(q, 'Metropolis', `不该被限定：${q}`);
+  assert.ok(!/site:/.test(q));
+
+  // 空数组同样是"不限定"
+  const q2 = await capturedQuery({ id: 'engine:google', engine: 'google', siteScope: [] });
+  assert.equal(q2, 'Metropolis');
+});
+
+test('明确填了站点范围才带进查询里', async () => {
+  const q = await capturedQuery({
+    id: 'engine:google', engine: 'google', siteScope: ['archive.org'],
+  });
+  assert.match(q, /site:archive\.org/);
+});
+
+test('源的名字要如实反映限不限站点', () => {
+  assert.equal(
+    createEngineAdapter({ id: 'engine:google', engine: 'google' }).label,
+    'Google 搜索',
+    '没限定就别挂"（限定站点范围）"的尾巴让人以为搜的范围很小',
+  );
+  assert.equal(
+    createEngineAdapter({ id: 'engine:baidu', engine: 'baidu', siteScope: ['a.com', 'b.com'] }).label,
+    '百度搜索（限定 2 个站点）',
+  );
 });
 
 /* ── 产品边界 ───────────────────────────────────────────── */

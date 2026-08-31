@@ -156,7 +156,13 @@ function toLead(r, engineId, reason) {
 
 /* ───────────────────── 适配器工厂 ───────────────────── */
 
-/** 把站点范围拼成 site: 过滤条件。 */
+/**
+ * 把站点范围拼成 site: 过滤条件。
+ *
+ * **默认没有站点范围**，这里原样返回片名，也就是全网搜。只有用户在设置页
+ * 里明确填了域名才会加限定——加了就是一条 `(site:a OR site:b OR …)`
+ * 挂在词后面，引擎只在这几个站里翻。
+ */
 export function buildScopedQuery(title, siteScope) {
   const scope = (siteScope || []).filter(Boolean);
   if (scope.length === 0) return title;
@@ -178,7 +184,11 @@ export function createEngineAdapter(spec) {
   const name = ENGINE_LABELS[engine] || `${engine[0].toUpperCase()}${engine.slice(1)}`;
   // 中文名后面不加空格（「百度搜索」），西文名后面加（「Google 搜索」）。
   const gap = /[一-龥]$/.test(name) ? '' : ' ';
-  const label = spec.label || `${name}${gap}搜索（限定站点范围）`;
+  // 名字要如实反映这次到底限不限站点——默认不限，就别再挂个"（限定站点范围）"
+  // 的尾巴让人以为搜的范围很小
+  const scopeCount = (spec.siteScope || []).filter(Boolean).length;
+  const label = spec.label
+    || `${name}${gap}搜索${scopeCount ? `（限定 ${scopeCount} 个站点）` : ''}`;
 
   return {
     id: spec.id,

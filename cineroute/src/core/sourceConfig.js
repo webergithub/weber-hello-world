@@ -20,14 +20,30 @@ export const CONFIG_PATH = process.env.CINEROUTE_CONFIG
 export const DEFAULT_LIMIT = Number(process.env.CINEROUTE_DEFAULT_LIMIT || 100);
 
 /**
- * 引擎检索的站点范围。
+ * 引擎检索的站点范围：**出厂是空的，也就是不加限定、全网搜**。
  *
- * 引擎适配器会把这些域名拼成 `site:` 过滤条件，只在范围内搜。
- * 这是产品边界：不限定域名地搜片名再抓视频地址，搜到的绝大部分是盗版站。
- * 限定在归档站里搜，作用是补上没写专用适配器的那些站。
- * 这个列表用户可以增删。
+ * 以前这里预置了一串归档站域名，引擎适配器会把它们拼成
+ * `site:a OR site:b OR …` 挂在每个检索词后面。那样做的结果是引擎
+ * 只在这几个站里翻，而这几个站本来就有专用适配器——引擎这条线
+ * 实际上什么新东西都发现不了，还平白让查询串变长、被引擎判成
+ * 异常查询的概率变高。
+ *
+ * 现在默认不限定。想只在特定站里搜的，到设置页「站点范围」里自己填，
+ * 填了才生效；下面那份列表只是给这个输入框当填写建议用的。
+ *
+ * 要说清楚的是：**放开站点范围不等于放开播放/下载**。能被服务端代理的
+ * 域名由 registry.ALLOWED_MEDIA_HOSTS 单独把关，跟这里毫无关系。
+ * 引擎搜到的其他域名只会作为线索列出来。
  */
-export const DEFAULT_SITE_SCOPE = [
+export const DEFAULT_SITE_SCOPE = [];
+
+/**
+ * 设置页「站点范围」输入框的填写建议。
+ * 只是提示文案，**不会被自动套用**——留在这里是因为这几个站确实好用。
+ *
+ * 这同时也是**旧版的出厂列表**，`isLegacyFactoryScope()` 靠它做迁移。
+ */
+export const SITE_SCOPE_SUGGESTIONS = [
   'archive.org',
   'commons.wikimedia.org',
   'upload.wikimedia.org',
@@ -198,6 +214,23 @@ export function normalizeSource(raw, defaults = {}) {
   return out;
 }
 
+/**
+ * 存盘的站点范围是不是**原封不动的旧出厂列表**。
+ *
+ * 迁移用。旧版把那九个归档站域名当默认值写进了配置文件，所以已经在设置页
+ * 存过一次的人，文件里躺着的是一份他从没主动选过的限定。不认这件事的话，
+ * 「默认改成全网搜」对这些人等于没改——拉了新代码，行为一模一样。
+ *
+ * 判定卡得很死：**必须一个不多一个不少地等于那份旧列表**，只要增删过任何
+ * 一条就说明是用户自己动过的，原样保留。理论上有人恰好手打出一模一样的
+ * 九条会被误清，代价是去设置页重填一次（输入框的占位提示里就有这几条）。
+ */
+function isLegacyFactoryScope(list) {
+  if (list.length !== SITE_SCOPE_SUGGESTIONS.length) return false;
+  const set = new Set(list);
+  return SITE_SCOPE_SUGGESTIONS.every((d) => set.has(d));
+}
+
 /** 规范化整份配置。 */
 export function normalizeConfig(raw) {
   const defaults = {
@@ -213,9 +246,14 @@ export function normalizeConfig(raw) {
   }
   if (sources.length === 0) sources.push(...DEFAULT_SOURCES.map((s) => normalizeSource(s, defaults)));
 
-  const siteScope = Array.isArray(raw?.siteScope) && raw.siteScope.length
+  // 给了数组就照办，**空数组就是"不限定"**，不能悄悄套回默认列表。
+  // 以前这里写的是 `&& raw.siteScope.length`，于是设置页上"清空即全网搜"
+  // 这句话是假的——清空之后存回来还是原样，用户怎么删都没用。
+  const rawScope = Array.isArray(raw?.siteScope)
     ? raw.siteScope.map(String).map((s) => s.trim()).filter(Boolean).slice(0, 500)
     : [...DEFAULT_SITE_SCOPE];
+  // 存盘的正好是旧出厂列表 → 当作没配过。见 isLegacyFactoryScope 的说明。
+  const siteScope = isLegacyFactoryScope(rawScope) ? [] : rawScope;
 
   const expand = normalizeExpand(raw?.expand);
   const probeLimit = clampInt(raw?.probeLimit, DEFAULT_PROBE_LIMIT, 1, 200);

@@ -212,8 +212,19 @@
   <section id="sec-scope" class="panel">
     <h2>🌐 站点范围</h2>
     <p class="field-note">
-      引擎检索会被限定在这些域名内（拼成 <code>site:</code> 条件）。一行一个域名，可以自己增删。
-      清空则不加限定，直接全网搜。
+      <strong>默认留空，也就是不加限定、全网搜。</strong>
+      填了域名才会把它们拼成 <code>site:a OR site:b</code> 挂在检索词后面，
+      让引擎只在这几个站里翻。一行一个域名，清空即恢复全网搜。
+    </p>
+    <p class="field-note">
+      填之前想清楚：范围越窄，引擎能发现的新东西越少。要是填的正好是那几个
+      已经有专用解析器的归档站，引擎这条线基本就白跑了——那些站专用数据源
+      已经直接查过一遍。
+    </p>
+    <p class="field-note">
+      另外，<strong>这里跟能不能播放/下载没有关系</strong>。能被服务端代理的域名
+      由另一份白名单单独把关，在这里写什么都不会放行新域名；引擎搜到的其他
+      域名只会作为线索列出来。
     </p>
     <textarea id="siteScope" rows="8" spellcheck="false"></textarea>
   </section>

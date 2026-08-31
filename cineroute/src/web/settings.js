@@ -208,6 +208,10 @@ function renderSources() {
   );
 
   $('siteScope').value = (cfg.siteScope || []).join('\n');
+  // 建议列表只当占位提示：让人看得见能填什么，但**不自动填进去**——
+  // 默认就该是全网搜
+  const hints = catalog.siteScopeSuggestions || [];
+  if (hints.length) $('siteScope').placeholder = `留空 = 全网搜。想限定就一行一个，例如：\n${hints.slice(0, 4).join('\n')}`;
 }
 
 function addEngine() {
