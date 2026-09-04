@@ -119,14 +119,23 @@ function cookieHeader(cookies) {
 
 /**
  * 组一次请求的头。
+ *
+ * `recipe.headers` 可以是函数——Accept-Language 得跟着**查询词的语种**走，
+ * 不能写死。拿中文片名去问一个 Accept-Language 写着 en-US 的 Google，
+ * 拿回来的是英文语境的结果集。
+ *
  * @param {string} engine
  * @param {object} recipe
  * @param {string} url
+ * @param {string} [query] 这次搜的词，决定 locale
  */
-export function buildHeaders(engine, recipe, url) {
+export function buildHeaders(engine, recipe, url, query = '') {
   const profile = profileFor(engine);
   const { name, ...ua } = profile;
-  const headers = { ...COMMON_HEADERS, ...ua, ...(recipe.headers || {}) };
+  const recipeHeaders = typeof recipe.headers === 'function'
+    ? recipe.headers(query)
+    : (recipe.headers || {});
+  const headers = { ...COMMON_HEADERS, ...ua, ...recipeHeaders };
 
   const cookie = cookieHeader(recipe.cookies);
   if (cookie) headers.cookie = cookie;
@@ -216,7 +225,7 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
   let decoded;
   try {
     res = await fetchFn(url, {
-      headers: buildHeaders(engine, recipe, url),
+      headers: buildHeaders(engine, recipe, url, query),
       redirect: 'follow',
       signal: ac.signal,
     });

@@ -242,9 +242,12 @@ test('域名认识但**片名对不上**的，一样挡在外面', async () => {
 
   // 挡下来的**不能静悄悄丢掉**——取证要能回答"这条为什么没进来"
   assert.equal(leads.length, 1);
-  assert.match(leads[0].reason, /片名对不上/);
-  assert.match(leads[0].reason, /相似度 0\.00/, '理由里要带上具体数字，方便判断门槛该不该调');
   assert.match(leads[0].url, /avatar_the_last_airbender_book1/);
+  // 这一条是**跨语种**：中文查询 vs 英文条目名，相似度 0 说明的是"没法比"，
+  // 不是"不一样"。理由必须如实这么说——写成"片名对不上"是错的，
+  // 而这个工具是拿来取证的，说错理由比没有理由更糟。
+  assert.match(leads[0].reason, /跨语种/);
+  assert.match(leads[0].reason, /English Title/, '还要告诉用户怎么补救');
 });
 
 test('一字之差是两部电影：我不是酒神 ≠ 我不是药神', async () => {
@@ -261,7 +264,9 @@ test('一字之差是两部电影：我不是酒神 ≠ 我不是药神', async 
     { fetchJson, engineId: 'engine:google' },
   );
   assert.equal(sources.length, 0, '《我不是药神》不该被当成《我不是酒神》的片源');
+  // 这一条是同语种、名字确实不一样——这时"片名对不上"才是对的说法
   assert.match(leads[0].reason, /片名对不上/);
+  assert.match(leads[0].reason, /相似度 0\.\d\d/, '理由里要带上具体数字，方便判断门槛该不该调');
 });
 
 test('详情页解析失败时降级为线索，而不是编一个地址出来', async () => {

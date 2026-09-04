@@ -20,6 +20,21 @@
  *              让策略阶梯直接跳到浏览器，别白费一次请求
  */
 
+/**
+ * 查询词是中日韩就用中文 locale，否则用英文。
+ *
+ * 以前 Google 写死 `hl=en`、Bing 写死 `setlang=en`、DDG 写死 `kl=us-en`，
+ * 请求头也一律 `en-US`。拿「阿凡达」去问一个被强制设成英文区的 Google，
+ * 拿回来的是英文语境下的结果集——**这是中文片名搜不到东西的原因之一，
+ * 而且完全看不出来**：请求成功、结果页正常、就是没有该有的东西。
+ */
+export function localeFor(query) {
+  const cjk = /[\u3400-\u4DBF\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]/.test(String(query || ''));
+  return cjk
+    ? { google: 'zh-CN', bing: 'zh-hans', ddg: 'cn-zh', accept: 'zh-CN,zh;q=0.9,en;q=0.7' }
+    : { google: 'en', bing: 'en', ddg: 'us-en', accept: 'en-US,en;q=0.9' };
+}
+
 /** 从 URL 的查询参数里取出被包装的真实地址。 */
 function unwrapParam(href, base, keys) {
   try {
@@ -57,8 +72,8 @@ export const ENGINES = {
     httpOk: true,           // 能出结果，但被挡的概率也最高
     url: (q, page, pageSize) =>
       `https://www.google.com/search?q=${encodeURIComponent(q)}`
-      + `&num=${pageSize}&start=${(page - 1) * pageSize}&hl=en&gbv=1`,
-    headers: { 'accept-language': 'en-US,en;q=0.9' },
+      + `&num=${pageSize}&start=${(page - 1) * pageSize}&hl=${localeFor(q).google}&gbv=1`,
+    headers: (q) => ({ 'accept-language': localeFor(q).accept }),
     // CONSENT=YES 跳过欧盟同意页。不带这个 cookie，欧洲出口拿到的
     // 是一个只有"我同意"按钮的中间页，一条结果都没有。
     cookies: { CONSENT: 'YES+cb', SOCS: 'CAI' },
@@ -77,8 +92,8 @@ export const ENGINES = {
     httpOk: true,
     url: (q, page, pageSize) =>
       `https://www.bing.com/search?q=${encodeURIComponent(q)}`
-      + `&count=${pageSize}&first=${(page - 1) * pageSize + 1}&setlang=en`,
-    headers: { 'accept-language': 'en-US,en;q=0.9' },
+      + `&count=${pageSize}&first=${(page - 1) * pageSize + 1}&setlang=${localeFor(q).bing}`,
+    headers: (q) => ({ 'accept-language': localeFor(q).accept }),
     cookies: { SRCHHPGUSR: 'SRCHLANG=en', _EDGE_CD: 'm=en-us' },
     ownHosts: ['bing.com', 'microsoft.com', 'msn.com'],
     selectors: ['#b_results li.b_algo a[href]', '#b_results h2 a[href]', '#b_content a[href]'],
@@ -96,8 +111,8 @@ export const ENGINES = {
     // 这个端点是给不支持 JS 的浏览器用的，结构简单也稳定
     url: (q, page, pageSize) =>
       `https://html.duckduckgo.com/html/?q=${encodeURIComponent(q)}`
-      + `&s=${(page - 1) * pageSize}&kl=us-en`,
-    headers: { 'accept-language': 'en-US,en;q=0.9' },
+      + `&s=${(page - 1) * pageSize}&kl=${localeFor(q).ddg}`,
+    headers: (q) => ({ 'accept-language': localeFor(q).accept }),
     ownHosts: ['duckduckgo.com'],
     selectors: ['.result__a', '.results_links a.result__a', '#links a[href]'],
     // DDG 把外链包成 /l/?uddg=<编码后的真实地址>

@@ -50,6 +50,11 @@ export function buildVariants(query, opts = {}) {
     out.push({ term: t, kind: 'variant', why });
   };
 
+  // 别名优先级最高：跨语种是"搜不到"的头号原因。中文片在 archive.org 上
+  // 挂的多半是英文名，只拿中文名去搜，搜多少遍都是空的。别名来自两处——
+  // 用户自己写的「阿凡达 / Avatar」，以及 TMDB 回流的原名。
+  for (const alias of query.aliases ?? []) push(alias, '片名别名（跨语种检索）');
+
   // 年份是最有效的一个：同名重拍片非常多，带上年份能直接分开
   if (query.year) push(`${title} ${query.year}`, '加年份，区分同名重拍');
 

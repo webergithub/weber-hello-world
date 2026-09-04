@@ -126,6 +126,13 @@ export async function search(query, opts = {}) {
       overview: best.r.overview || detail?.overview || null,
       poster: best.r.poster_path ? `${IMG}${best.r.poster_path}` : null,
       similarity: best.similarity,
+      // **别名回流。** TMDB 早就知道《阿凡达》的原名是 Avatar，以前这个
+      // 字段拿到了却只用来打分，白白浪费——而跨语种恰恰是中文片名搜不到
+      // 东西的主因：archive.org 上挂的是英文名，中文名跟它连比都没法比。
+      // 交回给管线，第二轮就能拿英文名再搜一遍，准入门槛也认它。
+      aliases: [...new Set([best.name, best.original].filter(
+        (x) => x && x !== query.title,
+      ))],
       tmdbUrl: `https://www.themoviedb.org/${kind}/${best.r.id}`,
     },
     offers,

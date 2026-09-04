@@ -397,11 +397,30 @@ export async function searchAll(rawQuery, opts = {}) {
   );
 
   const rawSuggested = runs1.flatMap((r) => r.result?.related ?? []);
-  const round2Terms = (expandCfg.useSuggested ?? true)
-    ? planSecondRound(rawSuggested, query, round1Terms, {
-        maxSuggested: expandCfg.maxSuggested ?? 3,
-      })
-    : [];
+
+  // **TMDB 回流的片名。** 这是跨语种检索最关键的一步：搜「阿凡达」时
+  // TMDB 会告诉我们这部片的原名是 Avatar——而 archive.org 上挂的正是英文名。
+  // 以前这个字段拿到了只用来显示，第二轮白白重复搜中文名，永远搜不到。
+  const metaAliases = runs1
+    .find((r) => r.kind === 'metadata' && r.result?.titleInfo)?.result?.titleInfo?.aliases ?? [];
+  const known = new Set(round1Terms.map((t) => t.term.toLowerCase()));
+  const aliasTerms = metaAliases
+    .filter((a) => a && !known.has(String(a).toLowerCase()))
+    .map((a) => ({ term: String(a), kind: 'alias', why: 'TMDB 给出的片名（跨语种检索）' }));
+
+  // 准入门槛也要认这些别名，否则第二轮用英文名搜回来的条目
+  // 会被"片名对不上"挡在门外——搜出来了却进不来，比搜不到更冤。
+  const allAliases = [...new Set([...(query.aliases ?? []), ...metaAliases])];
+  const round2Opts = { ...adapterOpts, aliases: allAliases };
+
+  const round2Terms = [
+    ...aliasTerms,
+    ...((expandCfg.useSuggested ?? true)
+      ? planSecondRound(rawSuggested, query, round1Terms, {
+          maxSuggested: expandCfg.maxSuggested ?? 3,
+        })
+      : []),
+  ];
 
   // 第二轮只跑引擎源：专用适配器（IA / Commons / TMDB）已经按片名搜过，
   // 拿推荐词再搜一遍纯属重复消耗。
@@ -411,11 +430,13 @@ export async function searchAll(rawQuery, opts = {}) {
     report.phase('expand', `推荐词：${round2Terms.map((t) => t.term).join('、')}`);
     let n = 0;
     runs2 = await Promise.all(
-      enginePlan.map((p) => runAdapter(p, query, { ...adapterOpts, terms: round2Terms },
+      enginePlan.map((p) => runAdapter(p, query, { ...round2Opts, terms: round2Terms },
         (rec) => reportRun(report, rec, ++n, enginePlan.length))),
     );
   } else {
-    report.phase('expand', '引擎没给出可用的推荐搜索词，跳过补搜');
+    report.phase('expand', metaAliases.length
+      ? '没有可用的补搜词'
+      : '引擎没给出可用的推荐搜索词，跳过补搜');
     report.step('跳过', { done: 1, total: 1 });
   }
 

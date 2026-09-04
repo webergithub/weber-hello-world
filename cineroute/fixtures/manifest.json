@@ -59,6 +59,15 @@
     "file": "serp-google-longcanting.json"
   },
   {
+    "_comment": "用英文别名搜时的结果，跟中文那侧不是同一批页面。",
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "Avatar"
+    ],
+    "file": "serp-google-avatar-en.json"
+  },
+  {
     "when": [
       "serp.fixture"
     ],

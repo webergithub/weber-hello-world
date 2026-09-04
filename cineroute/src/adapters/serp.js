@@ -22,7 +22,7 @@ import { harvestRelated } from '../core/expand.js';
 import { findChromeSync } from '../browser/cdp.js';
 import { httpSearchPage, httpSupported } from './serp/httpSearch.js';
 import { searchWithLadder } from './serp/ladder.js';
-import { recipeFor } from './serp/engines.js';
+import { recipeFor, localeFor } from './serp/engines.js';
 
 /**
  * 可选的检索策略。
@@ -276,13 +276,15 @@ function runCli(cmd, args, { timeoutMs = 20000, signal } = {}) {
 export function engineSearchUrl(engine, q, page = 1, pageSize = 10) {
   const e = encodeURIComponent(q);
   const offset = (page - 1) * pageSize;
+  const loc = localeFor(q);
   switch (engine) {
-    case 'google':     return `https://www.google.com/search?q=${e}&num=${pageSize}&start=${offset}&hl=en`;
-    case 'bing':       return `https://www.bing.com/search?q=${e}&count=${pageSize}&first=${offset + 1}`;
+    // locale 跟着查询词的语种走，理由同 serp/engines.js 的 localeFor()
+    case 'google':     return `https://www.google.com/search?q=${e}&num=${pageSize}&start=${offset}&hl=${loc.google}`;
+    case 'bing':       return `https://www.bing.com/search?q=${e}&count=${pageSize}&first=${offset + 1}&setlang=${loc.bing}`;
     case 'baidu':      return `https://www.baidu.com/s?wd=${e}&pn=${offset}&rn=${pageSize}`;
     case 'yandex':     return `https://yandex.com/search/?text=${e}&p=${page - 1}`;
     // DuckDuckGo 的 html 端点没有 JS 依赖，结构也简单，比主站好取
-    case 'duckduckgo': return `https://html.duckduckgo.com/html/?q=${e}&s=${offset}`;
+    case 'duckduckgo': return `https://html.duckduckgo.com/html/?q=${e}&s=${offset}&kl=${loc.ddg}`;
     default:           return `https://duckduckgo.com/?q=${e}`;
   }
 }

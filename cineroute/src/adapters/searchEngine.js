@@ -17,7 +17,7 @@
  */
 
 import { httpJson, settleAll } from '../core/http.js';
-import { titleSimilarity } from '../core/match.js';
+import { titleMatches } from '../core/match.js';
 import { runSerp, checkBackend, SERP_BACKENDS, SERP_PROVIDERS, PAGE_SIZE } from './serp.js';
 import { extractSourcesFromMetadata } from './internetArchive.js';
 
@@ -73,9 +73,8 @@ export async function resolveResults(results, query, opts = {}) {
     // 卡在门槛线上。
     minSimilarity = 0.55,
   } = opts;
-  /** 片名对不上时的线索理由。把数字写出来，方便判断门槛该不该调。 */
-  const mismatch = (name, similarity) =>
-    `片名对不上：《${name}》与「${query.title}」相似度 ${similarity.toFixed(2)}，低于门槛 ${minSimilarity}`;
+  /** 统一的准入判定。理由由 titleMatches 给——它能分清"不一样"和"没法比"。 */
+  const gate = (name) => titleMatches(query, name, { minSimilarity, aliases: opts.aliases });
   const sources = [];
   const leads = [];
 
@@ -100,10 +99,10 @@ export async function resolveResults(results, query, opts = {}) {
     const extracted = extractSourcesFromMetadata(meta, { identifier: id });
     if (extracted.length === 0) { leads.push(toLead(r, engineId, '该条目没有视频文件')); return; }
     const name = meta.metadata?.title || r.title || id;
-    const similarity = titleSimilarity(query.title, name);
-    if (similarity < minSimilarity) { leads.push(toLead(r, engineId, mismatch(name, similarity))); return; }
+    const v = gate(name);
+    if (!v.ok) { leads.push(toLead(r, engineId, v.reason)); return; }
     for (const s of extracted) {
-      sources.push({ ...s, similarity, ...citation(r, engineId, engineLabel) });
+      sources.push({ ...s, similarity: v.similarity, ...citation(r, engineId, engineLabel) });
     }
   });
 
@@ -122,11 +121,12 @@ export async function resolveResults(results, query, opts = {}) {
         const lead = commonsTitles.find(({ title }) => String(page.title || '').includes(title));
         if (!info?.url) { if (lead) leads.push(toLead(lead.r, engineId, '未取到文件地址')); continue; }
         const name = String(page.title || '').replace(/^File:/i, '');
-        const similarity = titleSimilarity(query.title, name);
-        if (similarity < minSimilarity) {
-          if (lead) leads.push(toLead(lead.r, engineId, mismatch(name, similarity)));
+        const v = gate(name);
+        if (!v.ok) {
+          if (lead) leads.push(toLead(lead.r, engineId, v.reason));
           continue;
         }
+        const similarity = v.similarity;
         sources.push({
           id: `commons:${page.pageid}`,
           provider: 'wikimedia-commons',

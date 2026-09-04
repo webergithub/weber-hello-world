@@ -281,7 +281,7 @@ test('不认识的引擎给通用配方，而不是抛错', () => {
 /* ── 请求头 ───────────────────────────────────────────────── */
 
 test('请求头是成套的，不是只换个 User-Agent', () => {
-  const h = buildHeaders('google', ENGINES.google, 'https://www.google.com/search?q=x');
+  const h = buildHeaders('google', ENGINES.google, 'https://www.google.com/search?q=x', 'x');
   // 真实浏览器这几个头是一起出现的，缺了反而更可疑
   for (const k of ['user-agent', 'accept', 'accept-language', 'sec-fetch-mode', 'referer']) {
     assert.ok(h[k], `缺请求头 ${k}`);
@@ -292,8 +292,8 @@ test('请求头是成套的，不是只换个 User-Agent', () => {
 });
 
 test('同一个引擎每次用同一套请求头，不自己乱变', () => {
-  const a = buildHeaders('bing', ENGINES.bing, 'https://www.bing.com/search?q=1');
-  const b = buildHeaders('bing', ENGINES.bing, 'https://www.bing.com/search?q=2');
+  const a = buildHeaders('bing', ENGINES.bing, 'https://www.bing.com/search?q=1', '1');
+  const b = buildHeaders('bing', ENGINES.bing, 'https://www.bing.com/search?q=2', '2');
   assert.equal(a['user-agent'], b['user-agent'], '同一引擎的 UA 应当稳定');
 });
 

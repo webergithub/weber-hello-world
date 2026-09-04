@@ -14,7 +14,7 @@
  */
 
 import { httpJson, settleAll } from '../core/http.js';
-import { titleSimilarity, yearCompatible, normalizeTitle } from '../core/match.js';
+import { titleMatches, yearCompatible, normalizeTitle } from '../core/match.js';
 
 const SEARCH_ENDPOINT = 'https://archive.org/advancedsearch.php';
 const METADATA_ENDPOINT = 'https://archive.org/metadata';
@@ -131,8 +131,15 @@ export async function search(query, opts = {}) {
     fetchJson = httpJson,
   } = opts;
 
-  const term = escapeLucene(query.title);
-  const clauses = [`title:("${term}")`, 'mediatype:(movies)'];
+  // **别名一起搜。** archive.org 的元数据几乎全是英文，拿「阿凡达」去查
+  // title 字段是查不到任何东西的——这是中文片名"检索结果为 0"最直接的原因，
+  // 而且看不出来：请求成功、返回 200、docs 就是空的。
+  // 别名来自用户输入（「阿凡达 / Avatar」）与 TMDB 回流的原名。
+  const names = [query.title, ...(query.aliases ?? []), ...(opts.aliases ?? [])]
+    .map((x) => String(x || '').trim()).filter(Boolean);
+  const titleClause = [...new Set(names)]
+    .map((n) => `title:("${escapeLucene(n)}")`).join(' OR ');
+  const clauses = [`(${titleClause})`, 'mediatype:(movies)'];
   if (query.year) clauses.push(`year:[${query.year - 2} TO ${query.year + 2}]`);
 
   const params = new URLSearchParams();
@@ -155,8 +162,11 @@ export async function search(query, opts = {}) {
 
   // 准入过滤：标题相似度与年份必须过关，否则不去拉 metadata（省一次往返）。
   const accepted = docs
-    .map((d) => ({ doc: d, similarity: titleSimilarity(query.title, d.title || d.identifier) }))
-    .filter(({ doc, similarity }) => similarity >= minSimilarity && yearCompatible(query.year, doc.year))
+    .map((d) => {
+      const v = titleMatches(query, d.title || d.identifier, { minSimilarity, aliases: opts.aliases });
+      return { doc: d, similarity: v.similarity, ok: v.ok };
+    })
+    .filter(({ doc, ok }) => ok && yearCompatible(query.year, doc.year))
     .sort((a, b) => b.similarity - a.similarity || (b.doc.downloads || 0) - (a.doc.downloads || 0))
     .slice(0, limitItems);
 
