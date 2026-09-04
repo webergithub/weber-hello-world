@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 344 个用例，全部离线
+npm test                                              # 358 个用例，全部离线
 ```
 
 ---
@@ -216,10 +216,11 @@ Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Ya
 | 后端 | 怎么工作 | 代价 |
 |---|---|---|
 | `http` | **直接请求结果页，自己解析响应**（默认） | 免费、纯代码、快一到两个数量级，但更容易被认出来是脚本 |
+| `python` | **把发请求交给 Python 脚本**，解析仍在这边 | 多一次进程启动（~100ms），换来**能改 TLS 指纹** |
 | `api` | 调 SERP 服务（serper / brave / 自定义 URL 模板） | 稳，但按次收费 |
 | `cli` | 调本机命令行工具，如 `ddgr --json -n {limit} {query}` | 免费，但要机器上装了才有 |
 | `browser` | 无头浏览器打开结果页，从 DOM 里取 | 能过大部分检测，但慢（每页两三秒）、吃内存，**且要求本机装了浏览器** |
-| `ladder` | 先 `http`，被拦截了升级到 `browser` | 同上，浏览器是**按需**开的：`http` 出结果就根本不启动 |
+| `ladder` | `http` → `python` → `browser`，被挡才逐级升 | 浏览器是**按需**开的：前两级出结果就根本不启动 |
 
 默认是 `auto`：配了 SERP 服务走 `api`，配了命令行工具走 `cli`，**都没配就走 `http`**。
 
@@ -235,6 +236,50 @@ Bing 的 2025 年 8 月退役，DuckDuckGo 没有官方搜索 API，百度和 Ya
 > "三条路至少配通一条"，一台没装 Chromium 又没买 SERP 服务的机器上还是搜不了。
 > 第三次：加了 `http` 之后，`auto` 还是先去磁盘上找 Chromium 来决定走哪条路——
 > 等于把"这台机器上有没有浏览器"塞进了默认行为里。现在这个探测彻底拿掉了。
+
+### 为什么要有 python 这条路
+
+不是因为 Python 会写 HTTP 请求——Node 也会，`http` 策略就是。是因为**TLS 指纹**。
+
+Google、Cloudflare 这类不只看 User-Agent。TLS 握手时客户端提供的密码套件顺序、
+扩展列表、椭圆曲线偏好合起来是一个指纹（JA3/JA4），Node 的 undici 有它自己那一套，
+跟任何一个真浏览器都对不上——**请求头调得再像也没用，握手那一刻就已经被认出来了**。
+而 Node 没有换掉自己 TLS 指纹的口子。
+
+Python 的 `curl_cffi` 能直接冒充 Chrome 的握手。这是纯 Node 做不到的事，
+也是这条路唯一的存在理由：
+
+```bash
+pip install curl_cffi      # 装了这条路才有意义
+```
+
+没装也能跑，会按 httpx → requests → urllib 退——**但那时的效果和 `http` 后端差不多**。
+所以设置页里有个「自检」按钮，真跑一次告诉你这台机器上会用哪个，
+返回结果里的 `via` 字段也会一路带到检索日志里。不装还以为换了条路就更能过检测，
+是这类工具最常见的自我欺骗。
+
+**只有"发请求"交给 Python，解析留在 Node。** 分工是刻意的：引擎配方（各家的翻页参数）、
+跳转包装还原、字符编码判定、拦截识别——这四样每一样都踩过坑、都带着血泪注释。
+在两个语言里各写一份**必然漂移**，而且漂移的那天不会有人发现：两条路各自都"能跑"，
+只是结果悄悄不一样了。所以 Node 拼 URL、组请求头、解析响应，Python 只把字节取回来。
+一份配方，两种传输。
+
+脚本可以换（设置页里填路径），契约是 **stdin 收一个 JSON 作业、stdout 回一个 JSON 结果**：
+
+```jsonc
+// 传输模式（默认脚本）：只回字节，Node 解析
+{"ok": true, "status": 200, "content_type": "text/html; charset=gbk",
+ "body_b64": "…", "via": "curl_cffi/chrome"}
+
+// 自解析模式：脚本自己出结果，Node 原样收下。接 ddgs 或自己的爬虫走这个
+{"ok": true, "results": [{"url": "…", "title": "…", "snippet": "…"}], "via": "ddgs"}
+```
+
+回 base64 而不是文本是有意的：**编码判定必须在 Node 那边做**（百度会返 GBK），
+脚本先按 UTF-8 解一遍就毁了。有一条用例专门用真 GBK 字节验这件事。
+
+查询词**不进命令行**，整个作业走 stdin —— 参数里带查询词迟早会有人拼进 shell，
+那就是命令注入。
 
 ### 自有检索框架
 
@@ -431,6 +476,7 @@ cineroute/
     serp/html.js            零依赖 HTML 抽取（不依赖 class 名，抗改版）
     serp/httpSearch.js      http 策略：成套请求头 · 限速抖动 · 拦截识别
     serp/charset.js         响应编码判定（百度常出 GBK，按 UTF-8 解就是乱码）
+    serp/pythonSearch.js    python 策略：把发请求交给脚本，解析仍在这边
     serp/ladder.js          策略阶梯：先便宜的，被挡了再升级
     internetArchive.js / wikimediaCommons.js / jellyfin.js / tmdb.js
   src/browser/
@@ -450,7 +496,11 @@ cineroute/
   fixtures/                 真实形状的上游响应夹具
   forensics.js              取证 CLI（同一性甄别 / 后期加工识别）
   src/forensics/            容器解析（MP4 / fMP4 / MKV）· 码率与 GOP 剖面 · 异常检测 · 编码溯源 · 母版比对 · 帧分析
-  test/                     344 个用例，全部离线可跑
+  tools/
+    serp_search.py          Python 检索执行器（curl_cffi > httpx > requests > urllib）
+    demo-steps.mjs          把检索的三步摊开打印
+    test-report.mjs         跑全量测试并生成 HTML 报告
+  test/                     358 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本

@@ -93,7 +93,7 @@ export const DEFAULT_PRIORITY = {
  *
  * 环境变量仍然有效，作用是给配置里留空的字段兜底（部署时不想把 key 写进文件）。
  */
-export const SERP_BACKEND_CHOICES = ['auto', 'ladder', 'http', 'api', 'cli', 'browser'];
+export const SERP_BACKEND_CHOICES = ['auto', 'http', 'python', 'api', 'cli', 'ladder', 'browser'];
 export const SERP_CMD_FORMATS = ['json', 'jsonl', 'lines'];
 
 export const DEFAULT_SERP = {
@@ -104,6 +104,8 @@ export const DEFAULT_SERP = {
   cmd: '',             // cli 后端的命令模板，如 `ddgr --json -n {limit} {query}`
   cmdFormat: 'json',
   chromePath: '',      // 留空则按常见路径自动找
+  pythonPath: '',      // python 后端的解释器，留空用 python3
+  pythonScript: '',    // 检索脚本路径，留空用 tools/serp_search.py
   timeoutMs: 25000,    // browser 后端打开结果页的超时
   settleMs: 800,       // load 之后再等多久取 DOM（结果常是脚本渲染的）
 };
@@ -286,6 +288,8 @@ export function normalizeSerpConfig(raw) {
     cmd: str(raw?.cmd),
     cmdFormat: SERP_CMD_FORMATS.includes(raw?.cmdFormat) ? raw.cmdFormat : 'json',
     chromePath: str(raw?.chromePath),
+    pythonPath: str(raw?.pythonPath, 300),
+    pythonScript: str(raw?.pythonScript),
     timeoutMs: clampInt(raw?.timeoutMs, DEFAULT_SERP.timeoutMs, 3000, 120000),
     settleMs: clampInt(raw?.settleMs, DEFAULT_SERP.settleMs, 0, 15000),
   };

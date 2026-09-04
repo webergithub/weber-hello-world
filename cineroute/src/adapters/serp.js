@@ -10,7 +10,11 @@
  *              检测，代价是慢一到两个数量级、吃内存，而且**要求这台机器上
  *              真有浏览器**。服务器上一般没有，所以这条路是选了才用，
  *              不作为默认。
- *   ladder  —— 前两者的组合：先 http，被挡了再升级到浏览器。同样是选了才用。
+ *   python  —— 把**发请求**交给 Python 脚本，解析仍在这边。存在的理由只有一个：
+ *              `curl_cffi` 能冒充 Chrome 的 TLS 握手，而 Node 的 undici 换不了
+ *              自己的指纹——请求头调得再像，握手那一刻也已经被认出来了。
+ *              见 serp/pythonSearch.js。
+ *   ladder  —— 上面几条的组合：先 http，被挡了升级到 python，再被挡才开浏览器。
  *
  * 所有后端产出同一个形状：{ results: [{url,title,snippet,rank}], related: [...] }，
  * 上层（searchEngine.js）不需要知道结果是怎么来的。
@@ -21,6 +25,7 @@ import { httpJson } from '../core/http.js';
 import { harvestRelated } from '../core/expand.js';
 import { findChromeSync } from '../browser/cdp.js';
 import { httpSearchPage, httpSupported } from './serp/httpSearch.js';
+import { pythonSearchPage, DEFAULT_SCRIPT } from './serp/pythonSearch.js';
 import { searchWithLadder } from './serp/ladder.js';
 import { recipeFor, localeFor } from './serp/engines.js';
 
@@ -30,7 +35,7 @@ import { recipeFor, localeFor } from './serp/engines.js';
  * `http` 是新加的：直接请求结果页自己解析，不开浏览器也不花钱。
  * `ladder` 是它们的组合——先 http，被挡了再升级到浏览器。
  */
-export const SERP_BACKENDS = ['api', 'cli', 'browser', 'http', 'ladder'];
+export const SERP_BACKENDS = ['api', 'cli', 'browser', 'http', 'python', 'ladder'];
 /** api 后端下支持的服务商。 */
 export const SERP_PROVIDERS = ['serper', 'brave', 'custom'];
 
@@ -61,6 +66,8 @@ export function serpSettings(env = process.env, cfg = null) {
     cmd: or(cfg?.cmd, env.CINEROUTE_SERP_CMD),
     cmdFormat: or(cfg?.cmdFormat, env.CINEROUTE_SERP_CMD_FORMAT) || 'json',
     chrome: or(cfg?.chromePath, env.CINEROUTE_CHROME),
+    python: or(cfg?.pythonPath, env.CINEROUTE_PYTHON) || 'python3',
+    pythonScript: or(cfg?.pythonScript, env.CINEROUTE_PYTHON_SCRIPT) || DEFAULT_SCRIPT,
     timeoutMs: Number(cfg?.timeoutMs) > 0 ? Number(cfg.timeoutMs) : 25000,
     settleMs: Number.isFinite(Number(cfg?.settleMs)) ? Number(cfg.settleMs) : 800,
   };
@@ -143,6 +150,13 @@ export function checkBackend(env = process.env, cfg = null, opts = {}) {
   }
   if (backend === 'http') {
     // 不需要任何配置，也不需要机器上装什么。唯一的前提是这台机器能出网。
+    return yes();
+  }
+  if (backend === 'python') {
+    // 脚本能不能跑、装没装 curl_cffi，要真跑一次才知道，而 checkBackend
+    // 是同步的。这里只做"路径填了没"的静态检查，实跑自检在设置页
+    // （probePython）。判可用而实际跑不起来时，runSerp 会如实报错。
+    if (!s.pythonScript) return no('python 后端需要指定脚本路径（CINEROUTE_PYTHON_SCRIPT）');
     return yes();
   }
   if (backend === 'ladder') {
@@ -479,6 +493,24 @@ export async function runSerp(engine, q, opts = {}) {
         if (r.charsetNote) notes.push(`${engine} 第 ${page} 页：${r.charsetNote}`);
         items = r.results;
         if (page === 1) related.push(...r.related);
+      } else if (backend === 'python') {
+        const r = await pythonSearchPage(engine, q, page, {
+          signal,
+          baseUrl: settings.urlTemplate || '',
+          timeoutMs: opts.timeoutMs ?? 15000,
+          python: settings.python,
+          script: settings.pythonScript,
+        });
+        if (r.blocked) {
+          notes.push(`${engine} 第 ${page} 页被拦截：${r.blocked}`);
+          break;
+        }
+        // 用了哪个传输要说出来——装没装 curl_cffi 的效果差很多，
+        // 不说的话用户会以为"换了 python 就一定过得去"
+        if (page === 1 && r.via) notes.push(`${engine} 走 ${r.via}`);
+        if (r.charsetNote) notes.push(`${engine} 第 ${page} 页：${r.charsetNote}`);
+        items = r.results;
+        if (page === 1) related.push(...r.related);
       } else if (backend === 'ladder') {
         // 阶梯自己决定用哪级。把浏览器那一级包成回调传进去——
         // ladder 不该认识 CDP，也不该反过来 import 这个文件。
@@ -486,6 +518,13 @@ export async function runSerp(engine, q, opts = {}) {
           signal,
           baseUrl: settings.urlTemplate || '',
           timeoutMs: opts.timeoutMs ?? 15000,
+          pythonSearch: (eng, query, pg) => pythonSearchPage(eng, query, pg, {
+            signal,
+            baseUrl: settings.urlTemplate || '',
+            timeoutMs: opts.timeoutMs ?? 15000,
+            python: settings.python,
+            script: settings.pythonScript,
+          }),
           browserSearch: openBrowser
             ? async (eng, query, pg) => browserSearchPage(await openBrowser(), eng, query, pg, pageSize, {
                 ...opts,

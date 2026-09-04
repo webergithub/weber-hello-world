@@ -4,6 +4,8 @@
  * 三种拿结果的方式代价差着量级：
  *
  *   http     几十毫秒，不占内存，但最容易被认出来是脚本
+ *   python   多一次进程启动（~100ms），换来的是**能改 TLS 指纹**——
+ *            装了 curl_cffi 就能冒充 Chrome 的握手，这是纯 Node 做不到的
  *   browser  两三秒（还要先把 Chromium 拉起来），但过得去大部分检测
  *   api      最稳，按次收费
  *
@@ -36,6 +38,7 @@ function attempt(strategy, ok, detail, elapsedMs = 0) {
  * @param {number} page
  * @param {{
  *   order?: string[],                       想按什么顺序试，默认按引擎情况决定
+ *   pythonSearch?: Function,                python 策略的实现（由调用方注入）
  *   browserSearch?: Function,               浏览器策略的实现（由调用方注入，避免循环依赖）
  *   apiSearch?: Function,                   api 策略的实现
  *   fetchFn?: Function, signal?: AbortSignal,
@@ -53,6 +56,10 @@ export async function searchWithLadder(engine, query, page = 1, opts = {}) {
   // 省掉一次注定失败的请求。
   const plan = order ?? [
     ...(recipe.httpOk ? ['http'] : []),
+    // python 排在浏览器之前：它贵一点点（多一次进程启动），但比开一个
+    // Chromium 便宜两个数量级，而在"被 TLS 指纹认出来"这种场景下
+    // 它恰恰是对症的那一味。
+    ...(opts.pythonSearch ? ['python'] : []),
     ...(browserSearch ? ['browser'] : []),
     ...(apiSearch ? ['api'] : []),
   ];
@@ -81,6 +88,19 @@ export async function searchWithLadder(engine, query, page = 1, opts = {}) {
         }
         attempts.push(attempt('http', true, `${r.results.length} 条`, r.elapsedMs));
         return { ...r, strategy: 'http', attempts };
+      }
+
+      if (strategy === 'python') {
+        const r = await opts.pythonSearch(engine, query, page);
+        if (r.blocked) {
+          lastBlocked = r.blocked;
+          attempts.push(attempt('python', false, `被挡：${r.blocked}`, r.elapsedMs));
+          continue;
+        }
+        // 与 http 那一级同理：没被挡但没结果是**正常结束**，不该继续升级
+        attempts.push(attempt('python', true,
+          `${r.results.length} 条${r.via ? `（${r.via}）` : ''}`, r.elapsedMs));
+        return { ...r, strategy: 'python', attempts };
       }
 
       if (strategy === 'browser') {

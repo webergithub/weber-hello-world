@@ -47,9 +47,10 @@
         <select id="serpBackend">
           <option value="auto">自动（推荐）</option>
           <option value="http">http — 直接请求结果页并解析</option>
+          <option value="python">python — 交给 Python 脚本发请求（可换 TLS 指纹）</option>
           <option value="api">api — SERP 服务</option>
           <option value="cli">cli — 本机命令行工具</option>
-          <option value="ladder">阶梯 — 先直取，被挡了升级到浏览器（本机要有浏览器）</option>
+          <option value="ladder">阶梯 — 直取 → Python → 浏览器，被挡才逐级升</option>
           <option value="browser">browser — 无头浏览器（本机要有浏览器）</option>
         </select>
       </label>
@@ -75,6 +76,41 @@
       <p class="field-note">
         各家的难易程度差别很大：DuckDuckGo 的 html 端点最好抓，Bing、百度、Mojeek 次之，
         Google 时好时坏，Yandex 几乎必弹验证码（所以它会直接跳过 http 这一级）。
+      </p>
+    </div>
+
+    <div id="pythonFields" class="backend-fields">
+      <h3>python · 交给 Python 脚本发请求</h3>
+      <p class="field-note">
+        <strong>只有"发请求"这一步交给 Python，解析仍在服务端这边。</strong>
+        引擎配方、跳转包装还原、编码判定、拦截识别都只有一份实现——
+        两份必然漂移，而且漂移那天不会有人发现。
+      </p>
+      <p class="field-note">
+        这条路存在的理由只有一个：<strong>TLS 指纹</strong>。Google、Cloudflare 这类
+        不只看 User-Agent —— TLS 握手时提供的密码套件顺序、扩展列表合起来是一个指纹
+        （JA3/JA4），Node 有它自己那一套，跟任何真浏览器都对不上，请求头调得再像，
+        握手那一刻也已经被认出来了。Python 的
+        <code>curl_cffi</code> 能直接冒充 Chrome 的握手，这是纯 Node 做不到的。
+      </p>
+      <p class="field-note">
+        装它这条路才有意义：<code>pip install curl_cffi</code>。
+        没装也能跑，会按 httpx → requests → urllib 退，
+        <strong>但那时的效果和 http 后端差不多</strong>——下面的自检会如实告诉你用的是哪个。
+      </p>
+      <div class="global-row">
+        <label class="field"><span>解释器</span>
+          <input id="serpPython" type="text" spellcheck="false" placeholder="留空用 python3"></label>
+        <label class="field wide"><span>脚本路径</span>
+          <input id="serpPythonScript" type="text" spellcheck="false"
+                 placeholder="留空用 tools/serp_search.py"></label>
+        <button id="pyProbeBtn" class="toggle" type="button">自检</button>
+      </div>
+      <p id="pyProbeOut" class="field-note"></p>
+      <p class="field-note">
+        换成自己的脚本也行，契约是 <strong>stdin 收一个 JSON 作业、stdout 回一个 JSON 结果</strong>。
+        回 <code>{status, body_b64, content_type}</code> 就由这边解析；
+        想自己解析（接 ddgs 之类）就回 <code>{results, related}</code>，原样收下。
       </p>
     </div>
 

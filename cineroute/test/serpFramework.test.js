@@ -640,3 +640,52 @@ test('httpSupported 如实反映各家能不能走 HTTP', () => {
   assert.equal(httpSupported('yandex'), false);
   assert.equal(httpSupported('searxng'), true);
 });
+
+test('阶梯：http 被挡就升级到 python，不必一上来就开浏览器', async () => {
+  // python 那一级排在浏览器之前是有理由的：它多一次进程启动（~100ms），
+  // 但比拉起一个 Chromium 便宜两个数量级；而在"被 TLS 指纹认出来"
+  // 这种场景下，换传输恰恰是对症的那一味——curl_cffi 能冒充 Chrome 的
+  // 握手，而 Node 的 undici 换不了自己的指纹。
+  resetThrottle();
+  let browserCalls = 0;
+  await withEngine((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(CAPTCHA_PAGE);
+  }, async (base) => {
+    const r = await searchWithLadder('google', 'notld', 1, {
+      fetchFn: localFetch(base),
+      skipThrottle: true,
+      pythonSearch: async () => ({
+        results: [{ url: 'https://archive.org/details/x', title: 'X', snippet: '' }],
+        related: [], blocked: null, elapsedMs: 180, via: 'python/curl_cffi/chrome',
+      }),
+      browserSearch: async () => { browserCalls += 1; return { results: [], related: [] }; },
+    });
+    assert.equal(r.strategy, 'python', `应当升级到 python：${describeAttempts(r.attempts)}`);
+    assert.equal(r.results.length, 1);
+    assert.equal(browserCalls, 0, 'python 已经出结果了，不该再开浏览器');
+    assert.match(r.attempts[0].detail, /被挡/, 'http 那次失败要留在记录里');
+    assert.match(describeAttempts(r.attempts), /curl_cffi/, '用了哪个传输要能看见');
+  });
+});
+
+test('阶梯：python 也被挡才轮到浏览器', async () => {
+  resetThrottle();
+  await withEngine((req, res) => {
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(CAPTCHA_PAGE);
+  }, async (base) => {
+    const r = await searchWithLadder('google', 'notld', 1, {
+      fetchFn: localFetch(base),
+      skipThrottle: true,
+      pythonSearch: async () => ({ results: [], related: [], blocked: '页面出现「captcha」字样', elapsedMs: 150 }),
+      browserSearch: async () => ({
+        results: [{ url: 'https://archive.org/details/y', title: 'Y', snippet: '' }],
+        related: [], suspectBlocked: false, elapsedMs: 2400,
+      }),
+    });
+    assert.equal(r.strategy, 'browser');
+    assert.equal(r.attempts.length, 3, 'http、python、browser 三次都要留下记录');
+    assert.deepEqual(r.attempts.map((a) => a.strategy), ['http', 'python', 'browser']);
+  });
+});

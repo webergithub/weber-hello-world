@@ -31,6 +31,7 @@ function syncBackendFields() {
   const on = (name) => picked === name || (picked === 'auto' && actual === name);
   // 阶梯把 http 和 browser 两级都用上，所以两组字段都算相关
   show('httpFields', on('http') || on('ladder') || picked === 'ladder');
+  show('pythonFields', on('python') || on('ladder') || picked === 'ladder');
   show('apiFields', on('api'));
   show('cliFields', on('cli'));
   show('browserFields', on('browser') || on('ladder') || picked === 'ladder');
@@ -80,6 +81,8 @@ function renderBackend() {
   $('serpCmd').value = c.cmd || '';
   $('serpCmdFormat').value = c.cmdFormat || 'json';
   $('serpChrome').value = c.chromePath || '';
+  $('serpPython').value = c.pythonPath || '';
+  $('serpPythonScript').value = c.pythonScript || '';
   $('serpTimeout').value = String(c.timeoutMs ?? 25000);
   $('serpSettle').value = String(c.settleMs ?? 800);
   renderBackendState();
@@ -96,6 +99,8 @@ function readBackend() {
     cmd: $('serpCmd').value.trim(),
     cmdFormat: $('serpCmdFormat').value,
     chromePath: $('serpChrome').value.trim(),
+    pythonPath: $('serpPython').value.trim(),
+    pythonScript: $('serpPythonScript').value.trim(),
     timeoutMs: Number($('serpTimeout').value) || 25000,
     settleMs: Number($('serpSettle').value) || 0,
   };
@@ -212,6 +217,36 @@ function renderSources() {
   // 默认就该是全网搜
   const hints = catalog.siteScopeSuggestions || [];
   if (hints.length) $('siteScope').placeholder = `留空 = 全网搜。想限定就一行一个，例如：\n${hints.slice(0, 4).join('\n')}`;
+}
+
+/**
+ * python 后端自检。
+ *
+ * 装没装 curl_cffi 决定了这条路到底有没有意义——没装的话它跟 http 后端
+ * 效果差不多。这件事不能靠猜，所以给个按钮真跑一次，把用的哪个传输
+ * 如实显示出来。
+ */
+async function probePython() {
+  const out = $('pyProbeOut');
+  out.textContent = '正在自检…';
+  out.className = 'field-note';
+  try {
+    const r = await fetch('/api/serp/python-probe', { method: 'POST' }).then((x) => x.json());
+    if (!r.ok) {
+      out.className = 'field-note warn-text';
+      out.textContent = `跑不起来：${r.error || '脚本没说原因'}`;
+      return;
+    }
+    const best = r.via === 'curl_cffi';
+    out.className = `field-note${best ? '' : ' warn-text'}`;
+    out.textContent = `Python ${r.python} · 会用 ${r.via} · 装了：${(r.available || []).join('、')}`
+      + (best
+        ? ' —— 能冒充 Chrome 的 TLS 握手，这条路的价值就在这儿'
+        : ' —— 没装 curl_cffi，换不了 TLS 指纹，效果和 http 后端差不多；pip install curl_cffi 才有意义');
+  } catch (err) {
+    out.className = 'field-note warn-text';
+    out.textContent = `自检请求失败：${String(err?.message || err)}`;
+  }
 }
 
 function addEngine() {
@@ -341,6 +376,7 @@ function bind() {
     }
   });
   $('addEngineBtn').addEventListener('click', addEngine);
+  $('pyProbeBtn').addEventListener('click', probePython);
   $('serpBackend').addEventListener('change', () => { syncBackendFields(); markDirty(); });
   $('downloadTarget').addEventListener('change', () => { renderDownloadTarget(); markDirty(); });
 

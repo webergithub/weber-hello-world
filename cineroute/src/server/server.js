@@ -19,7 +19,8 @@ import {
   SERP_BACKEND_CHOICES, SERP_CMD_FORMATS, DEFAULT_SERP,
 } from '../core/sourceConfig.js';
 import { SERP_PROVIDERS } from '../adapters/searchEngine.js';
-import { checkBackend } from '../adapters/serp.js';
+import { checkBackend, serpSettings } from '../adapters/serp.js';
+import { probePython } from '../adapters/serp/pythonSearch.js';
 import { DownloadManager, safeFilename } from './downloader.js';
 import { launch, findChrome } from '../browser/cdp.js';
 import { verifyWithRounds } from '../verify/deepVerify.js';
@@ -333,6 +334,20 @@ export async function startServer(options = {}) {
       }
 
       // 数据源配置：读 / 改。改完立即生效，下一次检索就按新配置跑。
+      /**
+       * python 后端自检：这台机器上脚本跑不跑得起来、会用哪个传输。
+       *
+       * 单独开一个接口而不是塞进 /api/config，是因为它**要真起一个进程**。
+       * 每次打开设置页都跑一遍没必要，而且装没装 curl_cffi 是随时会变的事
+       * （用户可能刚 pip install 完），所以做成按钮点一下才跑。
+       */
+      if (pathname === '/api/serp/python-probe' && req.method === 'POST') {
+        const s2 = serpSettings(process.env, effectiveSerp());
+        const r = await probePython({ python: s2.python, script: s2.pythonScript });
+        sendJson(res, 200, { ...r, python: r.python || null, script: s2.pythonScript });
+        return;
+      }
+
       if (pathname === '/api/sources' && req.method === 'GET') {
         sendJson(res, 200, { config: publicConfig(), catalog: sourceCatalog() });
         return;

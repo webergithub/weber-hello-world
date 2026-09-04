@@ -67,7 +67,8 @@ export const BACKEND_LABEL = {
   cli: '本机命令行工具',
   browser: '无头浏览器打开结果页（本机要有浏览器）',
   http: '直接请求结果页并解析（纯代码，不用装浏览器）',
-  ladder: '阶梯：先直取，被挡了升级到浏览器',
+  python: '交给 Python 脚本发请求（装了 curl_cffi 可换 TLS 指纹）',
+  ladder: '阶梯：直取 → Python → 浏览器，被挡才逐级升',
 };
 
 /** 一行一个、去空白的文本框读法。域名列表、站点范围都用它。 */
