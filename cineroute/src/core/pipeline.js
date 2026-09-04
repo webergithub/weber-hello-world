@@ -15,6 +15,7 @@ import { buildAdapters, adapterAvailability } from '../adapters/registry.js';
 import { defaultConfig } from './sourceConfig.js';
 import { planFirstRound, planSecondRound } from './expand.js';
 import { createReporter } from './progress.js';
+import { summarizeVideos } from './videoSanity.js';
 
 /**
  * 把两轮的适配器结果按源合并。
@@ -650,6 +651,9 @@ export async function searchAll(rawQuery, opts = {}) {
       total: rankedAll.length,
       usable: usable.length,
       rejected: verifyItems.length - usable.length,
+      // 只看时长与体积的初步判断，跟"能不能播"是两回事：一个 2 分半的预告片
+      // 是完全有效的视频文件，只是够不上正片。见 core/videoSanity.js
+      sanity: (({ items, ...counts }) => counts)(summarizeVideos(rankedAll)),
       items: verifyItems,
       // 没有解析器、只能作为线索的页面也归到这一步，方便一起看
       leads,

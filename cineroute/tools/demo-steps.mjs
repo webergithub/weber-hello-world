@@ -14,6 +14,7 @@
  */
 
 import { searchAll } from '../src/core/pipeline.js';
+import { summarizeVideos } from '../src/core/videoSanity.js';
 import {
   createFixtureFetch, createFixtureProbe, applyFixtureSerpEnv, FIXTURE_SERP_CONFIG,
 } from '../src/core/fixtureFetch.js';
@@ -68,7 +69,7 @@ async function run(rawQuery) {
   }
 
   /* ── 第三步 ─────────────────────────────────────────── */
-  console.log(`\n【第二步/嗅探】${verify.label}`);
+  console.log(`\n【第二步】嗅探甄别（管线里的 ${verify.label}）`);
   console.log(`  归一去重后 ${r.stats.afterDedupe} 条候选 · 实际嗅探 ${verify.checked}/${verify.total} 条`
     + ` · 可用 ${verify.usable} 条 · 筛除 ${verify.rejected} 条\n`);
 
@@ -96,6 +97,25 @@ async function run(rawQuery) {
     console.log(`       ${l.reason}`);
   }
   if (leads.length > 12) console.log(`     … 另有 ${leads.length - 12} 条`);
+
+  /* ── 第三步 ─────────────────────────────────────────── */
+  // 只拿上游给的时长和体积算，不解码也不请求。这一步专抓"数字对不上"的
+  // 文件——声称 90 分钟却只有 48 MB 之类。那种东西容器是正经 mp4、
+  // 文件名也规规矩矩，前面几道都拦不住，只有把两个数除一下才露馅。
+  const all = verify.items;
+  const sanity = summarizeVideos(all);
+
+  console.log('\n【第三步】最终结果 · 有效视频初步判断（只看时长 + 体积）');
+  console.log(`  候选 ${sanity.total} 条`);
+  console.log(`    ✅ 有效视频 ${sanity.valid} 条　其中够正片长度（≥40 分钟）${sanity.feature} 条`);
+  console.log(`    ❌ 无效     ${sanity.invalid} 条`);
+  console.log(`    ❔ 判不了   ${sanity.unknown} 条（上游没给时长或体积，不猜）\n`);
+
+  for (const x of sanity.items) {
+    const icon = x.verdict === 'valid' ? (x.feature ? '✅正片' : '✅短片') : (x.verdict === 'invalid' ? '❌无效' : '❔未知');
+    console.log(`  ${icon}  ${pad(trunc(x.source.filename, 44), 46)} ${dur(x.source.durationSec).padStart(9)} · ${size(x.source.bytes).padStart(7)} · ${x.kbps ? `${Math.round(x.kbps)} kbps` : '码率未知'}`);
+    console.log(`         ${x.reason}`);
+  }
 
   console.log(`\n  ⟹ 最终可直接播放：${r.top.length} 条${r.top.length ? '' : '（没有找到可播的正片）'}`);
   for (const t of r.top.slice(0, 5)) console.log(`     ${t.score} 分  ${trunc(t.filename, 60)}`);
