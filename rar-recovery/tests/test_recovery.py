@@ -103,6 +103,40 @@ class TestCandidates(unittest.TestCase):
         self.assertEqual(seq[1], "00")
         self.assertIn("99", seq)
 
+    def test_rules_mangle(self):
+        from recovery import rules
+        full = list(rules.mangle("password", "full"))
+        for v in ("Password", "PASSWORD", "password1", "password123", "Password!",
+                  "p@ssw0rd", "drowssap", "passwordpassword"):
+            self.assertIn(v, full, f"缺变体 {v}")
+        # light 更少、且是 full 的子集范围内
+        light = list(rules.mangle("password", "light"))
+        self.assertLess(len(light), len(full))
+        self.assertIn("Password", light)
+        self.assertIn("password123", light)
+        # 每个变体唯一
+        self.assertEqual(len(full), len(set(full)))
+
+    def test_rules_dates_and_personal(self):
+        from recovery import rules
+        dv = rules.date_variants("19900215")
+        for v in ("19900215", "900215", "1990", "0215"):
+            self.assertIn(v, dv)
+        pc = list(rules.personal_candidates(["zhang", "19900215", "mimi"], "full"))
+        for v in ("zhang", "zhang1990", "Zhang0215", "zhangmimi", "mimi1990"):
+            self.assertIn(v, pc, f"缺组合 {v}")
+
+    def test_rules_in_stream(self):
+        # personal 紧跟猜测；rules 变形出现在流里
+        opts = Options(strategy="custom", extra_passwords=["admin"], personal=["zhang", "1990"],
+                       rules="full", use_key_lib=False, use_industry=False,
+                       include_dates=False, wordcombos=False, digits_max=0)
+        seq = list(iter_candidates(opts))
+        self.assertEqual(seq[0], "admin")
+        self.assertIn("zhang1990", seq)      # 个人组合
+        self.assertIn("Admin123", seq)       # admin 的变形
+        self.assertIn("@dm1n", seq)          # leet 变形
+
     def test_brute_scope(self):
         # 暴力范围可控：只要 lower 长度 2..2 -> 恰好 26*26=676 个，且都是 2 位小写
         opts = Options(strategy="custom", use_key_lib=False, use_industry=False,

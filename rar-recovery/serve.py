@@ -162,6 +162,8 @@ class Handler(BaseHTTPRequestHandler):
             strategy=data.get("strategy", "standard"),
             wordlist=(data.get("wordlist") or None),
             extra_passwords=[g for g in (data.get("guesses") or []) if g],
+            personal=[p for p in (data.get("personal") or []) if p],
+            rules=data.get("rules", "none") or "none",
             mask=data.get("mask", "") or "",
             mask_custom1=data.get("mask_custom1", "") or "",
             mask_custom2=data.get("mask_custom2", "") or "",

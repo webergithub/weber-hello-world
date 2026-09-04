@@ -38,6 +38,10 @@ def main() -> int:
                     default="standard", help="搜索强度（默认 standard；custom=完全按你给的参数）")
     ap.add_argument("--wordlist", help="额外字典文件（如 rockyou.txt）")
     ap.add_argument("--guess", nargs="*", default=[], help="你自己记得的候选密码，优先尝试")
+    ap.add_argument("--personal", nargs="*", default=[],
+                    help="个人信息（姓名/生日/纪念词），按常见套路自动组合，如 zhang 19900215 mimi")
+    ap.add_argument("--rules", choices=["none", "light", "full"], default="none",
+                    help="规则变形：把词扩展成真人常用变体（大小写/leet/加数字符号）")
     ap.add_argument("--mask", default="", help="掩码（知道结构就填）：?d数字 ?l小写 ?u大写 ?s符号 ?a全部 ?1/?2自定义，"
                                                "字面字符原样。例：love?d?d?d?d")
     ap.add_argument("--mask-custom1", default="", help="?1 对应的自定义字符集")
@@ -76,6 +80,7 @@ def main() -> int:
 
     opts = Options(strategy=strategy, wordlist=args.wordlist,
                    extra_passwords=list(args.guess),
+                   personal=list(args.personal), rules=args.rules,
                    mask=args.mask, mask_custom1=args.mask_custom1, mask_custom2=args.mask_custom2,
                    include_dates=not args.no_dates,
                    use_key_lib=not args.no_keylib, use_industry=not args.no_industry,

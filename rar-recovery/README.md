@@ -90,6 +90,8 @@ python3 recover.py secret.rar --digits-max 8
 | --- | --- |
 | `--strategy fast\|standard\|deep\|custom` | 搜索强度，默认 `standard`（给了暴力参数会自动转 custom） |
 | `--guess A B C` | 你自己记得的候选密码，**最优先**尝试 |
+| `--personal 姓名 生日 …` | 👤 个人信息，自动按常见套路组合（见下） |
+| `--rules none\|light\|full` | 🔧 规则变形：把词扩展成真人常用变体（见下） |
 | `--mask 掩码` | 🎯 按"结构"精准搜索（紧跟猜测之后优先跑），见下 |
 | `--mask-custom1 串` / `--mask-custom2 串` | 掩码里 `?1` / `?2` 对应的自定义字符集 |
 | **第 1 级** | |
@@ -115,7 +117,7 @@ python3 recover.py secret.rar --digits-max 8
 
 | 级别 | 内容 | 说明 |
 | --- | --- | --- |
-| 🔑 **第 0 级** | 你自己的候选（`--guess`） | 永远最先试 |
+| 🔑 **第 0 级（你的知识）** | `--guess` + 👤 个人信息组合 + 🎯 掩码 + 🔧 变形你的猜测 | 永远最先，命中率最高 |
 | 1️⃣ **第 1 级：关键数字与字母** | 顺子、重复、键盘走位（qwerty/1qaz2wsx）、吉利数（520/1314）、生日日期 | 真人最常设的"关键组合"，秒级覆盖 |
 | 2️⃣ **第 2 级：行业常用密码库** | 内置高频库 + 常见词加数字 + 你挂的外部字典（rockyou/SecLists） | 安全行业沉淀的常用密码 |
 | 3️⃣ **第 3 级：暴力生成（范围可控）** | 纯数字穷举 + 通用字符集×长度区间 | **每次可自定范围**：选字符集 + 定长度 `min~max`，分批推进 |
@@ -135,6 +137,34 @@ python3 recover.py x.rar --brute-charset custom --brute-custom 'abc123!@' --brut
 ```
 
 网页/桌面版里，第 3 级会**实时显示这一批的组合数与预计耗时**，方便你把控每次范围。
+
+## 🔧 规则变形 + 👤 个人信息（最能提升命中率）
+
+真人很少用"裸词"当密码，而是加料：`password` → `Password123`、`P@ssw0rd`、`password!`。
+**规则变形**把每个基础词（你的猜测、内置字典、个人信息）自动扩展成这些真人常用变体：
+
+- 大小写：`password / Password / PASSWORD`
+- leet 替换：`p@ssw0rd / p455w0rd`（含只替元音的最常见形式）
+- 加数字/符号：`password1 / password123 / password! / password2025`
+- full 档再加：前缀、反转（`drowssap`）、叠词（`passwordpassword`）
+
+```bash
+python3 recover.py x.rar --rules light     # 大小写 + 常见后缀（快）
+python3 recover.py x.rar --rules full      # 再加 leet/前缀/反转/叠词（覆盖广）
+```
+
+**个人信息**：把姓名、生日、纪念词按真人套路自动组合——生日会展开成多种写法
+（`19900215 → 1990 / 0215 / 900215 / 02151990…`），再和名字/常见尾巴拼接：
+
+```bash
+python3 recover.py x.rar --personal zhang 19900215 mimi
+# 自动尝试 zhang1990 / Zhang0215 / zhangmimi / mimi520 / zhang@1990 …
+```
+
+个人信息与变形都排在很靠前的优先级（紧跟你的 `--guess` 之后），命中概率最高。
+网页/桌面版有对应的"个人信息"输入框和"规则变形"下拉。
+
+---
 
 ## 🎯 掩码攻击（记得"结构"时最有效）
 

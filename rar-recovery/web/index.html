@@ -46,6 +46,18 @@
             <textarea id="guesses" rows="3" placeholder="常用的密码&#10;生日&#10;手机号"></textarea>
           </label>
 
+          <label>👤 个人信息（姓名/生日/纪念词，每行一个，自动按常见套路组合）
+            <textarea id="personal" rows="2" placeholder="zhang&#10;19900215&#10;mimi"></textarea>
+          </label>
+
+          <label>🔧 规则变形（把上面的词扩展成真人常用变体：大小写 / leet / 加数字符号）
+            <select id="rules">
+              <option value="none" selected>不变形</option>
+              <option value="light">轻量（大小写 + 常见后缀，快）</option>
+              <option value="full">完整（再加 leet / 前缀 / 反转 / 叠词，慢但覆盖广）</option>
+            </select>
+          </label>
+
           <label>🎯 掩码（记得<b>结构</b>就填，紧跟猜测之后优先跑）
             <input id="mask" type="text" placeholder="例：love?d?d?d?d 或 ?u?l?l?l?d?d?d?d" />
             <span class="hint" id="maskHint"></span>

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from typing import Iterable, Iterator, List
 
 from . import keylib
+from . import rules as rulesmod
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _COMMON_TXT = os.path.join(_HERE, "..", "wordlists", "common.txt")
@@ -40,6 +41,10 @@ CHARSETS = {
 class Options:
     strategy: str = "standard"          # fast | standard | deep | custom
     extra_passwords: List[str] = field(default_factory=list)   # 第 0 级
+    # ---- 个人信息（姓名/生日/纪念词，按常见套路组合，高优先）----
+    personal: List[str] = field(default_factory=list)
+    # ---- 规则变形（把词扩展成真人常用变体）：none | light | full ----
+    rules: str = "none"
     # ---- 掩码（知道密码"结构"时最有效，紧跟用户猜测之后优先跑）----
     mask: str = ""                      # 如 love?d?d?d?d、?u?l?l?l?d?d?d?d
     mask_custom1: str = ""              # ?1 对应的自定义字符集
@@ -235,6 +240,15 @@ def iter_candidates(opts: Options) -> Iterator[str]:
     # 第 0 级：用户自己的猜测
     yield from stage(o.extra_passwords, dedup=True)
 
+    # 个人信息组合：姓名/生日/纪念词，按常见套路（高优先，仅在提供时）
+    if o.personal:
+        yield from stage(rulesmod.personal_candidates(o.personal, "full"), dedup=True)
+
+    # 规则变形：把你的猜测扩展成真人常用变体（P@ssw0rd、xxx123!…）
+    if o.rules != "none" and o.extra_passwords:
+        for w in o.extra_passwords:
+            yield from stage(rulesmod.mangle(w, o.rules), dedup=True)
+
     # 掩码：知道结构时最精准，紧跟猜测之后优先跑
     if o.mask:
         yield from stage(mask_iter(o.mask, o.mask_custom1, o.mask_custom2), dedup=False)
@@ -251,6 +265,12 @@ def iter_candidates(opts: Options) -> Iterator[str]:
         yield from stage(load_common(), dedup=True)
     if o.wordlist and os.path.exists(o.wordlist):
         yield from stage(_iter_wordlist_file(o.wordlist), dedup=False)
+    # 规则变形：把字典里的词扩展成真人常用变体
+    if o.rules != "none":
+        base_words = keylib.TOP_WORDS + [w for w in load_common()
+                                         if any(c.isalpha() for c in w) and len(w) >= 3]
+        for w in base_words:
+            yield from stage(rulesmod.mangle(w, o.rules), dedup=True)
     if o.wordcombos:
         yield from stage(_wordcombos(load_common(), o.year_from, o.year_to), dedup=True)
 
@@ -273,6 +293,14 @@ def _count_lines(path: str) -> int:
 def estimate_total(opts: Options) -> int:
     o = opts.resolved()
     total = len(o.extra_passwords)
+    if o.personal:
+        total += len(o.personal) * 300           # 个人信息变体+组合（粗略）
+    if o.rules != "none":
+        per = rulesmod.mangle_count(o.rules)
+        total += len(o.extra_passwords) * per     # 变形你的猜测
+        common_alpha = sum(1 for w in load_common()
+                           if any(c.isalpha() for c in w) and len(w) >= 3)
+        total += (len(keylib.TOP_WORDS) + common_alpha) * per   # 变形字典
     if o.mask:
         total += mask_count(o.mask, o.mask_custom1, o.mask_custom2)
     if o.use_key_lib:

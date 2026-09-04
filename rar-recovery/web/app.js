@@ -85,6 +85,8 @@ async function start() {
     path: currentPath,
     strategy: "custom",
     guesses,
+    personal: $("personal").value.split("\n").map((s) => s.trim()).filter(Boolean),
+    rules: $("rules").value,
     mask: $("mask").value.trim(),
     mask_custom1: $("maskCustom1").value,
     mask_custom2: $("maskCustom2").value,
