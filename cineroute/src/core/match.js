@@ -143,7 +143,29 @@ export function titleSimilarity(query, candidate) {
     return Math.max(0.84, diceCoefficient(qTokens, cTokens));
   }
 
-  return Math.max(diceCoefficient(qTokens, cTokens), levenshteinRatio(q, c));
+  const dice = diceCoefficient(qTokens, cTokens);
+
+  // **中日韩片名不能用编辑距离兜底。**
+  //
+  // 编辑距离在拉丁文里是对的：Metropolis / Metropolís 差一个字母，是转写差异，
+  // 同一部片。但一个汉字不是一个字母，是一个词——「我不是药神」和「我不是酒神」
+  // 也差一个字，却是两部完全不同的电影；「阿凡达」和「阿凡提」同理。
+  //
+  // 实测这条兜底把这几对的分数抬到了 0.67~0.80，而正常该放行的
+  // （「猫和老鼠」vs「貓和老鼠」= 0.75、「欢迎来到龙餐厅」vs
+  // 「欢迎来到龙虾餐厅」= 0.88）也在这个区间里——**两边完全重叠，
+  // 调门槛救不回来**，只能不让编辑距离参与中日韩的判定。
+  //
+  // 去掉之后靠二元组 Dice：换掉一个字会同时打掉两个二元组，短片名上
+  // 掉得很明显（药神/酒神 → 0.50），而"片名 + 后缀"那种走上面的子串分支，
+  // 根本到不了这里。
+  //
+  // 仍有拦不住的：同长度、差两个字的续集名（「哪吒之魔童降世」vs
+  // 「哪吒之魔童闹海」= 0.67）还是会过。要真分开得靠繁简归一 + 作品库比对，
+  // 不是一个字符串距离能解决的，这里不假装解决了。
+  if (CJK_RE.test(q) || CJK_RE.test(c)) return dice;
+
+  return Math.max(dice, levenshteinRatio(q, c));
 }
 
 /**

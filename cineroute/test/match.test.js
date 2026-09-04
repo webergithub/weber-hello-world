@@ -56,3 +56,40 @@ test('parseQuery 抽出结尾年份', () => {
 test('titleKey 让不同写法的同一部片合并到同一个键', () => {
   assert.equal(titleKey('The Metropolis', 1927), titleKey('Metropolis', 1927));
 });
+
+test('中文片名差一个字就是两部片：不能用编辑距离兜底', () => {
+  // 实跑「我不是酒神」「阿凡达」时抓到的：编辑距离在拉丁文里是对的
+  // （Metropolis / Metropolís 差一个字母，是转写差异），但一个汉字不是
+  // 一个字母，是一个词。「我不是药神」和「我不是酒神」也差一个字，
+  // 却是两部完全不同的电影。
+  //
+  // 当时的分数是 0.80，比正常该放行的「猫和老鼠」vs「貓和老鼠」(0.75)
+  // 还高 —— 两边区间完全重叠，**调门槛救不回来**，只能不让编辑距离
+  // 参与中日韩的判定。
+  const GATE = 0.55;   // 与 IA / 引擎两个适配器的准入门槛一致
+
+  const mustBlock = [
+    ['我不是酒神', '我不是药神'],
+    ['阿凡达', '阿凡提'],
+    ['阿凡达', 'Avatar: The Last Airbender - Book One'],
+    ['欢迎来到龙餐厅', 'The Dragon Restaurant — regional cooking show'],
+  ];
+  for (const [q, c] of mustBlock) {
+    const s = titleSimilarity(q, c);
+    assert.ok(s < GATE, `「${q}」vs「${c}」得了 ${s.toFixed(2)}，会被当成同一部片`);
+  }
+
+  const mustPass = [
+    ['阿凡达', '阿凡达 2009 官方预告片 中文字幕'],
+    ['我不是药神', '我不是药神 片段合集'],
+    ['猫和老鼠', '貓和老鼠'],                    // 繁简变体
+    ['欢迎来到龙餐厅', '欢迎来到龙虾餐厅'],       // 译名变体
+  ];
+  for (const [q, c] of mustPass) {
+    const s = titleSimilarity(q, c);
+    assert.ok(s >= GATE, `「${q}」vs「${c}」只有 ${s.toFixed(2)}，正常的同名变体被误伤了`);
+  }
+
+  // 拉丁文那边不受影响：转写差异还得靠编辑距离救回来
+  assert.equal(titleSimilarity('Metropolis', 'Metropolís'), 1);
+});

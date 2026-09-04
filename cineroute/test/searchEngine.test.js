@@ -205,6 +205,65 @@ test('不认识的域名只列为线索，绝不去抓页面找视频地址', as
   for (const l of leads) assert.match(l.reason, /没有对应的解析器/);
 });
 
+test('域名认识但**片名对不上**的，一样挡在外面', async () => {
+  // 这条是实跑三个中文片名时发现的真实缺陷。引擎给的是"这个页面里出现过
+  // 你搜的词"，不是"这个页面就是那部片"：搜「阿凡达」它会返回 archive.org
+  // 上的《降世神通》（Avatar: The Last Airbender），搜「我不是酒神」它会
+  // 自作主张纠正成《我不是药神》。这些条目确实在 archive.org 上、确实能
+  // 解析出能播的 mp4——唯一的问题是那不是用户要的片子。
+  //
+  // 别的适配器（IA / Commons / Jellyfin）都在自己那头卡了相似度，只有引擎
+  // 这条路漏了：相似度算了、挂在片源上了，就是没拿它筛过。结果搜「阿凡达」
+  // 的第一推荐位是一集《降世神通》，480p、mp4、23 分钟，各项指标都正常，
+  // 错得非常理直气壮。
+  const meta = (title, id) => ({
+    metadata: { identifier: id, title },
+    server: 'ia801509.us.archive.org', dir: `/27/items/${id}`,
+    files: [{ name: `${id}.mp4`, format: 'h.264', size: '400000000', length: '1404', height: '480', width: '640', md5: 'a1' }],
+  });
+
+  // 一次进来两条：一条对得上，一条对不上。要的是"只放行对得上的那条"，
+  // 而不是"一条都不放"或者"两条都放"。
+  const fetchJson = async (url) => (url.includes('avatar_the_last_airbender')
+    ? meta('Avatar: The Last Airbender - Book One', 'avatar_the_last_airbender_book1')
+    : meta('阿凡达 2009 官方预告片', 'avatar_2009_trailer_zh'));
+
+  const { sources, leads } = await resolveResults(
+    [
+      { url: 'https://archive.org/details/avatar_the_last_airbender_book1', title: 'ATLA', rank: 1 },
+      { url: 'https://archive.org/details/avatar_2009_trailer_zh', title: '阿凡达预告', rank: 2 },
+    ],
+    { title: '阿凡达', year: null },
+    { fetchJson, engineId: 'engine:google' },
+  );
+
+  assert.equal(sources.length, 1, `只该放行片名对得上的那条，实际 ${sources.map((s) => s.filename)}`);
+  assert.match(sources[0].url, /avatar_2009_trailer_zh/);
+
+  // 挡下来的**不能静悄悄丢掉**——取证要能回答"这条为什么没进来"
+  assert.equal(leads.length, 1);
+  assert.match(leads[0].reason, /片名对不上/);
+  assert.match(leads[0].reason, /相似度 0\.00/, '理由里要带上具体数字，方便判断门槛该不该调');
+  assert.match(leads[0].url, /avatar_the_last_airbender_book1/);
+});
+
+test('一字之差是两部电影：我不是酒神 ≠ 我不是药神', async () => {
+  const fetchJson = async () => ({
+    metadata: { identifier: 'dying_to_survive_2018', title: '我不是药神' },
+    server: 'ia801509.us.archive.org', dir: '/52/items/dying_to_survive_2018',
+    // 刻意起一个**正常的正片文件名**：不含 clip/trailer，容器也能播。
+    // 也就是说除了片名，没有任何别的规则能拦下它——这条只能靠准入门槛。
+    files: [{ name: 'dying_to_survive_2018.mp4', format: 'h.264', size: '2000000000', length: '7320', height: '1080', width: '1920', md5: 'b2' }],
+  });
+  const { sources, leads } = await resolveResults(
+    [{ url: 'https://archive.org/details/dying_to_survive_2018', title: '我不是药神', rank: 1 }],
+    { title: '我不是酒神', year: null },
+    { fetchJson, engineId: 'engine:google' },
+  );
+  assert.equal(sources.length, 0, '《我不是药神》不该被当成《我不是酒神》的片源');
+  assert.match(leads[0].reason, /片名对不上/);
+});
+
 test('详情页解析失败时降级为线索，而不是编一个地址出来', async () => {
   const fetchJson = async () => { throw new Error('404'); };
   const { sources, leads } = await resolveResults(

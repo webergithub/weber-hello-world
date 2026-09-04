@@ -46,10 +46,36 @@ const COMMONS_FILE = /^https?:\/\/commons\.wikimedia\.org\/wiki\/(File|文件):(
 /**
  * 把搜到的页面解析成真实片源。只处理域名认识的，其余原样返回为"线索"。
  *
+ * **片名对不上的要挡在外面。** 引擎给的是"这个页面里出现过你搜的词"，
+ * 不是"这个页面就是那部片"——搜「阿凡达」它会给你 archive.org 上的
+ * 《降世神通》（英文名 Avatar: The Last Airbender），搜「我不是酒神」
+ * 它会自作主张纠正成《我不是药神》。这些页面确实在 archive.org 上、
+ * 确实能解析出能播的 mp4，唯一的问题是**那不是用户要的片子**。
+ *
+ * 别的适配器（IA、Commons、Jellyfin）都在自己那头做了这道过滤，只有这里
+ * 漏了：相似度算了、挂在片源上了，就是没拿它筛过。于是搜「阿凡达」的
+ * 第一推荐位是一集《降世神通》，而且分还挺高（480p、mp4、23 分钟，
+ * 各项指标都很正常）——错得非常理直气壮。
+ *
+ * 被挡下来的不删掉，**转成线索并写明理由**：调研取证要能回答"这条为什么
+ * 没进来"，静悄悄丢掉等于把证据链掐断。
+ *
+ * @param {{fetchJson?: Function, signal?: AbortSignal, engineId?: string,
+ *          engineLabel?: string, minSimilarity?: number}} [opts]
  * @returns {Promise<{sources: object[], leads: object[]}>}
  */
 export async function resolveResults(results, query, opts = {}) {
-  const { fetchJson = httpJson, signal, engineId, engineLabel } = opts;
+  const {
+    fetchJson = httpJson, signal, engineId, engineLabel,
+    // 跟 internetArchive.js 用同一档（0.55）：引擎这条路解析的正是
+    // archive.org 的条目，同一部片从两条路进来待遇不该不一样。
+    // 0.5 挡不住「我不是药神」冒充「我不是酒神」——二元组只对上一半正好是 0.50，
+    // 卡在门槛线上。
+    minSimilarity = 0.55,
+  } = opts;
+  /** 片名对不上时的线索理由。把数字写出来，方便判断门槛该不该调。 */
+  const mismatch = (name, similarity) =>
+    `片名对不上：《${name}》与「${query.title}」相似度 ${similarity.toFixed(2)}，低于门槛 ${minSimilarity}`;
   const sources = [];
   const leads = [];
 
@@ -73,7 +99,9 @@ export async function resolveResults(results, query, opts = {}) {
     if (!meta) { leads.push(toLead(r, engineId, '详情页解析失败')); return; }
     const extracted = extractSourcesFromMetadata(meta, { identifier: id });
     if (extracted.length === 0) { leads.push(toLead(r, engineId, '该条目没有视频文件')); return; }
-    const similarity = titleSimilarity(query.title, meta.metadata?.title || r.title || id);
+    const name = meta.metadata?.title || r.title || id;
+    const similarity = titleSimilarity(query.title, name);
+    if (similarity < minSimilarity) { leads.push(toLead(r, engineId, mismatch(name, similarity))); return; }
     for (const s of extracted) {
       sources.push({ ...s, similarity, ...citation(r, engineId, engineLabel) });
     }
@@ -94,6 +122,11 @@ export async function resolveResults(results, query, opts = {}) {
         const lead = commonsTitles.find(({ title }) => String(page.title || '').includes(title));
         if (!info?.url) { if (lead) leads.push(toLead(lead.r, engineId, '未取到文件地址')); continue; }
         const name = String(page.title || '').replace(/^File:/i, '');
+        const similarity = titleSimilarity(query.title, name);
+        if (similarity < minSimilarity) {
+          if (lead) leads.push(toLead(lead.r, engineId, mismatch(name, similarity)));
+          continue;
+        }
         sources.push({
           id: `commons:${page.pageid}`,
           provider: 'wikimedia-commons',
@@ -109,7 +142,7 @@ export async function resolveResults(results, query, opts = {}) {
           license: info.extmetadata?.LicenseUrl?.value || info.extmetadata?.LicenseShortName?.value || '',
           collections: ['wikimedia-commons'], downloads: 0,
           checksums: { md5: null, sha1: info.sha1 || null },
-          similarity: titleSimilarity(query.title, name),
+          similarity,
           rangeSupported: null, reachable: null,
           ...(lead ? citation(lead.r, engineId, engineLabel) : { discoveredBy: engineId, discoveredByLabel: engineLabel }),
         });
