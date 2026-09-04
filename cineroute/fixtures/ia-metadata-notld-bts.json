@@ -1,0 +1,32 @@
+{
+  "created": 1724371200,
+  "d1": "ia601402.us.archive.org",
+  "dir": "/9/items/notld_behind_the_scenes",
+  "files": [
+    {
+      "name": "notld_behind_the_scenes.mp4",
+      "source": "original",
+      "format": "h.264",
+      "mtime": "1611240033",
+      "size": "142606336",
+      "md5": "7b39e01cd458a2f6913ba0e75c284d1f",
+      "crc32": "88ac0f31",
+      "sha1": "2c47f0a8b6d915e304ba7c1f58d3e920a6b74015",
+      "length": "743.00",
+      "height": "480",
+      "width": "640"
+    }
+  ],
+  "files_count": 1,
+  "item_size": 142606336,
+  "metadata": {
+    "identifier": "notld_behind_the_scenes",
+    "title": "Night of the Living Dead - Behind the Scenes Featurette",
+    "mediatype": "movies",
+    "year": "1969",
+    "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+    "collection": ["moviesandfilms"],
+    "description": "Short featurette about the production."
+  },
+  "server": "ia601402.us.archive.org"
+}

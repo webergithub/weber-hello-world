@@ -1,0 +1,206 @@
+[
+  {
+    "_comment": "优先来源：site:yifan.tv 的查询走这个夹具。必须排在 engine=google 那条之前——那条只看引擎名和片名，会把这个查询也吃掉。",
+    "when": [
+      "serp.fixture",
+      "site:yifan.tv",
+      "Night of the Living Dead"
+    ],
+    "file": "serp-priority-yifan.json"
+  },
+  {
+    "_comment": "顺序即优先级：更具体的匹配必须排在更宽泛的前面，否则会被误匹配。引擎结果排最前——查询串里一旦出现 site:xxx（用户自己配了站点范围时会有），域名子串就会误撞下面那些按域名匹配的条目。",
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "Night of the Living Dead"
+    ],
+    "file": "serp-google-notld.json"
+  },
+  {
+    "when": [
+      "serp.fixture",
+      "engine=baidu",
+      "Night of the Living Dead"
+    ],
+    "file": "serp-baidu-notld.json"
+  },
+  {
+    "_comment": "三部中文片名的引擎结果，用来跑「搜索 → 嗅探」两步。",
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "阿凡达"
+    ],
+    "file": "serp-google-avatar.json"
+  },
+  {
+    "when": [
+      "serp.fixture",
+      "engine=baidu",
+      "阿凡达"
+    ],
+    "file": "serp-baidu-avatar.json"
+  },
+  {
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "我不是酒神"
+    ],
+    "file": "serp-google-jiushen.json"
+  },
+  {
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "欢迎来到龙餐厅"
+    ],
+    "file": "serp-google-longcanting.json"
+  },
+  {
+    "_comment": "用英文别名搜时的结果，跟中文那侧不是同一批页面。",
+    "when": [
+      "serp.fixture",
+      "engine=google",
+      "Avatar"
+    ],
+    "file": "serp-google-avatar-en.json"
+  },
+  {
+    "when": [
+      "serp.fixture"
+    ],
+    "file": "serp-empty.json"
+  },
+  {
+    "_comment": "Jellyfin 自建库。离线演示里指向本地文件，供第五步真解码。",
+    "when": [
+      "/Items",
+      "Night of the Living Dead"
+    ],
+    "file": "jellyfin-notld.json"
+  },
+  {
+    "when": [
+      "/metadata/notld_1968_restored_4k"
+    ],
+    "file": "ia-metadata-notld-restored.json"
+  },
+  {
+    "when": [
+      "/metadata/notld_behind_the_scenes"
+    ],
+    "file": "ia-metadata-notld-bts.json"
+  },
+  {
+    "when": [
+      "/metadata/night_of_the_living_dead"
+    ],
+    "file": "ia-metadata-notld.json"
+  },
+  {
+    "when": [
+      "/metadata/metropolis_1927_restored"
+    ],
+    "file": "ia-metadata-metropolis.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php",
+      "Night of the Living Dead"
+    ],
+    "file": "ia-search-notld.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php",
+      "Metropolis"
+    ],
+    "file": "ia-search-metropolis.json"
+  },
+  {
+    "when": [
+      "/metadata/avatar_the_last_airbender_book1"
+    ],
+    "file": "ia-metadata-avatar-tla.json"
+  },
+  {
+    "when": [
+      "/metadata/avatar_2009_trailer_zh"
+    ],
+    "file": "ia-metadata-avatar-trailer.json"
+  },
+  {
+    "when": [
+      "/metadata/dying_to_survive_2018_clip"
+    ],
+    "file": "ia-metadata-dying-clip.json"
+  },
+  {
+    "when": [
+      "/metadata/dragon_restaurant_cooking_show_1998"
+    ],
+    "file": "ia-metadata-dragon-cooking.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php",
+      "阿凡达"
+    ],
+    "file": "ia-search-avatar.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php",
+      "我不是酒神"
+    ],
+    "file": "ia-search-jiushen.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php",
+      "欢迎来到龙餐厅"
+    ],
+    "file": "ia-search-longcanting.json"
+  },
+  {
+    "when": [
+      "advancedsearch.php"
+    ],
+    "file": "ia-search-empty.json"
+  },
+  {
+    "_comment": "按 /w/api.php 匹配，不要只写域名——引擎查询串里也含这个域名。",
+    "when": [
+      "commons.wikimedia.org/w/api.php",
+      "Metropolis"
+    ],
+    "file": "commons-search-metropolis.json"
+  },
+  {
+    "when": [
+      "commons.wikimedia.org/w/api.php"
+    ],
+    "file": "commons-search-empty.json"
+  },
+  {
+    "when": [
+      "/search/multi",
+      "Night of the Living Dead"
+    ],
+    "file": "tmdb-search-notld.json"
+  },
+  {
+    "when": [
+      "/movie/10331/watch/providers"
+    ],
+    "file": "tmdb-providers-notld.json"
+  },
+  {
+    "when": [
+      "/movie/10331"
+    ],
+    "file": "tmdb-detail-notld.json"
+  }
+]

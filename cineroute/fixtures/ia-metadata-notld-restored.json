@@ -1,0 +1,68 @@
+{
+  "created": 1724371200,
+  "d1": "ia902703.us.archive.org",
+  "dir": "/14/items/notld_1968_restored_4k",
+  "files": [
+    {
+      "name": "notld_restored_1080p.mp4",
+      "source": "original",
+      "format": "HiRes MPEG4",
+      "mtime": "1698412033",
+      "size": "2094825472",
+      "md5": "d8c31f75a94e0b26375ca1e8047fb932",
+      "crc32": "b1730fe4",
+      "sha1": "82a4f6c0d13b95e7402ac81f6d539be07a41c2d8",
+      "length": "5766.00",
+      "height": "1080",
+      "width": "1440"
+    },
+    {
+      "name": "notld_restored_720p.webm",
+      "source": "derivative",
+      "original": "notld_restored_1080p.mp4",
+      "format": "WebM",
+      "mtime": "1698419887",
+      "size": "912261120",
+      "md5": "4e71b93c085da2f6187c3be409a5d726",
+      "crc32": "6d02af31",
+      "sha1": "05f3ba7c19d28e460a7fc3b158d92e0736ca4187",
+      "length": "5766.00",
+      "height": "720",
+      "width": "960"
+    },
+    {
+      "name": "notld_restored_512kb.mp4",
+      "source": "derivative",
+      "original": "notld_restored_1080p.mp4",
+      "format": "512Kb MPEG4",
+      "mtime": "1698421002",
+      "size": "241172480",
+      "md5": "9a05e37b1c8d64f2079ab3e15c740d68",
+      "crc32": "3ef17b0a",
+      "sha1": "6b1c840f2a93d5e70a1cf38b0d4e29175c0a3f9b",
+      "length": "5766.00",
+      "height": "360",
+      "width": "480"
+    },
+    {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "format": "Item Tile",
+      "size": "21044",
+      "md5": "e3719a04bc582d61079fae3b5c1d4820"
+    }
+  ],
+  "files_count": 4,
+  "item_size": 3248259072,
+  "metadata": {
+    "identifier": "notld_1968_restored_4k",
+    "title": "Night of the Living Dead (1968) — Restored Transfer",
+    "mediatype": "movies",
+    "year": "1968",
+    "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+    "collection": ["feature_films", "moviesandfilms"],
+    "description": "A restored high-definition transfer of the public domain 1968 feature."
+  },
+  "server": "ia902703.us.archive.org",
+  "workable_servers": ["ia902703.us.archive.org"]
+}

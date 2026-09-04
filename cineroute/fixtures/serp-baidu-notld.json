@@ -1,0 +1,20 @@
+{
+  "_comment": "百度引擎（限定站点范围）返回的结果页。与 Google 有重叠条目——用来演示跨引擎去重：同一个文件被两个引擎搜到，最终只会出现一条。",
+  "organic": [
+    {
+      "link": "https://archive.org/details/night_of_the_living_dead",
+      "title": "活死人之夜 1968 完整版 - Internet Archive",
+      "snippet": "公有领域影片，多种清晰度可选。"
+    },
+    {
+      "link": "https://archive.org/details/notld_behind_the_scenes",
+      "title": "活死人之夜 幕后花絮",
+      "snippet": "拍摄花絮合辑。"
+    },
+    {
+      "link": "https://openbeelden.nl/media/notld-fragment",
+      "title": "Night of the Living Dead fragment — Open Beelden",
+      "snippet": "Fragment uit de collectie."
+    }
+  ]
+}

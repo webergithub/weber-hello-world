@@ -1,0 +1,15 @@
+{
+  "_comment": "archive.org 搜「阿凡达」的真实形态：这部片是有版权的商业大片，归档站上不可能有正片，搜出来的是同名动画和预告片。",
+  "responseHeader": { "status": 0, "QTime": 21, "params": { "q": "title:(\"阿凡达\") AND mediatype:(movies)", "rows": "24", "wt": "json" } },
+  "response": {
+    "numFound": 2, "start": 0,
+    "docs": [
+      { "identifier": "avatar_2009_trailer_zh", "title": "阿凡达 2009 官方预告片 中文字幕", "year": "2009",
+        "downloads": 8421, "collection": ["opensource_movies"], "avg_rating": "3.10",
+        "description": "官方预告片，2 分 32 秒。" },
+      { "identifier": "avatar_the_last_airbender_book1", "title": "Avatar: The Last Airbender - Book One", "year": "2005",
+        "downloads": 33190, "collection": ["opensource_movies"], "avg_rating": "4.20",
+        "description": "Fan upload of the animated series." }
+    ]
+  }
+}

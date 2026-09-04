@@ -1,0 +1,12 @@
+{
+  "_comment": "「阿凡达」的 Google 结果。刻意做成真实形态：绝大多数是流媒体/资料站（没有解析器，只能当线索），archive.org 上能搜到的是同名但不是这部片的东西，以及一个预告片。",
+  "organic": [
+    { "link": "https://movie.douban.com/subject/1652587/", "title": "阿凡达 Avatar (2009) - 豆瓣电影", "snippet": "导演: 詹姆斯·卡梅隆。2009 年上映，片长 162 分钟。" },
+    { "link": "https://zh.wikipedia.org/wiki/阿凡达", "title": "阿凡达 - 维基百科", "snippet": "2009 年美国科幻电影，詹姆斯·卡梅隆编剧并执导。" },
+    { "link": "https://www.disneyplus.com/movies/avatar/1c4G1ZzQOZ9E", "title": "Avatar | Disney+", "snippet": "Stream Avatar now on Disney+." },
+    { "link": "https://archive.org/details/avatar_the_last_airbender_book1", "title": "Avatar: The Last Airbender - Book One (fan upload)", "snippet": "Animated series episodes, fan uploaded." },
+    { "link": "https://archive.org/details/avatar_2009_trailer_zh", "title": "阿凡达 2009 官方预告片 中文字幕", "snippet": "Official trailer, 2 minutes." },
+    { "link": "https://www.iqiyi.com/dianying/20101103/avatar.html", "title": "阿凡达-高清正版在线观看-爱奇艺", "snippet": "VIP 会员可观看。" },
+    { "link": "https://some-pirate-mirror.example/avatar-2009-1080p", "title": "阿凡达 1080p 完整版 免费在线", "snippet": "无需注册，点击即看。" }
+  ]
+}

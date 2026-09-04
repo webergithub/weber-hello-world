@@ -1,0 +1,7 @@
+# 生成物：测试报告由 tools/test-report.mjs 现跑现生成，不进版本库
+test-report.html
+test-report.json
+
+# 运行时产物
+downloads/
+config/sources.json

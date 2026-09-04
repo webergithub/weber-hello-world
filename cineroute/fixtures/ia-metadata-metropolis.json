@@ -1,0 +1,60 @@
+{
+  "created": 1724371200,
+  "d1": "ia801604.us.archive.org",
+  "dir": "/33/items/metropolis_1927_restored",
+  "files": [
+    {
+      "name": "metropolis_1927.mp4",
+      "source": "original",
+      "format": "h.264",
+      "mtime": "1601240933",
+      "size": "1610612736",
+      "md5": "b47e1c09a3d582f6170ea9c3b581d472",
+      "crc32": "0f31ba7c",
+      "sha1": "41c07de95b2a836f1907cb4d2e58a017f3b6c920",
+      "length": "8940.00",
+      "height": "720",
+      "width": "960"
+    },
+    {
+      "name": "metropolis_1927.ogv",
+      "source": "derivative",
+      "original": "metropolis_1927.mp4",
+      "format": "Ogg Video",
+      "mtime": "1601248801",
+      "size": "587202560",
+      "md5": "2d91b74c0a8e365f1740ba9c31e5d087",
+      "crc32": "ac710b32",
+      "sha1": "70f3b1a94c286d05e7a13cbf420d8e9175a06c34",
+      "length": "8940.00",
+      "height": "480",
+      "width": "640"
+    },
+    {
+      "name": "metropolis_1927_64kb.mp4",
+      "source": "derivative",
+      "original": "metropolis_1927.mp4",
+      "format": "64Kb MPEG4",
+      "mtime": "1601250114",
+      "size": "71303168",
+      "md5": "8f02a15c9e74b3d6014fca8b27d3e150",
+      "crc32": "5b19e0a4",
+      "sha1": "c9a417f30b58d2e6710ab3c94f0d5e2871a6b043",
+      "length": "8940.00",
+      "height": "180",
+      "width": "240"
+    }
+  ],
+  "files_count": 3,
+  "item_size": 2269118464,
+  "metadata": {
+    "identifier": "metropolis_1927_restored",
+    "title": "Metropolis (1927)",
+    "mediatype": "movies",
+    "year": "1927",
+    "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+    "collection": ["feature_films", "silent_films", "moviesandfilms"],
+    "description": "Fritz Lang's 1927 expressionist science-fiction feature."
+  },
+  "server": "ia801604.us.archive.org"
+}

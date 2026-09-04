@@ -1,0 +1,377 @@
+/**
+ * 搜索引擎适配器测试。
+ *
+ * 这里守两条线：
+ * 1. **翻页**：用户配"前 100 条"就得真的翻够页数，而不是只拿第一页的 10 条。
+ * 2. **产品边界**：引擎只负责发现页面。域名有解析器的才解析成片源，
+ *    其余一律进"线索"列表——绝不去爬任意页面翻视频地址。这条线要是破了，
+ *    整个平台就变成盗版聚合器了，所以用例写得比功能测试更严。
+ */
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  serpSearch, normalizeSerp, resolveResults, buildScopedQuery, createEngineAdapter,
+} from '../src/adapters/searchEngine.js';
+
+const ENV = { CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'test-key' };
+
+/** 造一个假的 SERP 服务：每页返回 pageSize 条，共 total 条。 */
+function fakeSerp(total, pageSize = 10) {
+  const calls = [];
+  const fetchJson = async (url, opts) => {
+    const body = JSON.parse(opts.body);
+    calls.push({ url, page: body.page, num: body.num, q: body.q });
+    const start = (body.page - 1) * pageSize;
+    const organic = [];
+    for (let i = start; i < Math.min(start + pageSize, total); i += 1) {
+      organic.push({ link: `https://example.org/page-${i}`, title: `结果 ${i}`, snippet: '' });
+    }
+    return { organic };
+  };
+  return { fetchJson, calls };
+}
+
+test('要 100 条就翻够页数，不是只拿第一页', async () => {
+  const { fetchJson, calls } = fakeSerp(200, 10);
+  const results = await serpSearch('google', 'x', { limit: 100, fetchJson, env: ENV });
+
+  assert.equal(results.length, 100);
+  assert.equal(calls.length, 10, 'google 单页 10 条，100 条要翻 10 页');
+  assert.equal(results[0].rank, 1);
+  assert.equal(results[99].rank, 100, '名次应连续编到 100');
+});
+
+test('单页容量大的引擎少翻几页（每个引擎的翻页方式不同）', async () => {
+  const { fetchJson, calls } = fakeSerp(200, 50);
+  const results = await serpSearch('bing', 'x', { limit: 100, fetchJson, env: ENV });
+  assert.equal(results.length, 100);
+  assert.equal(calls.length, 2, 'bing 单页 50 条，100 条只要 2 页');
+});
+
+test('上游结果不够时按实际条数返回，不空转', async () => {
+  const { fetchJson, calls } = fakeSerp(23, 10);
+  const results = await serpSearch('google', 'x', { limit: 100, fetchJson, env: ENV });
+  assert.equal(results.length, 23);
+  assert.equal(calls.length, 3, '第 3 页拿到 3 条，第 4 页空了就停');
+});
+
+test('翻到一半失败时保留已拿到的结果', async () => {
+  let n = 0;
+  const fetchJson = async () => {
+    n += 1;
+    if (n > 2) throw new Error('配额用尽');
+    return { organic: Array.from({ length: 10 }, (_, i) => ({ link: `https://e.org/${n}-${i}`, title: 't' })) };
+  };
+  const results = await serpSearch('google', 'x', { limit: 100, fetchJson, env: ENV });
+  assert.equal(results.length, 20, '前两页的结果不该因为第三页失败而全丢');
+});
+
+test('第一页就失败则如实抛错（没有结果可保）', async () => {
+  const fetchJson = async () => { throw new Error('401 无效 key'); };
+  await assert.rejects(
+    () => serpSearch('google', 'x', { limit: 10, fetchJson, env: ENV }),
+    /401/,
+  );
+});
+
+test('一个后端都没配就明说，不假装能搜', async () => {
+  // 只写了 provider 没写 key —— backend=auto 推成 api，然后卡在缺 key
+  await assert.rejects(
+    () => serpSearch('google', 'x', { env: { CINEROUTE_SERP_PROVIDER: 'serper' } }),
+    /key/i,
+  );
+  // 显式选了 cli 却没给命令模板
+  await assert.rejects(
+    () => serpSearch('google', 'x', { env: { CINEROUTE_SERP_BACKEND: 'cli' } }),
+    /命令模板/,
+  );
+});
+
+test('不同服务商的响应结构都能压成统一形状', () => {
+  assert.deepEqual(
+    normalizeSerp('brave', { web: { results: [{ url: 'https://a.org', title: 'A', description: 'd' }] } }),
+    [{ url: 'https://a.org', title: 'A', snippet: 'd' }],
+  );
+  assert.deepEqual(
+    normalizeSerp('serper', { organic: [{ link: 'https://b.org', title: 'B', snippet: 's' }] }),
+    [{ url: 'https://b.org', title: 'B', snippet: 's' }],
+  );
+  // 结构对不上时返回空数组而不是抛错
+  assert.deepEqual(normalizeSerp('serper', { unexpected: 1 }), []);
+  assert.deepEqual(normalizeSerp('brave', null), []);
+});
+
+test('站点范围拼成 site: 条件；范围为空则不加限定', () => {
+  assert.equal(
+    buildScopedQuery('Metropolis', ['archive.org', 'commons.wikimedia.org']),
+    'Metropolis (site:archive.org OR site:commons.wikimedia.org)',
+  );
+  assert.equal(buildScopedQuery('Metropolis', []), 'Metropolis');
+});
+
+/** 跑一次适配器检索，把它真正发出去的查询串抓回来。 */
+async function capturedQuery(spec) {
+  let seenQuery = null;
+  const fetchJson = async (url, opts) => {
+    if (url.includes('serper')) { seenQuery = JSON.parse(opts.body).q; return { organic: [] }; }
+    return {};
+  };
+  const prev = { ...process.env };
+  Object.assign(process.env, ENV);
+  try {
+    await createEngineAdapter(spec).search({ title: 'Metropolis', year: 1927 }, { limit: 10, fetchJson });
+  } finally {
+    for (const k of Object.keys(ENV)) {
+      if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
+    }
+  }
+  return seenQuery;
+}
+
+test('没配站点范围时，查询串里干干净净，一个 site: 都不加', async () => {
+  // 这是默认行为：引擎全网搜。挂一串 site: 限定的后果是引擎只在那几个站里翻，
+  // 而那几个站本来就有专用解析器——等于引擎这条线什么新东西都发现不了。
+  const q = await capturedQuery({ id: 'engine:google', engine: 'google' });
+  assert.equal(q, 'Metropolis', `不该被限定：${q}`);
+  assert.ok(!/site:/.test(q));
+
+  // 空数组同样是"不限定"
+  const q2 = await capturedQuery({ id: 'engine:google', engine: 'google', siteScope: [] });
+  assert.equal(q2, 'Metropolis');
+});
+
+test('明确填了站点范围才带进查询里', async () => {
+  const q = await capturedQuery({
+    id: 'engine:google', engine: 'google', siteScope: ['archive.org'],
+  });
+  assert.match(q, /site:archive\.org/);
+});
+
+test('源的名字要如实反映限不限站点', () => {
+  assert.equal(
+    createEngineAdapter({ id: 'engine:google', engine: 'google' }).label,
+    'Google 搜索',
+    '没限定就别挂"（限定站点范围）"的尾巴让人以为搜的范围很小',
+  );
+  assert.equal(
+    createEngineAdapter({ id: 'engine:baidu', engine: 'baidu', siteScope: ['a.com', 'b.com'] }).label,
+    '百度搜索（限定 2 个站点）',
+  );
+});
+
+/* ── 产品边界 ───────────────────────────────────────────── */
+
+test('认识的域名解析成真实片源（archive.org 详情页）', async () => {
+  const fetchJson = async (url) => {
+    assert.match(url, /archive\.org\/metadata\/night_of_the_living_dead/);
+    return {
+      metadata: { identifier: 'night_of_the_living_dead', title: 'Night of the Living Dead', year: '1968' },
+      server: 'ia801509.us.archive.org', dir: '/27/items/night_of_the_living_dead',
+      files: [
+        { name: 'night.mp4', format: 'h.264', size: '900000000', length: '5760', height: '720', width: '1280', md5: 'abc' },
+      ],
+    };
+  };
+  const { sources, leads } = await resolveResults(
+    [{ url: 'https://archive.org/details/night_of_the_living_dead', title: 'NOTLD', rank: 1 }],
+    { title: 'Night of the Living Dead', year: 1968 },
+    { fetchJson, engineId: 'engine:google' },
+  );
+  assert.equal(sources.length, 1);
+  assert.equal(sources[0].discoveredBy, 'engine:google');
+  assert.equal(sources[0].discoveredRank, 1);
+  assert.equal(leads.length, 0);
+});
+
+test('不认识的域名只列为线索，绝不去抓页面找视频地址', async () => {
+  const fetched = [];
+  const fetchJson = async (url) => { fetched.push(url); return {}; };
+
+  const suspicious = [
+    'https://some-streaming-site.example/watch/12345',
+    'https://another-site.example/movie/metropolis',
+    'https://cdn.example/hls/master.m3u8',
+  ];
+  const { sources, leads } = await resolveResults(
+    suspicious.map((url, i) => ({ url, title: `t${i}`, rank: i + 1 })),
+    { title: 'Metropolis', year: 1927 },
+    { fetchJson, engineId: 'engine:google' },
+  );
+
+  assert.equal(sources.length, 0, '未知域名不得产出任何可播片源');
+  assert.equal(leads.length, 3, '应如实列为线索');
+  assert.equal(fetched.length, 0, '不得对未知域名发起任何请求');
+  for (const l of leads) assert.match(l.reason, /没有对应的解析器/);
+});
+
+test('域名认识但**片名对不上**的，一样挡在外面', async () => {
+  // 这条是实跑三个中文片名时发现的真实缺陷。引擎给的是"这个页面里出现过
+  // 你搜的词"，不是"这个页面就是那部片"：搜「阿凡达」它会返回 archive.org
+  // 上的《降世神通》（Avatar: The Last Airbender），搜「我不是酒神」它会
+  // 自作主张纠正成《我不是药神》。这些条目确实在 archive.org 上、确实能
+  // 解析出能播的 mp4——唯一的问题是那不是用户要的片子。
+  //
+  // 别的适配器（IA / Commons / Jellyfin）都在自己那头卡了相似度，只有引擎
+  // 这条路漏了：相似度算了、挂在片源上了，就是没拿它筛过。结果搜「阿凡达」
+  // 的第一推荐位是一集《降世神通》，480p、mp4、23 分钟，各项指标都正常，
+  // 错得非常理直气壮。
+  const meta = (title, id) => ({
+    metadata: { identifier: id, title },
+    server: 'ia801509.us.archive.org', dir: `/27/items/${id}`,
+    files: [{ name: `${id}.mp4`, format: 'h.264', size: '400000000', length: '1404', height: '480', width: '640', md5: 'a1' }],
+  });
+
+  // 一次进来两条：一条对得上，一条对不上。要的是"只放行对得上的那条"，
+  // 而不是"一条都不放"或者"两条都放"。
+  const fetchJson = async (url) => (url.includes('avatar_the_last_airbender')
+    ? meta('Avatar: The Last Airbender - Book One', 'avatar_the_last_airbender_book1')
+    : meta('阿凡达 2009 官方预告片', 'avatar_2009_trailer_zh'));
+
+  const { sources, leads } = await resolveResults(
+    [
+      { url: 'https://archive.org/details/avatar_the_last_airbender_book1', title: 'ATLA', rank: 1 },
+      { url: 'https://archive.org/details/avatar_2009_trailer_zh', title: '阿凡达预告', rank: 2 },
+    ],
+    { title: '阿凡达', year: null },
+    { fetchJson, engineId: 'engine:google' },
+  );
+
+  assert.equal(sources.length, 1, `只该放行片名对得上的那条，实际 ${sources.map((s) => s.filename)}`);
+  assert.match(sources[0].url, /avatar_2009_trailer_zh/);
+
+  // 挡下来的**不能静悄悄丢掉**——取证要能回答"这条为什么没进来"
+  assert.equal(leads.length, 1);
+  assert.match(leads[0].url, /avatar_the_last_airbender_book1/);
+  // 这一条是**跨语种**：中文查询 vs 英文条目名，相似度 0 说明的是"没法比"，
+  // 不是"不一样"。理由必须如实这么说——写成"片名对不上"是错的，
+  // 而这个工具是拿来取证的，说错理由比没有理由更糟。
+  assert.match(leads[0].reason, /跨语种/);
+  assert.match(leads[0].reason, /English Title/, '还要告诉用户怎么补救');
+});
+
+test('一字之差是两部电影：我不是酒神 ≠ 我不是药神', async () => {
+  const fetchJson = async () => ({
+    metadata: { identifier: 'dying_to_survive_2018', title: '我不是药神' },
+    server: 'ia801509.us.archive.org', dir: '/52/items/dying_to_survive_2018',
+    // 刻意起一个**正常的正片文件名**：不含 clip/trailer，容器也能播。
+    // 也就是说除了片名，没有任何别的规则能拦下它——这条只能靠准入门槛。
+    files: [{ name: 'dying_to_survive_2018.mp4', format: 'h.264', size: '2000000000', length: '7320', height: '1080', width: '1920', md5: 'b2' }],
+  });
+  const { sources, leads } = await resolveResults(
+    [{ url: 'https://archive.org/details/dying_to_survive_2018', title: '我不是药神', rank: 1 }],
+    { title: '我不是酒神', year: null },
+    { fetchJson, engineId: 'engine:google' },
+  );
+  assert.equal(sources.length, 0, '《我不是药神》不该被当成《我不是酒神》的片源');
+  // 这一条是同语种、名字确实不一样——这时"片名对不上"才是对的说法
+  assert.match(leads[0].reason, /片名对不上/);
+  assert.match(leads[0].reason, /相似度 0\.\d\d/, '理由里要带上具体数字，方便判断门槛该不该调');
+});
+
+test('详情页解析失败时降级为线索，而不是编一个地址出来', async () => {
+  const fetchJson = async () => { throw new Error('404'); };
+  const { sources, leads } = await resolveResults(
+    [{ url: 'https://archive.org/details/gone', title: 'gone', rank: 1 }],
+    { title: 'x', year: null },
+    { fetchJson, engineId: 'engine:google' },
+  );
+  assert.equal(sources.length, 0);
+  assert.equal(leads.length, 1);
+  assert.match(leads[0].reason, /解析失败/);
+});
+
+test('未配置时适配器自报不可用，三种后端各自检查各自的配置', async () => {
+  const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
+  // 有没有 Chromium 是机器状态，会让"什么都没配"的判定摇摆，所以显式给定
+  const noChrome = { hasChrome: false };
+  const hasChrome = { hasChrome: true };
+
+  // 什么都没配、也没有 Chromium —— 现在**仍然可用**：退到 http 策略，
+  // 直接请求结果页自己解析。以前这里会整体跳过所有引擎源，
+  // 结果就是"检索结果永远是空的"。
+  assert.equal(adapter.checkConfig({}, noChrome).available, true);
+  assert.equal(adapter.checkConfig({}, noChrome).backend, 'http');
+
+  // api
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'nope' }, noChrome).available, false);
+  assert.equal(
+    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'custom' }, noChrome).available, false,
+    'custom 缺 URL 模板也算未配置',
+  );
+  assert.equal(
+    adapter.checkConfig({ CINEROUTE_SERP_PROVIDER: 'serper', CINEROUTE_SERP_KEY: 'k' }, noChrome).available,
+    true,
+  );
+
+  // cli：缺命令模板不算配好
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, noChrome).available, false);
+  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, noChrome).reason, /命令模板/);
+  assert.equal(
+    adapter.checkConfig(
+      { CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'ddgr --json {query}' }, noChrome,
+    ).available,
+    true,
+  );
+
+  // browser：不用填任何东西，但机器上得真有 Chromium
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, hasChrome).available, true);
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, noChrome).available, false);
+  assert.match(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'browser' }, noChrome).reason, /找不到 Chromium/);
+
+  // 不认识的后端要报出来，而不是默默当成某一种
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'telepathy' }, noChrome).available, false);
+});
+
+test('backend=auto 时按现场情况自己挑一条能走的路', () => {
+  const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
+  const pick = (env, cfg, opts) => createEngineAdapter({
+    id: 'engine:google', engine: 'google', serp: cfg,
+  }).checkConfig(env, opts);
+
+  // 优先级：api > cli > http
+  let v = pick({}, { backend: 'auto', provider: 'serper', key: 'k' }, { hasChrome: true });
+  assert.equal(v.backend, 'api');
+  assert.equal(v.auto, true, '没显式指定就算自动挑的');
+
+  v = pick({}, { backend: 'auto', cmd: 'ddgr --json {query}' }, { hasChrome: true });
+  assert.equal(v.backend, 'cli');
+
+  // 什么都没配 —— 走纯 http，仍然可用。**有没有 Chromium 都一样**：
+  // 检索跑在服务端，默认路径不该取决于本机装没装浏览器。
+  for (const hasChrome of [true, false]) {
+    v = pick({}, { backend: 'auto' }, { hasChrome });
+    assert.equal(v.backend, 'http', `hasChrome=${hasChrome} 时自动挑到了 ${v.backend}`);
+    assert.equal(v.available, true, '不该再出现"所有引擎被整体跳过"');
+  }
+
+  // 显式指定就不再自动挑
+  v = pick({}, { backend: 'browser', provider: 'serper', key: 'k' }, { hasChrome: true });
+  assert.equal(v.backend, 'browser');
+  assert.equal(v.auto, false);
+
+  // 设置页填了就盖过环境变量；设置页留空才回落到环境变量
+  v = pick({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'x {query}' }, { backend: 'auto' }, { hasChrome: true });
+  assert.equal(v.backend, 'cli', '配置里是 auto，环境变量说了算');
+  v = pick({ CINEROUTE_SERP_BACKEND: 'cli', CINEROUTE_SERP_CMD: 'x {query}' }, { backend: 'browser' }, { hasChrome: true });
+  assert.equal(v.backend, 'browser', '配置里显式指定就盖过环境变量');
+
+  // 显式选了一条配不齐的路，才该判不可用
+  assert.equal(adapter.checkConfig({ CINEROUTE_SERP_BACKEND: 'cli' }, { hasChrome: false }).available, false);
+});
+
+test('引擎失败时返回错误而不是抛出，不拖垮其他源', async () => {
+  const adapter = createEngineAdapter({ id: 'engine:google', engine: 'google' });
+  const fetchJson = async () => { throw new Error('配额用尽'); };
+  const prev = { ...process.env };
+  Object.assign(process.env, ENV);
+  try {
+    const r = await adapter.search({ title: 'x', year: null }, { limit: 10, fetchJson });
+    assert.match(r.error, /配额用尽/);
+    assert.deepEqual(r.sources, []);
+  } finally {
+    for (const k of Object.keys(ENV)) {
+      if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
+    }
+  }
+});
