@@ -67,11 +67,21 @@ function hostileFetch() {
     const nextFile = () => HOSTILE_TITLES[fileN++ % HOSTILE_TITLES.length];
     const nextTitle = () => HOSTILE_TITLES[titleN++ % HOSTILE_TITLES.length];
 
+    // 条目标题里**追加**载荷，而不是整个替换掉。
+    //
+    // 整个替换等于把条目变成"另一部片"——搜的是 Night of the Living Dead，
+    // 条目却叫《你好，李焕英》。准入门槛会正当地把它挡在外面，于是页面上
+    // 一条片源都不剩，这条用例就退化成在验"空页面里没有 XSS"，白验。
+    // （引擎那条路以前没做片名过滤，所以这些条目能混进来，用例才一直是绿的；
+    // 门槛补上之后这个依赖就暴露了。）
+    //
+    // 要验的是**载荷经过渲染路径之后有没有被转义坏**，所以条目得先进得来。
+    // 追加的写法两头都占：片名对得上，载荷也照样走完整条渲染路径。
     if (data?.response?.docs) {
-      data.response.docs.forEach((d) => { d.title = nextTitle(); });
+      data.response.docs.forEach((d) => { d.title = `${d.title} ${nextTitle()}`; });
     }
     if (data?.metadata) {
-      data.metadata.title = nextTitle();
+      data.metadata.title = `${data.metadata.title} ${nextTitle()}`;
       data.metadata.description = `简介里也来一发：${XSS[0]}`;
       if (Array.isArray(data.files)) {
         for (const f of data.files) {
