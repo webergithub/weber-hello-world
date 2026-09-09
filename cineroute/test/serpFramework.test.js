@@ -26,6 +26,7 @@ import {
 } from '../src/adapters/serp/charset.js';
 import {
   httpSearchPage, extractResults, buildHeaders, httpSupported, throttle, resetThrottle,
+  rememberCookies, cookiesFor, noteBlocked, noteOk, penaltyFor,
 } from '../src/adapters/serp/httpSearch.js';
 import { searchWithLadder, describeAttempts } from '../src/adapters/serp/ladder.js';
 
@@ -688,4 +689,134 @@ test('阶梯：python 也被挡才轮到浏览器', async () => {
     assert.equal(r.attempts.length, 3, 'http、python、browser 三次都要留下记录');
     assert.deepEqual(r.attempts.map((a) => a.strategy), ['http', 'python', 'browser']);
   });
+});
+
+/* ── 被挡之后做什么 ───────────────────────────────────────── */
+
+test('被挡就换一整套请求头再试一次，而不是拿同一个指纹再撞一遍', async () => {
+  // 以前被挡之后什么都不做，直接返回。可对方刚刚认出这套指纹，
+  // 原样再来一次毫无意义——要么换，要么就别再打。
+  resetThrottle();
+  const seen = [];
+  let hits = 0;
+  await withEngine((req, res) => {
+    hits += 1;
+    seen.push(req.headers['user-agent']);
+    if (hits === 1) {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(CAPTCHA_PAGE);          // 第一发被挡
+    } else {
+      res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+      res.end(googleLikePage(2));     // 换了指纹之后放行
+    }
+  }, async (base) => {
+    const r = await httpSearchPage('google', 'notld', 1, {
+      fetchFn: localFetch(base), skipThrottle: true,
+    });
+    assert.equal(r.blocked, null, '第二发应当拿到结果');
+    assert.equal(r.results.length, 2);
+    assert.equal(r.attempts, 2, '应当只打了两发');
+    assert.equal(seen.length, 2);
+    assert.notEqual(seen[0], seen[1], '重试必须换掉 User-Agent，否则等于原样再撞一次');
+  });
+});
+
+test('429 不重试 —— 它说的是"你太快了"，换个身份再撞只是多送一次证据', async () => {
+  resetThrottle();
+  let hits = 0;
+  await withEngine((req, res) => {
+    hits += 1;
+    res.writeHead(429, { 'content-type': 'text/html' });
+    res.end('<html><body>slow down</body></html>');
+  }, async (base) => {
+    const r = await httpSearchPage('bing', 'x', 1, {
+      fetchFn: localFetch(base), skipThrottle: true,
+    });
+    assert.match(r.blocked, /429/);
+    assert.equal(hits, 1, '429 不该重试');
+    assert.equal(r.attempts, 2, '尝试数按上限报，但实际只打了一发');
+  });
+});
+
+test('会话 cookie 要存下来带回去，第二页才像第一页的延续', async () => {
+  resetThrottle();
+  const sentCookies = [];
+  await withEngine((req, res) => {
+    sentCookies.push(req.headers.cookie || '');
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      // 一次种两个，Node 的 getSetCookie 要能都拿到
+      'set-cookie': ['NID=abc123; Path=/; HttpOnly', 'SID=xyz; Path=/'],
+    });
+    res.end(googleLikePage(2));
+  }, async (base) => {
+    await httpSearchPage('google', 'notld', 1, { fetchFn: localFetch(base), skipThrottle: true });
+    const jar = cookiesFor('google');
+    assert.equal(jar.get('NID'), 'abc123');
+    assert.equal(jar.get('SID'), 'xyz');
+
+    await httpSearchPage('google', 'notld', 2, { fetchFn: localFetch(base), skipThrottle: true });
+    assert.equal(sentCookies.length, 2);
+    assert.match(sentCookies[1], /NID=abc123/, '第二页要把第一页种的 cookie 带回去');
+    assert.match(sentCookies[1], /SID=xyz/);
+    // 配方里的同意页 cookie 不能被服务端种的盖掉，否则等于把刚绕过的
+    // 同意页又请回来
+    assert.match(sentCookies[1], /CONSENT=YES/, '配方里的 CONSENT 必须还在');
+  });
+});
+
+test('cookie 的删除指令要真删掉，不能留个空值回传', () => {
+  resetThrottle();
+  const res = { headers: { getSetCookie: () => ['A=1; Path=/', 'B=2; Path=/'] } };
+  rememberCookies('mojeek', res);
+  assert.equal(cookiesFor('mojeek').get('A'), '1');
+
+  rememberCookies('mojeek', {
+    headers: { getSetCookie: () => ['A=; Expires=Thu, 01 Jan 1970 00:00:00 GMT'] },
+  });
+  assert.equal(cookiesFor('mojeek').has('A'), false, '删除指令下来了就该真的删掉');
+  assert.equal(cookiesFor('mojeek').get('B'), '2', '别的 cookie 不受影响');
+});
+
+test('被挡就放慢，成功就慢慢放回去 —— 涨得快，退得慢，但会退', () => {
+  // 被挡是最强的"你打太快了"信号。以前不管挡没挡都按同一个间隔走，
+  // 等于收到警告还照原速撞上去。
+  resetThrottle();
+  assert.equal(penaltyFor('google'), 1);
+
+  noteBlocked('google');
+  assert.equal(penaltyFor('google'), 2);
+  noteBlocked('google');
+  assert.equal(penaltyFor('google'), 4);
+
+  // 有上限，不会一路翻到天上去
+  for (let i = 0; i < 10; i += 1) noteBlocked('google');
+  assert.ok(penaltyFor('google') <= 8, `惩罚该有上限：${penaltyFor('google')}`);
+
+  // 会退——一次偶发拦截不该让这家引擎在整个进程里一直慢着
+  noteOk('google');
+  assert.equal(penaltyFor('google'), 4);
+  for (let i = 0; i < 10; i += 1) noteOk('google');
+  assert.equal(penaltyFor('google'), 1, '一路成功就该退回原速');
+
+  // 各家各算各的
+  assert.equal(penaltyFor('bing'), 1, '一家被挡不该拖累别家');
+});
+
+test('惩罚要真的体现在等待时长上', async () => {
+  resetThrottle();
+  const waited = [];
+  const wait = async (ms) => { waited.push(ms); };
+
+  await throttle('mojeek', Date.now(), wait);      // 第一次不等
+  await throttle('mojeek', Date.now(), wait);      // 第二次等一个基准间隔
+  const base = waited[0];
+  assert.ok(base > 0);
+
+  noteBlocked('mojeek');
+  noteBlocked('mojeek');                            // ×4
+  await throttle('mojeek', Date.now(), wait);
+  const punished = waited[1];
+  assert.ok(punished > base * 2,
+    `被挡两次之后该明显更慢：基准 ${base}ms，惩罚后 ${punished}ms`);
 });

@@ -176,6 +176,7 @@ const ROLES = {
 
 function buildHtml(report) {
   const { files, summary, generatedAt, nodeVersion } = report;
+  const broken = files.filter((f) => f.exitCode !== 0 && f.failed === 0);
   const key = (f) => f.file.replace(/^test\//, '').replace(/\.test\.js$/, '');
   const slowest = files.flatMap((f) => f.tests.map((t) => ({ ...t, file: key(f) })))
     .filter((t) => t.durationMs != null)
@@ -264,6 +265,10 @@ function buildHtml(report) {
     font-variant-numeric:tabular-nums}
 
   /* 最慢的用例：这套里"慢"集中在模糊测试和真浏览器，值得单独点出来 */
+  .broken{background:color-mix(in srgb,var(--fail) 12%,var(--panel));
+    border:1px solid var(--fail);border-radius:10px;padding:14px 18px;margin:14px 0 0;
+    font-size:13px;line-height:1.7}
+  .broken p{margin:0 0 6px} .broken p:last-child{margin:0}
   .slow{background:var(--panel);border:1px solid var(--line);border-radius:12px;
     padding:18px 26px 20px;margin:0 0 14px}
   .cap{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
@@ -346,8 +351,15 @@ function buildHtml(report) {
   <div class="band">
     <div class="head">
       <div class="score">${summary.passed}<span class="sep">/</span>${summary.total}</div>
-      <span class="verdict${summary.failed ? ' bad' : ''}">${summary.failed ? `${summary.failed} 条失败` : '全部通过'}</span>
-    </div>
+      <span class="verdict${summary.failed || summary.broken ? ' bad' : ''}">${
+        summary.failed ? `${summary.failed} 条失败` : (summary.broken ? `${summary.broken} 个文件没跑完` : '全部通过')}</span>
+    </div>${broken.length ? `
+    <div class="broken">
+      <p class="cap">没跑完的文件</p>
+      ${broken.map((f) => `<p>${esc(f.file)} —— 退出码 ${f.exitCode}，只跑出 ${f.total} 条却没报任何失败。
+        进程多半中途死了：没跑到的用例既不算过也不算败，它们只是<b>不存在</b>了，
+        所以上面那个"通过"数是不完整的。</p>`).join('')}
+    </div>` : ''}
     <div class="track"><i style="width:${pct.toFixed(2)}%"></i></div>
     <div class="facts">
       <span>测试文件 <b>${files.length}</b></span>
@@ -446,11 +458,25 @@ const raw = await pool(entries, async (file) => {
   };
 }, JOBS);
 
+/**
+ * **退出码非 0 但一条 `not ok` 都没有的文件，是最危险的一种。**
+ *
+ * 实际发生过：pipeline.test.js 跑到一半被拖死，33 条只吐出 3 条，
+ * 而报告显示"335 通过、0 失败" —— 30 条用例凭空消失，报表一片绿。
+ * 只统计 ok/not ok 就会漏掉这种：进程根本没跑完，没跑到的用例既不算过
+ * 也不算败，它们只是**不存在**了。
+ *
+ * 所以退出码要单独看一眼。这跟这个项目在别处反复写的是同一条：
+ * 兜住边界只是一半，兜住之后必须说出来。
+ */
+const brokenFiles = raw.filter((f) => f.exitCode !== 0 && f.failed === 0);
+
 const summary = {
   total: raw.reduce((n, f) => n + f.total, 0),
   passed: raw.reduce((n, f) => n + f.passed, 0),
   failed: raw.reduce((n, f) => n + f.failed, 0),
   skipped: raw.reduce((n, f) => n + f.skipped, 0),
+  broken: brokenFiles.length,
   wallMs: Date.now() - wallStart,
 };
 
@@ -465,5 +491,13 @@ await writeFile(OUT, buildHtml(report), 'utf8');
 await writeFile(OUT.replace(/\.html$/, '.json'), JSON.stringify(report, null, 2), 'utf8');
 
 process.stderr.write(`\n用例 ${summary.total} · 通过 ${summary.passed} · 失败 ${summary.failed}`
-  + ` · 跳过 ${summary.skipped} · 耗时 ${(summary.wallMs / 1000).toFixed(1)}s\n报告：${OUT}\n`);
-process.exitCode = summary.failed > 0 ? 1 : 0;
+  + ` · 跳过 ${summary.skipped} · 耗时 ${(summary.wallMs / 1000).toFixed(1)}s\n`);
+for (const f of brokenFiles) {
+  process.stderr.write(`⚠ ${f.file} 退出码 ${f.exitCode}，却没报出任何失败用例——`
+    + `只跑出 ${f.total} 条，进程多半中途就死了。这种情况报表会显示"全绿"，`
+    + `实际是有用例根本没跑。\n`);
+  if (f.stderr) process.stderr.write(`  stderr: ${f.stderr.slice(0, 300)}\n`);
+}
+process.stderr.write(`报告：${OUT}\n`);
+// 退出码非 0 的文件必须让整体也非 0，否则 CI 会把"没跑完"当成"通过"
+process.exitCode = (summary.failed > 0 || brokenFiles.length > 0) ? 1 : 0;

@@ -11,9 +11,19 @@ import assert from 'node:assert/strict';
 import { searchAll, dedupeSources, buildRecommendations } from '../src/core/pipeline.js';
 import { createFixtureFetch, createFixtureProbe, FIXTURE_SERP_CONFIG } from '../src/core/fixtureFetch.js';
 
+/**
+ * 离线三件套。
+ *
+ * **`serp` 这一项不能漏。** 只换 fetchJson 是不够的：默认后端是 `http`，
+ * 而它压根不走 fetchJson——它用全局 fetch 直接打真的 google.com。
+ * 漏了这一项，这个文件开头那句"只是把网络换成了磁盘"就是假的：
+ * 每跑一次用例都在打真实搜索引擎，慢、不稳定，在没有外网的机器上
+ * 还会一路超时到把整个文件拖死。
+ */
 const offline = () => ({
   fetchJson: createFixtureFetch(),
   probeFn: createFixtureProbe(),
+  serp: FIXTURE_SERP_CONFIG,
 });
 
 test('端到端：Top5 按可播性与画质排序，最优解是 1080p MP4', async () => {
@@ -139,7 +149,17 @@ test('dedupeSources 无校验和时按 URL 去重', () => {
 
 test('检索统计如实反映漏斗各级数量', async () => {
   const r = await searchAll('Night of the Living Dead', offline());
-  assert.equal(r.stats.rawCandidates, r.stats.afterDedupe);
+
+  // 漏斗是单调收窄的：去重只会让条数变少，不会凭空多出来。
+  //
+  // 这条原来断言的是 rawCandidates === afterDedupe，也就是"没有任何重复"。
+  // 它能一直绿着，是因为引擎那几个源在静默失败——一条都没返回，自然没有
+  // 可去重的东西。把 offline() 真正接到夹具上之后，引擎和 Internet Archive
+  // 会同时报出同一批 archive.org 文件，去重才真的开始工作。
+  assert.ok(r.stats.rawCandidates >= r.stats.afterDedupe,
+    `去重之后反而变多了：${r.stats.rawCandidates} → ${r.stats.afterDedupe}`);
+  assert.ok(r.stats.rawCandidates > r.stats.afterDedupe,
+    '同一批文件被多个源报出来，这里应当真的发生了合并');
   assert.equal(r.stats.blocked, r.alternatives.length);
   assert.ok(r.stats.playable >= r.top.length);
 });
@@ -351,7 +371,11 @@ test('检索后端不可用时引擎被跳过，其余来源照常出结果', as
   for (const k of Object.keys(process.env)) if (k.startsWith('CINEROUTE_SERP')) delete process.env[k];
   try {
     const config = { ...defaultConfig(), serp: { ...defaultConfig().serp, backend: 'cli', cmd: '' } };
-    const r = await searchAll('Night of the Living Dead', { ...offline(), config });
+    // 这一条验的就是"后端配不齐"，所以要把 offline() 里那份夹具 serp 摘掉——
+    // searchAll 里 opts.serp 会盖过 config.serp，留着它就等于把要测的
+    // 那个配不齐的后端换成了能用的夹具，用例就变成在验别的事了。
+    const { serp: _fixtureSerp, ...fixtures } = offline();
+    const r = await searchAll('Night of the Living Dead', { ...fixtures, config });
     const engines = r.providers.filter((p) => p.id.startsWith('engine:'));
     assert.equal(engines.length, 5, '五个引擎都应出现在数据源列表里');
     for (const e of engines) {

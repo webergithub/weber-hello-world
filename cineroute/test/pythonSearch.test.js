@@ -26,7 +26,7 @@ import {
   runPythonScript, parsePythonResult, pythonSearchPage, probePython, DEFAULT_SCRIPT,
 } from '../src/adapters/serp/pythonSearch.js';
 import { recipeFor } from '../src/adapters/serp/engines.js';
-import { resetThrottle } from '../src/adapters/serp/httpSearch.js';
+import { resetThrottle, httpSearchPage, cookiesFor } from '../src/adapters/serp/httpSearch.js';
 
 const HAS_PY = (() => {
   try { return spawnSync('python3', ['-V']).status === 0; } catch { return false; }
@@ -291,4 +291,52 @@ test('解释器不存在时报错要说清楚是哪一步没成', async () => {
     () => runPythonScript({ python: '/nonexistent/python-does-not-exist', script: DEFAULT_SCRIPT, job: {} }),
     /无法执行|无法启动/,
   );
+});
+
+test('两条传输共用一份会话：http 种下的 cookie，python 要带回去', needPy, async () => {
+  // 阶梯是 http → python → browser。要是换条传输就等于换了个人——
+  // 第一页带着会话 cookie、第二页突然又变成全新的匿名访问——
+  // 那个跳变比一直不带 cookie 还显眼。
+  resetThrottle();
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    seen.push(req.headers.cookie || '');
+    res.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'set-cookie': ['SESSION=from-http; Path=/'],
+    });
+    res.end(GOOGLE_PAGE);
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const port = srv.address().port;
+  const local = (u) => { const x = new URL(u); return `http://127.0.0.1:${port}${x.pathname}${x.search}`; };
+
+  const spawnFn = (cmd, args, o) => {
+    const p = spawn(cmd, args, o);
+    const end = p.stdin.end.bind(p.stdin);
+    p.stdin.end = (d) => {
+      const job = JSON.parse(d);
+      job.url = local(job.url);
+      return end(JSON.stringify(job));
+    };
+    return p;
+  };
+
+  try {
+    // 第一页走 http，服务端种下 SESSION
+    await httpSearchPage('google', 'notld', 1, {
+      fetchFn: (u, i) => fetch(local(u), i), skipThrottle: true,
+    });
+    assert.equal(cookiesFor('google').get('SESSION'), 'from-http');
+
+    // 第二页换成 python —— 必须把刚才那个 SESSION 带上
+    await pythonSearchPage('google', 'notld', 2, {
+      script: DEFAULT_SCRIPT, skipThrottle: true, spawnFn,
+    });
+    assert.equal(seen.length, 2);
+    assert.match(seen[1], /SESSION=from-http/,
+      `换成 python 之后会话断了：${seen[1]}`);
+  } finally {
+    await new Promise((r) => srv.close(r));
+  }
 });

@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 358 个用例，全部离线
+npm test                                              # 365 个用例，全部离线
 ```
 
 ---
@@ -296,6 +296,21 @@ pip install curl_cffi      # 装了这条路才有意义
 这比写死选择器抗改版——引擎换了 class 名照样能出结果，因为结果链接
 本身的形态是不变的。有一条用例专门把结果页的 class 全改掉来验这件事。
 
+**被挡之后要做点什么**（`httpSearch.js`）。以前被挡就直接返回，什么都不做——
+可对方刚刚认出这套指纹，原样再撞一次毫无意义。现在三件事一起：
+**换一整套请求头重试一次**（不是只改 UA，只改 UA 会拼出现实中不存在的组合，更可疑）；
+**把会话 cookie 存下来带回去**（不带的话每一页都长得像一次全新的匿名访问，
+而真人翻页时是带着的）；**被挡就放慢**（被挡是最强的"你太快了"信号，挡一次翻一倍、
+成功一次退一半，但间隔有绝对上限 12 秒——×8 让 Google 变成 24 秒一发、翻十页四分钟，
+那不叫谨慎，叫这条线废了）。
+
+唯一的例外是 **429 不重试**：它字面意思就是"你请求太多了"，换个身份再撞一次
+既不会成功，还多给对方一次证据。这时唯一对的做法是慢下来，而惩罚已经替我们慢了。
+
+cookie 罐和惩罚**两条传输共用**：换成 python 不等于换了个人，对方看到的还是同一个
+出口 IP。第一页带着会话 cookie、第二页突然又变回全新匿名访问，那个跳变比一直不带
+还显眼。
+
 **别让对方一眼看出是脚本**（`httpSearch.js`）。关键不是把 User-Agent 换得多花哨，
 是**请求头要成套**：真实浏览器发的 `Accept`、`Accept-Language`、`Sec-Fetch-*`
 是一整组，只改 UA 而其余不带反而更可疑。另外两件影响很大但容易被忽略的事：
@@ -500,7 +515,7 @@ cineroute/
     serp_search.py          Python 检索执行器（curl_cffi > httpx > requests > urllib）
     demo-steps.mjs          把检索的三步摊开打印
     test-report.mjs         跑全量测试并生成 HTML 报告
-  test/                     358 个用例，全部离线可跑
+  test/                     365 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本

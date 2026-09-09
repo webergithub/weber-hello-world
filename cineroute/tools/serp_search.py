@@ -29,7 +29,8 @@ Node 的 undici 有它自己那一套，跟任何一个真浏览器都对不上�
 
        {"ok": true, "status": 200, "final_url": "…",
         "content_type": "text/html; charset=gbk",
-        "body_b64": "…", "via": "curl_cffi/chrome124"}
+        "body_b64": "…", "set_cookie": ["NID=…; Path=/"],
+        "via": "curl_cffi/chrome124"}
 
    之所以回 base64 而不是文本：编码判定在 Node 那边（见 serp/charset.js），
    百度返回 GBK 时这一步不能先按 UTF-8 解一遍——那就毁了。
@@ -52,6 +53,26 @@ import time
 TIMEOUT_DEFAULT = 15.0
 
 
+def _set_cookies(headers_obj):
+    """把响应里的 set-cookie 行都取出来。
+
+    一个响应可以种多个 cookie，而大多数 header 容器按名字取只给第一个。
+    各库暴露多值的方式不一样，逐个试；取不到就返回空——**宁可少带，
+    不能编**：编一个不存在的会话 cookie 比不带更容易露馅。
+    """
+    try:
+        # requests / urllib：http.client.HTTPMessage 有 get_all
+        if hasattr(headers_obj, "get_all"):
+            return list(headers_obj.get_all("set-cookie") or [])
+        # httpx / curl_cffi：多值 Mapping 有 get_list
+        if hasattr(headers_obj, "get_list"):
+            return list(headers_obj.get_list("set-cookie") or [])
+        raw = headers_obj.get("set-cookie")
+        return [raw] if raw else []
+    except Exception:  # noqa: BLE001 - 拿不到就算了，不能因为这个整个失败
+        return []
+
+
 def _fetch_curl_cffi(url, headers, timeout):
     """最优解：连 TLS 握手一起冒充 Chrome。"""
     from curl_cffi import requests as cffi  # noqa: PLC0415
@@ -63,7 +84,7 @@ def _fetch_curl_cffi(url, headers, timeout):
         impersonate="chrome", allow_redirects=True,
     )
     return r.status_code, str(r.url), r.headers.get("content-type", ""), r.content, \
-        f"curl_cffi/{getattr(r, 'impersonate', 'chrome')}"
+        f"curl_cffi/{getattr(r, 'impersonate', 'chrome')}", _set_cookies(r.headers)
 
 
 def _fetch_httpx(url, headers, timeout):
@@ -71,14 +92,16 @@ def _fetch_httpx(url, headers, timeout):
 
     with httpx.Client(follow_redirects=True, timeout=timeout) as c:
         r = c.get(url, headers=headers)
-        return r.status_code, str(r.url), r.headers.get("content-type", ""), r.content, "httpx"
+        return r.status_code, str(r.url), r.headers.get("content-type", ""), r.content, \
+            "httpx", _set_cookies(r.headers)
 
 
 def _fetch_requests(url, headers, timeout):
     import requests  # noqa: PLC0415
 
     r = requests.get(url, headers=headers, timeout=timeout, allow_redirects=True)
-    return r.status_code, r.url, r.headers.get("content-type", ""), r.content, "requests"
+    return r.status_code, r.url, r.headers.get("content-type", ""), r.content, \
+        "requests", _set_cookies(r.raw.headers if hasattr(r, "raw") and r.raw else r.headers)
 
 
 def _fetch_urllib(url, headers, timeout):
@@ -113,7 +136,8 @@ def _fetch_urllib(url, headers, timeout):
         except zlib.error:
             raw = zlib.decompress(raw, -zlib.MAX_WBITS)
 
-    return resp.status, resp.geturl(), resp.headers.get("content-type", ""), raw, "urllib"
+    return resp.status, resp.geturl(), resp.headers.get("content-type", ""), raw, \
+        "urllib", _set_cookies(resp.headers)
 
 
 # 顺序即优先级。curl_cffi 排第一是因为只有它能改 TLS 指纹。
@@ -146,7 +170,7 @@ def run(job):
     name, fn = available_transport()
     started = time.monotonic()
     try:
-        status, final_url, ctype, body, via = fn(url, headers, timeout)
+        status, final_url, ctype, body, via, cookies = fn(url, headers, timeout)
     except Exception as err:  # noqa: BLE001 - 什么都不能漏出去，上层要拿去显示
         return {
             "ok": False,
@@ -162,6 +186,9 @@ def run(job):
         # base64 而不是文本：编码由 Node 判（百度会返 GBK），
         # 这里先解一次就把它毁了
         "body_b64": base64.b64encode(body).decode("ascii"),
+        # 会话 cookie 交回去，由 Node 那边的罐子统一管——http 和 python
+        # 两条传输共用一份会话，换条路不该等于换个人
+        "set_cookie": cookies,
         "via": via,
         "elapsed_ms": int((time.monotonic() - started) * 1000),
     }

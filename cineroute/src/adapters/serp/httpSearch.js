@@ -87,11 +87,87 @@ const DEFAULT_INTERVAL_MS = 1500;
  */
 const lastHitAt = new Map();
 
+/**
+ * 每个引擎一个 cookie 罐。
+ *
+ * 不带 cookie 的后果不是"少了点什么"，是**每一页都长得像一次全新的匿名访问**。
+ * 真人翻到第二页时带着第一页种下的会话 cookie，脚本不带——这个差别对方
+ * 一眼就能看出来。存下来回传，第二页才像第一页的延续。
+ *
+ * 放模块级和节流同理：同一个进程里所有检索共用一份会话，
+ * 各存各的等于白存。
+ */
+const jars = new Map();
+
+/**
+ * 被挡之后的惩罚倍数。
+ *
+ * 被挡是**最强的"你打太快了"信号**，比任何固定间隔都准。以前不管挡没挡
+ * 都按同一个间隔走，等于收到警告还照原速撞上去。这里挡一次翻一倍，
+ * 成功一次减一半——涨得快、退得慢，但会退：一次偶发拦截不该让这家引擎
+ * 在整个进程生命周期里一直慢着。
+ */
+const penalties = new Map();
+const MAX_PENALTY = 8;
+/**
+ * 惩罚之后的间隔上限。
+ *
+ * 光给倍数封顶不够：Google 的基准是 3 秒，×8 就是 24 秒一发，翻十页
+ * 要四分钟——这不叫"谨慎"，叫这条线废了。被挡该慢下来，但一次检索
+ * 还是得跑得完；真的一直被挡，正确的做法是让阶梯升级到别的策略，
+ * 而不是在这儿无限期地耗着。
+ */
+const MAX_INTERVAL_MS = 12_000;
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** 记下响应里种的 cookie。 */
+export function rememberCookies(engine, res) {
+  const lines = res?.headers?.getSetCookie?.() ?? [];
+  if (!lines.length) return;
+  const jar = jars.get(engine) ?? new Map();
+  for (const line of lines) {
+    const pair = String(line).split(';')[0];
+    const i = pair.indexOf('=');
+    if (i <= 0) continue;
+    const name = pair.slice(0, i).trim();
+    const value = pair.slice(i + 1).trim();
+    if (!name) continue;
+    // 删除指令（1970 年过期，或值被清空）要真的删掉，不能留个空值回传
+    if (!value || /expires=\s*Thu,\s*01\s*Jan\s*1970/i.test(line)) jar.delete(name);
+    else jar.set(name, value);
+  }
+  jars.set(engine, jar);
+}
+
+/** 这家引擎目前攒了哪些 cookie。 */
+export function cookiesFor(engine) {
+  return new Map(jars.get(engine) ?? []);
+}
+
+/** 被挡了：下次对这家慢一倍。 */
+export function noteBlocked(engine) {
+  penalties.set(engine, Math.min((penalties.get(engine) ?? 1) * 2, MAX_PENALTY));
+}
+
+/** 顺利拿到结果：把惩罚退回去一半。 */
+export function noteOk(engine) {
+  const cur = penalties.get(engine) ?? 1;
+  if (cur > 1) penalties.set(engine, Math.max(1, cur / 2));
+}
+
+/** 当前的惩罚倍数（测试与诊断用）。 */
+export function penaltyFor(engine) {
+  return penalties.get(engine) ?? 1;
+}
 
 /** 等到可以再打这家引擎为止。带抖动——固定间隔本身就是指纹。 */
 export async function throttle(engine, now = Date.now(), wait = sleep) {
-  const min = MIN_INTERVAL_MS[engine] ?? DEFAULT_INTERVAL_MS;
+  // 惩罚倍数：被挡过就拉长间隔，但有绝对上限——见 MAX_INTERVAL_MS。
+  const min = Math.min(
+    (MIN_INTERVAL_MS[engine] ?? DEFAULT_INTERVAL_MS) * penaltyFor(engine),
+    MAX_INTERVAL_MS,
+  );
   const last = lastHitAt.get(engine) ?? 0;
   const jitter = Math.floor(min * 0.4 * Math.random());
   const readyAt = last + min + jitter;
@@ -102,13 +178,22 @@ export async function throttle(engine, now = Date.now(), wait = sleep) {
 /** 测试用：把节流状态清干净。 */
 export function resetThrottle() {
   lastHitAt.clear();
+  jars.clear();
+  penalties.clear();
 }
 
-/** 按引擎名挑一个稳定的请求头套装——同一个引擎每次用同一套，别自己乱变。 */
-function profileFor(engine) {
+/**
+ * 按引擎名挑一套请求头。**正常情况下同一个引擎每次用同一套**——
+ * 一个"浏览器"翻着翻着换了内核，比从头到尾用同一套可疑得多。
+ *
+ * 例外是重试：被挡之后拿同一套指纹再撞一次是没有意义的，对方刚认出它。
+ * 所以只有 attempt > 0 时才换，换的是**整套**（UA + sec-ch-ua 一起走），
+ * 不是只改 UA——只改 UA 会拼出一个现实中不存在的组合，更可疑。
+ */
+function profileFor(engine, attempt = 0) {
   let h = 0;
   for (const c of String(engine)) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  return PROFILES[h % PROFILES.length];
+  return PROFILES[(h + attempt) % PROFILES.length];
 }
 
 /** 把 cookie 对象拼成一个请求头。 */
@@ -129,15 +214,19 @@ function cookieHeader(cookies) {
  * @param {string} url
  * @param {string} [query] 这次搜的词，决定 locale
  */
-export function buildHeaders(engine, recipe, url, query = '') {
-  const profile = profileFor(engine);
+export function buildHeaders(engine, recipe, url, query = '', attempt = 0) {
+  const profile = profileFor(engine, attempt);
   const { name, ...ua } = profile;
   const recipeHeaders = typeof recipe.headers === 'function'
     ? recipe.headers(query)
     : (recipe.headers || {});
   const headers = { ...COMMON_HEADERS, ...ua, ...recipeHeaders };
 
-  const cookie = cookieHeader(recipe.cookies);
+  // 先铺攒下来的会话 cookie，**再让配方里的覆盖**。顺序不能反：
+  // 配方里那几个（CONSENT=YES 之类）是专门用来跳过同意页的，
+  // 让服务端后来种的值盖掉它，等于自己把刚绕过的同意页又请回来。
+  const merged = { ...Object.fromEntries(cookiesFor(engine)), ...(recipe.cookies || {}) };
+  const cookie = cookieHeader(merged);
   if (cookie) headers.cookie = cookie;
 
   // 带上 Referer，看起来像是从首页点过来的
@@ -192,19 +281,8 @@ export function extractResults(html, baseUrl, recipe) {
   return { results, related: [...new Set(related)] };
 }
 
-/**
- * 用 http 策略搜一页。
- *
- * @param {string} engine
- * @param {string} query 已拼好 site: 限定的查询串
- * @param {number} page 从 1 开始
- * @param {{fetchFn?: Function, signal?: AbortSignal, timeoutMs?: number,
- *          baseUrl?: string, skipThrottle?: boolean}} [opts]
- * @returns {Promise<{results: object[], related: string[], blocked: string|null,
- *                    status: number, url: string, elapsedMs: number,
- *                    charset: string, charsetNote: string|null}>}
- */
-export async function httpSearchPage(engine, query, page = 1, opts = {}) {
+/** 打一次，解析一次。重试逻辑在外面那层。 */
+async function fetchAndParse(engine, query, page, attempt, opts) {
   const {
     fetchFn = fetch, signal, timeoutMs = 15000, baseUrl = '', skipThrottle = false,
   } = opts;
@@ -225,14 +303,17 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
   let decoded;
   try {
     res = await fetchFn(url, {
-      headers: buildHeaders(engine, recipe, url, query),
+      headers: buildHeaders(engine, recipe, url, query, attempt),
       redirect: 'follow',
       signal: ac.signal,
     });
     // **不能用 res.text()**：它一律按 UTF-8 解，而百度这类站点返回的是 GBK，
-    // 解出来是一片 "����" 且不报任何错。拿原始字节自己判编码，见 charset.js。
+    // 解出来是一片 "????" 且不报任何错。拿原始字节自己判编码，见 charset.js。
     decoded = decodeBody(await res.arrayBuffer(), res.headers?.get?.('content-type') || '');
     body = decoded.text;
+    // 会话 cookie 存起来，下一页带回去——不带的话每一页都长得像一次
+    // 全新的匿名访问，而真人翻页时是带着的
+    rememberCookies(engine, res);
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
@@ -241,7 +322,10 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
   const elapsedMs = Date.now() - started;
   // 编码信息一路带上去：取证时"这页是按什么编码读的"是溯源的一部分，
   // 偏离了声明更要说出来。
-  const charsetInfo = { charset: decoded.charset, charsetNote: decoded.note };
+  const meta = {
+    charset: decoded.charset, charsetNote: decoded.note,
+    status: res.status, url, elapsedMs, attempt,
+  };
 
   // SearXNG 之类直接给 JSON 的，走另一条解析路径
   if (recipe.json) {
@@ -250,23 +334,77 @@ export async function httpSearchPage(engine, query, page = 1, opts = {}) {
     const blocked = recipe.blocked({ status: res.status, title: '', textLength: body.length, text: body })
       || (data ? null : '返回的不是 JSON，实例地址可能不对或未开放 JSON 输出');
     const parsed = data ? recipe.parseJson(data) : { results: [], related: [] };
-    return { ...parsed, blocked, status: res.status, url, elapsedMs, ...charsetInfo };
+    return { ...parsed, blocked, ...meta };
   }
 
-  const title = pageTitle(body);
-  const textLength = visibleTextLength(body);
   const blocked = recipe.blocked({
-    status: res.status, title, textLength, text: stripTags(body).slice(0, 2000),
+    status: res.status,
+    title: pageTitle(body),
+    textLength: visibleTextLength(body),
+    text: stripTags(body).slice(0, 2000),
   });
 
   // 被挡了就别再去解析——那页上抠出来的东西全是噪音，
   // 混进结果里比没有结果更糟
-  if (blocked) {
-    return { results: [], related: [], blocked, status: res.status, url, elapsedMs, ...charsetInfo };
-  }
+  if (blocked) return { results: [], related: [], blocked, ...meta };
 
   const { results, related } = extractResults(body, url, recipe);
-  return { results, related, blocked: null, status: res.status, url, elapsedMs, ...charsetInfo };
+  return { results, related, blocked: null, ...meta };
+}
+
+/**
+ * 被挡之后值不值得换套指纹再试一次。
+ *
+ * **429 不重试。** 它的字面意思就是"你请求太多了"，换个 User-Agent 再撞
+ * 一次既不会成功，还多给对方一次证据。这时唯一对的做法是慢下来，
+ * 而惩罚倍数已经替我们慢了。
+ *
+ * 403 和「200 但是张验证码页」值得试：这两种更像是**认出了你是谁**，
+ * 而不是嫌你太快。换一套完整的请求头套装有机会绕过去。
+ */
+function worthRetrying(r) {
+  if (!r.blocked) return false;
+  if (r.status === 429) return false;
+  return true;
+}
+
+/** 一次检索最多打几发。第二发换指纹，再多就是在给对方送样本了。 */
+const MAX_ATTEMPTS = 2;
+
+/**
+ * 用 http 策略搜一页。
+ *
+ * 被挡时会**换一套完整的请求头套装重试一次**（429 除外，见 worthRetrying）。
+ * 重试前惩罚倍数已经翻倍，所以第二发一定比第一发慢——收到警告还照原速
+ * 撞上去是这类抓取最常见的死法。
+ *
+ * @param {string} engine
+ * @param {string} query 已拼好 site: 限定的查询串
+ * @param {number} page 从 1 开始
+ * @param {{fetchFn?: Function, signal?: AbortSignal, timeoutMs?: number,
+ *          baseUrl?: string, skipThrottle?: boolean, maxAttempts?: number}} [opts]
+ * @returns {Promise<{results: object[], related: string[], blocked: string|null,
+ *                    status: number, url: string, elapsedMs: number, attempts: number,
+ *                    charset: string, charsetNote: string|null}>}
+ */
+export async function httpSearchPage(engine, query, page = 1, opts = {}) {
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? MAX_ATTEMPTS);
+  let last = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    last = await fetchAndParse(engine, query, page, attempt, opts);
+
+    if (!last.blocked) {
+      noteOk(engine);
+      return { ...last, attempts: attempt + 1 };
+    }
+
+    // 被挡了先记账：下一发（以及后面所有对这家的请求）都会慢一倍
+    noteBlocked(engine);
+    if (attempt + 1 >= maxAttempts || !worthRetrying(last)) break;
+  }
+
+  return { ...last, attempts: maxAttempts };
 }
 
 /** 这家引擎能不能走 http 策略。 */

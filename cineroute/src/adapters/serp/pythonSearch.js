@@ -31,7 +31,9 @@
 
 import { spawn } from 'node:child_process';
 import { recipeFor } from './engines.js';
-import { buildHeaders, throttle, extractResults } from './httpSearch.js';
+import {
+  buildHeaders, throttle, extractResults, rememberCookies, noteBlocked, noteOk,
+} from './httpSearch.js';
 import { decodeBody } from './charset.js';
 import { pageTitle, visibleTextLength, stripTags } from './html.js';
 
@@ -151,6 +153,11 @@ export function parsePythonResult(data, ctx) {
   if (typeof b64 !== 'string') {
     throw new Error(`Python 脚本既没给 results 也没给 body_b64（${via}）`);
   }
+  // 脚本带回来的会话 cookie 喂进**同一个罐子**：http 和 python 两条传输
+  // 共用一份会话，换条路不该等于换了个人——阶梯 http→python 时尤其明显。
+  if (Array.isArray(data.set_cookie) && data.set_cookie.length) {
+    rememberCookies(engine, { headers: { getSetCookie: () => data.set_cookie } });
+  }
   const bytes = Buffer.from(b64, 'base64');
   const decoded = decodeBody(bytes, data.content_type || '');
   const body = decoded.text;
@@ -230,7 +237,11 @@ export async function pythonSearchPage(engine, query, page = 1, opts = {}) {
     spawnFn: opts.spawnFn,
   });
 
-  return parsePythonResult(data, { engine, recipe, url });
+  const out = parsePythonResult(data, { engine, recipe, url });
+  // 拦截惩罚也跟 http 共用：对方看到的是同一个出口 IP，
+  // 换个传输不等于换了个身份，被挡了照样得慢下来。
+  if (out.blocked) noteBlocked(engine); else noteOk(engine);
+  return out;
 }
 
 /**
