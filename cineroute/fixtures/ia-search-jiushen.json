@@ -1,0 +1,12 @@
+{
+  "_comment": "archive.org 搜「我不是酒神」：正片没有，撞出来的是《我不是药神》的片段合集。",
+  "responseHeader": { "status": 0, "QTime": 14, "params": { "q": "title:(\"我不是酒神\") AND mediatype:(movies)", "rows": "24", "wt": "json" } },
+  "response": {
+    "numFound": 1, "start": 0,
+    "docs": [
+      { "identifier": "dying_to_survive_2018_clip", "title": "我不是药神 片段合集", "year": "2018",
+        "downloads": 1522, "collection": ["opensource_movies"], "avg_rating": "3.80",
+        "description": "片段合集，共 8 分 07 秒。" }
+    ]
+  }
+}

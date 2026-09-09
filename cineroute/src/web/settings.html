@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>设置 · CineRoute 影路</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚙️</text></svg>">
+</head>
+<body class="settings-page">
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">⚙️</span>
+      <div>
+        <h1>设置</h1>
+        <p class="tagline">检索后端 · 优先来源 · 检索来源 · 各步预算</p>
+      </div>
+    </div>
+    <a class="ghost-btn" href="/">← 回到检索</a>
+  </header>
+
+  <nav id="settingsNav" class="settings-nav" aria-label="设置分区">
+    <a href="#sec-backend">检索后端</a>
+    <a href="#sec-priority">优先来源</a>
+    <a href="#sec-sources">检索来源</a>
+    <a href="#sec-scope">站点范围</a>
+    <a href="#sec-download">下载去向</a>
+    <a href="#sec-budget">检索预算</a>
+  </nav>
+
+  <p id="loadError" class="status error hidden"></p>
+
+  <!-- ① 检索后端 —— 放最前面，因为它决定引擎能不能出结果 -->
+  <section id="sec-backend" class="panel">
+    <h2>🔌 检索后端</h2>
+    <p class="field-note">
+      Google / Bing / 百度 / DuckDuckGo 都没有可直接用的免费官方 API，所以引擎检索自己实现了几条路。
+      默认的<strong>「自动」什么都不用配就能搜</strong>——用代码直接请求结果页、自己解析响应，
+      <strong>不需要这台机器上装浏览器</strong>。检索是在服务端跑的，服务器上通常既没有图形环境
+      也没有 Chrome，所以默认路径刻意不依赖它。
+    </p>
+
+    <div id="backendState" class="backend-state"></div>
+
+    <div class="global-row">
+      <label class="field"><span>后端</span>
+        <select id="serpBackend">
+          <option value="auto">自动（推荐）</option>
+          <option value="http">http — 直接请求结果页并解析</option>
+          <option value="python">python — 交给 Python 脚本发请求（可换 TLS 指纹）</option>
+          <option value="api">api — SERP 服务</option>
+          <option value="cli">cli — 本机命令行工具</option>
+          <option value="ladder">阶梯 — 直取 → Python → 浏览器，被挡才逐级升</option>
+          <option value="browser">browser — 无头浏览器（本机要有浏览器）</option>
+        </select>
+      </label>
+      <span class="field-note">
+        选「自动」时按<strong>已经配好了什么</strong>挑：有 SERP 服务走 api，有命令行工具走 cli，
+        都没有就走 http。<strong>自动不会挑到浏览器那两档</strong>——它们要这台机器上真装了浏览器，
+        想用请明确选。
+      </span>
+    </div>
+
+    <div id="httpFields" class="backend-fields">
+      <h3>http · 直接请求结果页</h3>
+      <p class="field-note">
+        就是「发一个 GET，再从返回的 HTML 里把结果抠出来」。比开浏览器快一到两个数量级，
+        不用装东西也不花钱。抽取<strong>不依赖页面的 class 名</strong>——把所有链接捞出来
+        按规则筛（还原跳转包装、排掉引擎自家域名），所以引擎改版面了照样能出结果。
+      </p>
+      <p class="field-note">
+        代价是更容易被认出来是脚本。框架里做了这几件事来减少被挡：请求头成套发送
+        （只改 User-Agent 反而更可疑）、带上跳过同意页的 cookie、按引擎分别限速并带抖动。
+        真被挡了会<strong>如实报「被拦截」而不是「没搜到」</strong>——这两件事的处理方式完全不同。
+      </p>
+      <p class="field-note">
+        各家的难易程度差别很大：DuckDuckGo 的 html 端点最好抓，Bing、百度、Mojeek 次之，
+        Google 时好时坏，Yandex 几乎必弹验证码（所以它会直接跳过 http 这一级）。
+      </p>
+    </div>
+
+    <div id="pythonFields" class="backend-fields">
+      <h3>python · 交给 Python 脚本发请求</h3>
+      <p class="field-note">
+        <strong>只有"发请求"这一步交给 Python，解析仍在服务端这边。</strong>
+        引擎配方、跳转包装还原、编码判定、拦截识别都只有一份实现——
+        两份必然漂移，而且漂移那天不会有人发现。
+      </p>
+      <p class="field-note">
+        这条路存在的理由只有一个：<strong>TLS 指纹</strong>。Google、Cloudflare 这类
+        不只看 User-Agent —— TLS 握手时提供的密码套件顺序、扩展列表合起来是一个指纹
+        （JA3/JA4），Node 有它自己那一套，跟任何真浏览器都对不上，请求头调得再像，
+        握手那一刻也已经被认出来了。Python 的
+        <code>curl_cffi</code> 能直接冒充 Chrome 的握手，这是纯 Node 做不到的。
+      </p>
+      <p class="field-note">
+        装它这条路才有意义：<code>pip install curl_cffi</code>。
+        没装也能跑，会按 httpx → requests → urllib 退，
+        <strong>但那时的效果和 http 后端差不多</strong>——下面的自检会如实告诉你用的是哪个。
+      </p>
+      <div class="global-row">
+        <label class="field"><span>解释器</span>
+          <input id="serpPython" type="text" spellcheck="false" placeholder="留空用 python3"></label>
+        <label class="field wide"><span>脚本路径</span>
+          <input id="serpPythonScript" type="text" spellcheck="false"
+                 placeholder="留空用 tools/serp_search.py"></label>
+        <button id="pyProbeBtn" class="toggle" type="button">自检</button>
+      </div>
+      <p id="pyProbeOut" class="field-note"></p>
+      <p class="field-note">
+        换成自己的脚本也行，契约是 <strong>stdin 收一个 JSON 作业、stdout 回一个 JSON 结果</strong>。
+        回 <code>{status, body_b64, content_type}</code> 就由这边解析；
+        想自己解析（接 ddgs 之类）就回 <code>{results, related}</code>，原样收下。
+      </p>
+    </div>
+
+    <div id="apiFields" class="backend-fields">
+      <h3>api · SERP 服务</h3>
+      <p class="field-note">最稳，但按次计费。serper / brave 直接填 key；接别家服务选 custom 再填 URL 模板。</p>
+      <div class="global-row">
+        <label class="field"><span>服务商</span>
+          <select id="serpProvider">
+            <option value="">未选择</option>
+            <option value="serper">serper</option>
+            <option value="brave">brave</option>
+            <option value="custom">custom（自定义 URL）</option>
+          </select>
+        </label>
+        <label class="field wide"><span>API key</span>
+          <input id="serpKey" type="password" autocomplete="off" spellcheck="false"
+                 placeholder="留空表示不改动"></label>
+        <span id="serpKeyState" class="field-note"></span>
+      </div>
+      <label class="field block"><span>URL 模板（custom 用）</span>
+        <input id="serpUrl" type="text" spellcheck="false"
+               placeholder="https://your-serp.example/search?q={query}&engine={engine}&page={page}"></label>
+      <p class="field-note">
+        占位符：<code>{query}</code> <code>{engine}</code> <code>{limit}</code>
+        <code>{page}</code> <code>{key}</code>。
+      </p>
+    </div>
+
+    <div id="cliFields" class="backend-fields">
+      <h3>cli · 本机命令行工具</h3>
+      <p class="field-note">
+        免费，但机器上要先装（ddgr、googler 之类）。命令按空白拆成参数逐个执行，
+        <strong>不经过 shell</strong>，所以检索词里有什么字符都只会被当成一个参数。
+      </p>
+      <label class="field block"><span>命令模板</span>
+        <input id="serpCmd" type="text" spellcheck="false"
+               placeholder="ddgr --json -n {limit} {query}"></label>
+      <div class="global-row">
+        <label class="field"><span>输出格式</span>
+          <select id="serpCmdFormat">
+            <option value="json">json — 整体是数组</option>
+            <option value="jsonl">jsonl — 每行一个 JSON</option>
+            <option value="lines">lines — 每行一个 URL</option>
+          </select>
+        </label>
+      </div>
+    </div>
+
+    <div id="browserFields" class="backend-fields">
+      <h3>browser · 无头浏览器</h3>
+      <p class="field-note">
+        <strong>这一档要求运行检索的那台机器上真装了浏览器</strong>。放在自己电脑上跑没问题，
+        部署到服务器上就未必——所以它不是默认，是选了才用。选「阶梯」时浏览器是
+        <strong>按需开</strong>的：http 能出结果就根本不会启动它。
+      </p>
+      <p class="field-note">
+        好处是能过大部分反自动化检测；代价是慢一到两个数量级、吃内存，而且引擎改版面就得跟着改。
+        也可以把 URL 模板指向自建的 SearXNG，既不付费也不直接爬引擎。
+      </p>
+      <p class="field-note">
+        想要免费又稳的话，最好的答案是<strong>自建 SearXNG</strong>：它替你去问
+        Google/Bing/DDG 并聚合成 JSON，不用抓 HTML、不会被反自动化拦。
+        在「检索来源」里加一个名为 <code>searxng</code> 的引擎，把实例地址填到上面的
+        URL 模板里即可。
+      </p>
+      <div class="global-row">
+        <label class="field wide"><span>浏览器路径（可选）</span>
+          <input id="serpChrome" type="text" spellcheck="false"
+                 placeholder="留空则在常见位置找 Chrome / Edge / Brave / Chromium"></label>
+        <label class="field"><span>打开超时 (ms)</span>
+          <input id="serpTimeout" type="number" min="3000" max="120000" step="1000"></label>
+        <label class="field"><span>渲染等待 (ms)</span>
+          <input id="serpSettle" type="number" min="0" max="15000" step="100"></label>
+      </div>
+      <p class="field-note">结果常是脚本渲染的，页面 load 之后还要再等一会儿才取得到。</p>
+    </div>
+  </section>
+
+  <!-- ② 优先来源 -->
+  <section id="sec-priority" class="panel priority-panel">
+    <div class="sources-head">
+      <h2>📌 优先来源</h2>
+      <span id="prioritySummary" class="sources-summary"></span>
+      <label class="pick"><input id="priorityEnabled" type="checkbox" checked> 启用</label>
+    </div>
+
+    <p class="field-note priority-note">
+      先查这些站点上<strong>有没有这部片子</strong>，命中就记一条取证记录
+      （地址 + 页面标题 + 发现时间，可选截图）。
+      <strong>只回答「在不在」，不解析播放地址</strong>——结果进线索列表，
+      不进播放/下载通道，也不会被加进媒体白名单。
+    </p>
+
+    <p class="field-note">一行一个域名。整条 URL 粘进来也行，会自动剥成域名。</p>
+    <textarea id="priorityDomains" rows="4" spellcheck="false"
+              placeholder="yifan.tv&#10;olevod.com"></textarea>
+
+    <div class="global-row">
+      <label class="field"><span>每站取前</span>
+        <input id="priorityLimit" type="number" min="1" max="100"></label>
+      <label class="pick"><input id="priorityShots" type="checkbox"> 给命中页面截图存证</label>
+      <label class="field"><span>最多截几张</span>
+        <input id="priorityMaxShots" type="number" min="1" max="20"></label>
+      <span class="field-note">截图要开无头浏览器，慢一些。</span>
+    </div>
+  </section>
+
+  <!-- ③ 检索来源 -->
+  <section id="sec-sources" class="panel">
+    <h2>🔎 检索来源</h2>
+    <div class="global-row">
+      <label class="field"><span>全局默认取数</span>
+        <input id="defaultLimit" type="number" min="1" max="1000" step="10"></label>
+      <span class="field-note">没有单独设数量的来源用这个值。</span>
+    </div>
+
+    <h3>搜索引擎</h3>
+    <p class="field-note">勾选后按下面的数量取该引擎的前 N 条结果，每个引擎可单独设。</p>
+    <div id="engineList" class="source-rows"></div>
+
+    <div class="add-row">
+      <select id="addEngineSelect" aria-label="要添加的搜索引擎"></select>
+      <input id="addEngineName" type="text" placeholder="或填其他引擎名，如 yandex" spellcheck="false">
+      <input id="addEngineLimit" type="number" min="1" max="1000" placeholder="数量" value="100">
+      <button id="addEngineBtn" class="toggle" type="button">+ 添加引擎</button>
+    </div>
+
+    <h3>专用数据源</h3>
+    <p class="field-note">有专门的解析器，直接产出结构化片源，不依赖搜索引擎。</p>
+    <div id="builtinList" class="source-rows"></div>
+  </section>
+
+  <!-- ④ 站点范围 -->
+  <section id="sec-scope" class="panel">
+    <h2>🌐 站点范围</h2>
+    <p class="field-note">
+      <strong>默认留空，也就是不加限定、全网搜。</strong>
+      填了域名才会把它们拼成 <code>site:a OR site:b</code> 挂在检索词后面，
+      让引擎只在这几个站里翻。一行一个域名，清空即恢复全网搜。
+    </p>
+    <p class="field-note">
+      填之前想清楚：范围越窄，引擎能发现的新东西越少。要是填的正好是那几个
+      已经有专用解析器的归档站，引擎这条线基本就白跑了——那些站专用数据源
+      已经直接查过一遍。
+    </p>
+    <p class="field-note">
+      另外，<strong>这里跟能不能播放/下载没有关系</strong>。能被服务端代理的域名
+      由另一份白名单单独把关，在这里写什么都不会放行新域名；引擎搜到的其他
+      域名只会作为线索列出来。
+    </p>
+    <textarea id="siteScope" rows="8" spellcheck="false"></textarea>
+  </section>
+
+  <!-- ⑤ 下载去向 -->
+  <section id="sec-download" class="panel">
+    <h2>⬇ 离线下载存到哪儿</h2>
+    <p class="field-note">
+      默认存到<strong>你自己的机器</strong>。把服务部署到远程机器之后，
+      服务端的下载目录对你毫无用处——文件下到了别人的机器上。
+    </p>
+
+    <div class="global-row">
+      <label class="field"><span>存放位置</span>
+        <select id="downloadTarget">
+          <option value="local">本机（推荐）</option>
+          <option value="server">服务器目录</option>
+        </select>
+      </label>
+      <span id="downloadTargetNote" class="field-note"></span>
+    </div>
+
+    <p class="field-note">
+      选「本机」时，支持 File System Access 的浏览器（Chrome / Edge，且是
+      https 或 localhost）会让你选保存位置，然后<strong>分块并发直接写进去</strong>，
+      写完再读一遍算校验和。Firefox / Safari 没有这个接口，会退化成普通的
+      浏览器下载——字节不经过本页，所以<strong>校验不了</strong>，界面上会如实标注。
+    </p>
+  </section>
+
+  <!-- ⑥ 各步预算 -->
+  <section id="sec-budget" class="panel">
+    <h2>⏱ 检索预算</h2>
+    <p class="field-note">这几个数字直接决定一次检索发多少请求、花多少时间和钱。</p>
+
+    <h3>检索词扩展（第一步）</h3>
+    <p class="field-note">
+      每多一个词，请求数就多「引擎数 × 页数」一份。
+      默认 4 词 × 引擎数，再加推荐词补搜一轮。
+    </p>
+    <div class="global-row">
+      <label class="field"><span>近似词上限</span>
+        <input id="expMaxVariants" type="number" min="1" max="10"></label>
+      <label class="field"><span>第一轮用几个词</span>
+        <input id="expMaxTerms" type="number" min="1" max="10"></label>
+      <label class="pick"><input id="expUseSuggested" type="checkbox"> 用引擎推荐词补搜第二轮</label>
+      <label class="field"><span>推荐词用几个</span>
+        <input id="expMaxSuggested" type="number" min="0" max="10"></label>
+    </div>
+
+    <h3>嗅探甄别（第三步）</h3>
+    <div class="global-row">
+      <label class="field"><span>最多嗅探几条</span>
+        <input id="probeLimit" type="number" min="1" max="200"></label>
+      <span class="field-note">超出的按上游元数据判定，结果里会如实标注「未探测」。</span>
+    </div>
+
+    <h3>模拟打开验证（第五步）</h3>
+    <p class="field-note">
+      这一步真开浏览器解码、真发并发请求，比前四步贵得多。
+    </p>
+    <div class="global-row">
+      <label class="pick"><input id="verifyEnabled" type="checkbox"> 启用</label>
+      <label class="field"><span>验前几名</span>
+        <input id="verifyTopN" type="number" min="1" max="20"></label>
+      <label class="field"><span>下载线程</span>
+        <input id="verifyThreads" type="number" min="1" max="16"></label>
+      <label class="field"><span>最多轮数</span>
+        <input id="verifyRounds" type="number" min="1" max="10"></label>
+    </div>
+    <div class="global-row">
+      <label class="field"><span>截图采样宽度</span>
+        <input id="verifyShotWidth" type="number" min="160" max="1280" step="20"></label>
+      <label class="field"><span>每线程取样字节</span>
+        <input id="verifyProbeBytes" type="number" min="4096" max="8388608" step="4096"></label>
+      <label class="field"><span>同时开几个页面</span>
+        <input id="verifyConcurrency" type="number" min="1" max="6"></label>
+    </div>
+  </section>
+
+  <div class="save-bar">
+    <button id="saveBtn" type="button">保存并生效</button>
+    <button id="resetBtn" class="toggle" type="button">恢复出厂设置</button>
+    <span id="saveState" class="field-note"></span>
+    <span class="spacer"></span>
+    <a class="ghost-btn" href="/">← 回到检索</a>
+  </div>
+
+  <footer class="foot">
+    <p id="configPath" class="field-note"></p>
+    <p>改动保存后立即生效，下一次检索就按新配置跑，不用重启服务。</p>
+  </footer>
+
+  <script type="module" src="/settings.js"></script>
+</body>
+</html>

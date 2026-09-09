@@ -1,0 +1,10 @@
+{
+  "_comment": "「我不是酒神」的 Google 结果。这条是**近似片名**的实测样本：搜索引擎会自动把它纠正成热门的《我不是药神》，返回的绝大多数其实是另一部片。准入门槛必须把它们挡在外面——一字之差是两部电影。",
+  "organic": [
+    { "link": "https://movie.douban.com/subject/26752088/", "title": "我不是药神 Dying to Survive (2018) - 豆瓣电影", "snippet": "您是不是要找：我不是药神。导演: 文牧野。" },
+    { "link": "https://zh.wikipedia.org/wiki/我不是药神", "title": "我不是药神 - 维基百科", "snippet": "2018 年中国大陆剧情电影。" },
+    { "link": "https://archive.org/details/dying_to_survive_2018_clip", "title": "我不是药神 片段合集", "snippet": "Clips compilation, 8 minutes." },
+    { "link": "https://www.zhihu.com/question/285437119", "title": "如何评价电影《我不是药神》？ - 知乎", "snippet": "相关讨论。" },
+    { "link": "https://short-video-site.example/watch/wobushijiushen-2021", "title": "我不是酒神 2021 网络电影 完整版", "snippet": "网络大电影，片长 78 分钟。" }
+  ]
+}

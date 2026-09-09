@@ -1,0 +1,10 @@
+{
+  "_comment": "用英文别名 Avatar 搜时 Google 返回的东西。跟中文那侧刻意不同——这正是加别名的意义：中文名和英文名搜到的根本不是同一批页面。archive.org 上关于 Avatar 的仍然只有同名动画，因为《阿凡达》(2009) 是有版权的商业片，归档站上不会有正片。",
+  "organic": [
+    { "link": "https://www.imdb.com/title/tt0499549/", "title": "Avatar (2009) - IMDb", "snippet": "Directed by James Cameron. 162 min." },
+    { "link": "https://archive.org/details/avatar_the_last_airbender_book1", "title": "Avatar: The Last Airbender - Book One (fan upload)", "snippet": "Animated series episodes, fan uploaded." },
+    { "link": "https://archive.org/details/avatar_2009_trailer_zh", "title": "阿凡达 2009 官方预告片 中文字幕", "snippet": "Official trailer." },
+    { "link": "https://www.disneyplus.com/movies/avatar/1c4G1ZzQOZ9E", "title": "Avatar | Disney+", "snippet": "Stream Avatar now on Disney+." },
+    { "link": "https://en.wikipedia.org/wiki/Avatar_(2009_film)", "title": "Avatar (2009 film) - Wikipedia", "snippet": "2009 American epic science fiction film." }
+  ]
+}

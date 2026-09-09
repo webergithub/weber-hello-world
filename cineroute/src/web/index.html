@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CineRoute 影路</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎬</text></svg>">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">🎬</span>
+      <div>
+        <h1>CineRoute <span class="cn">影路</span></h1>
+        <p class="tagline">一次输入 · 多源并发 · 深度解析真实片源 · Top5 点开即播</p>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <div id="modeBadge" class="badge hidden"></div>
+      <a class="ghost-btn" href="/settings.html">⚙️ 设置</a>
+    </div>
+  </header>
+
+  <form id="searchForm" class="search">
+    <input id="q" type="search" placeholder="输入电影或电视剧名称，可带年份，如：Night of the Living Dead 1968"
+           autocomplete="off" spellcheck="false" required>
+    <button type="submit" id="searchBtn">检索片源</button>
+  </form>
+
+  <p class="scope-note">
+    检索范围限于 <strong>公有领域</strong>、<strong>自由许可（CC / PD）</strong> 与 <strong>你自己的媒体库</strong>；
+    受版权保护的作品只给出正版观看渠道，不解析播放地址。
+  </p>
+
+  <!-- 检索前的一眼状态：后端通不通、启用了哪些源。改配置去设置页。 -->
+  <section id="readyBar" class="ready-bar"></section>
+
+  <!-- 检索进度：点检索后出现，实时显示当前在做什么 -->
+  <section id="progress" class="progress-panel hidden">
+    <div class="progress-head">
+      <span id="progressPhase" class="progress-phase"></span>
+      <span class="spacer"></span>
+      <span id="progressPct" class="progress-pct"></span>
+      <span id="progressElapsed" class="progress-elapsed"></span>
+    </div>
+    <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+    <p id="progressDetail" class="progress-detail"></p>
+    <ol id="progressLog" class="progress-log"></ol>
+  </section>
+
+  <section id="status" class="status hidden"></section>
+
+  <main id="results" class="results hidden">
+    <section id="titleCard" class="title-card"></section>
+
+    <!-- 四步走：每一步的中间结果都摊开，取证时要能倒查 -->
+    <nav id="stageTabs" class="tabs" role="tablist" aria-label="检索过程">
+      <button class="tab" role="tab" type="button" data-stage="discovery" aria-selected="false">
+        <span class="tab-num">1</span>
+        <span class="tab-name">引擎原始结果</span>
+        <span class="tab-count" data-count="discovery"></span>
+      </button>
+      <button class="tab" role="tab" type="button" data-stage="normalize" aria-selected="false">
+        <span class="tab-num">2</span>
+        <span class="tab-name">归一去重</span>
+        <span class="tab-count" data-count="normalize"></span>
+      </button>
+      <button class="tab" role="tab" type="button" data-stage="verify" aria-selected="false">
+        <span class="tab-num">3</span>
+        <span class="tab-name">嗅探甄别</span>
+        <span class="tab-count" data-count="verify"></span>
+      </button>
+      <button class="tab" role="tab" type="button" data-stage="final" aria-selected="true">
+        <span class="tab-num">4</span>
+        <span class="tab-name">最终结果</span>
+        <span class="tab-count" data-count="final"></span>
+      </button>
+      <button class="tab" role="tab" type="button" data-stage="deep" aria-selected="false">
+        <span class="tab-num">5</span>
+        <span class="tab-name">模拟打开验证</span>
+        <span class="tab-count" data-count="deep"></span>
+      </button>
+    </nav>
+
+    <section id="panel-discovery" class="panel stage-panel hidden" role="tabpanel">
+      <div id="priorityResult" class="priority-result hidden">
+        <h3>📌 优先来源 · 站点存在性取证</h3>
+        <p id="priorityResultNote" class="slot-note"></p>
+        <div id="priorityHits"></div>
+      </div>
+
+      <h2>① 各引擎原始检索结果</h2>
+      <p class="slot-note">
+        原词 + 近似词 + 引擎返回的推荐搜索词，逐个搜、分引擎列出。
+        <strong>这一步不做任何去重和筛选</strong>，看到的就是引擎原样返回的。
+      </p>
+      <div id="termList" class="term-list"></div>
+      <div id="engineResults"></div>
+    </section>
+
+    <section id="panel-normalize" class="panel stage-panel hidden" role="tabpanel">
+      <h2>② 跨引擎归一去重</h2>
+      <p id="normalizeSummary" class="slot-note"></p>
+      <div id="dedupeList" class="dedupe-list"></div>
+    </section>
+
+    <section id="panel-verify" class="panel stage-panel hidden" role="tabpanel">
+      <h2>③ 嗅探甄别</h2>
+      <p id="verifySummary" class="slot-note"></p>
+      <div class="verify-filter">
+        <label class="pick"><input type="radio" name="verifyFilter" value="all" checked> 全部</label>
+        <label class="pick"><input type="radio" name="verifyFilter" value="usable"> 只看可用</label>
+        <label class="pick"><input type="radio" name="verifyFilter" value="rejected"> 只看被筛掉的</label>
+      </div>
+      <div id="verifyList" class="verify-list"></div>
+
+      <div id="leadsPanel" class="sub-panel hidden">
+        <h3>🧭 引擎发现但未解析的页面</h3>
+        <p class="slot-note">
+          这些域名没有对应的解析器，所以只列出地址，不去猜页面里有没有视频、更不抓取。
+        </p>
+        <div id="leadsList" class="leads"></div>
+      </div>
+    </section>
+
+    <section id="panel-final" class="panel stage-panel">
+      <h2 id="topHeading">🏆 Top5 推荐</h2>
+      <p id="topSubhead" class="slot-note"></p>
+      <div id="topList" class="source-list"></div>
+      <div id="batchBar" class="batch-bar hidden">
+        <span id="batchCount">已选 0 个</span>
+        <button id="batchDownload" type="button">批量离线下载</button>
+      </div>
+
+      <div id="altPanel" class="sub-panel hidden">
+        <h3>📦 备选片源（浏览器放不了，可下载后本地播放）</h3>
+        <div id="altList" class="source-list compact"></div>
+      </div>
+
+      <div id="offersPanel" class="sub-panel hidden">
+        <h3>🎟️ 正版观看渠道</h3>
+        <div id="offersList" class="offers"></div>
+        <p class="attribution">观看渠道数据来源 <strong>JustWatch</strong>（经 TMDB 提供）</p>
+      </div>
+    </section>
+
+    <section id="panel-deep" class="panel stage-panel hidden" role="tabpanel">
+      <h2>⑤ 模拟打开验证</h2>
+      <p class="slot-note">
+        把第四步的 Top-N 真的<strong>在无头浏览器里打开</strong>：测加载等待时间、
+        拖进度条到 8 个时间点截图、做清晰度识别；同时用多线程模拟下载测吞吐。
+        前四步都只是根据元数据和 HTTP 头判断，<strong>这一步是唯一真正解码的环节</strong>。
+      </p>
+
+      <div class="deep-controls">
+        <label class="field"><span>验前几名</span>
+          <input id="deepTopN" type="number" min="1" max="20" value="5"></label>
+        <label class="field"><span>下载线程</span>
+          <input id="deepThreads" type="number" min="1" max="16" value="5"></label>
+        <label class="field"><span>最多轮数</span>
+          <input id="deepRounds" type="number" min="1" max="10" value="10"></label>
+        <span class="spacer"></span>
+        <button id="deepRun" type="button">开始验证</button>
+      </div>
+      <p id="deepStatus" class="field-note"></p>
+      <div id="deepRounds_out"></div>
+    </section>
+
+    <section id="playerPanel" class="panel hidden">
+      <h2>▶ 正在播放</h2>
+      <p id="nowPlaying" class="now-playing"></p>
+      <video id="player" controls preload="metadata" playsinline></video>
+      <p id="playerHint" class="hint"></p>
+    </section>
+
+    <section class="panel">
+      <h2>📡 数据源与检索统计</h2>
+      <div id="providerList" class="providers"></div>
+      <p id="statsLine" class="stats"></p>
+      <ul id="notes" class="notes"></ul>
+    </section>
+  </main>
+
+  <section id="downloadPanel" class="panel downloads hidden">
+    <h2>⬇ 离线下载队列</h2>
+    <div id="downloadList"></div>
+  </section>
+
+  <footer class="foot">
+    <p>片源均来自公开归档站的自由许可内容；下载完成后会用上游提供的 md5/sha1 自动校验完整性。</p>
+  </footer>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

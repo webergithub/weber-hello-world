@@ -1,0 +1,10 @@
+{
+  "_comment": "「欢迎来到龙餐厅」的 Google 结果。冷门片名的典型形态：资料站 + 聚合站，没有一个域名有对应的解析器，archive.org 上搜到的是同名但完全无关的东西。",
+  "organic": [
+    { "link": "https://movie.douban.com/subject/35198692/", "title": "欢迎来到龙餐厅 - 豆瓣", "snippet": "动画作品条目。" },
+    { "link": "https://bangumi.tv/subject/301122", "title": "欢迎来到龙餐厅 | Bangumi 番组计划", "snippet": "动画资料与讨论。" },
+    { "link": "https://archive.org/details/dragon_restaurant_cooking_show_1998", "title": "The Dragon Restaurant — regional cooking show (1998)", "snippet": "Local TV cooking programme, unrelated to any film." },
+    { "link": "https://www.bilibili.com/bangumi/media/md28339123", "title": "欢迎来到龙餐厅-番剧-全集在线观看-bilibili", "snippet": "正版番剧，会员可看。" },
+    { "link": "https://anime-aggregator.example/welcome-to-the-dragon-restaurant", "title": "Welcome to the Dragon Restaurant - Watch Online", "snippet": "Streaming links aggregator." }
+  ]
+}

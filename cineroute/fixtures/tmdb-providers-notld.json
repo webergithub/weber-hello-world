@@ -1,0 +1,22 @@
+{
+  "id": 10331,
+  "results": {
+    "US": {
+      "link": "https://www.themoviedb.org/movie/10331/watch?locale=US",
+      "flatrate": [
+        { "provider_id": 526, "provider_name": "AMC+", "logo_path": "/uc4Ke1h8HGvhMQ8bLh6yGTLIhTB.jpg", "display_priority": 8 },
+        { "provider_id": 257, "provider_name": "fuboTV", "logo_path": "/9WeIcSAcbrJgEuoBpVwtjXKr2Wo.jpg", "display_priority": 12 }
+      ],
+      "free": [
+        { "provider_id": 73, "provider_name": "Tubi TV", "logo_path": "/dRfnJmRnaXY6vvNH8XmoWFYWiLl.jpg", "display_priority": 3 },
+        { "provider_id": 300, "provider_name": "Pluto TV", "logo_path": "/aDU2GsSXtozKQ4T3Sqm4cCM4LGA.jpg", "display_priority": 5 }
+      ],
+      "rent": [
+        { "provider_id": 2, "provider_name": "Apple TV", "logo_path": "/peURlLlr8jggOwK53fJ5wdQl05y.jpg", "display_priority": 1 }
+      ],
+      "buy": [
+        { "provider_id": 10, "provider_name": "Amazon Video", "logo_path": "/seGSXajazLMCKGB5hnRCidtjay1.jpg", "display_priority": 2 }
+      ]
+    }
+  }
+}

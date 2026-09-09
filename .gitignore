@@ -22,3 +22,8 @@ android-native/gradlew.bat
 android-native/gradle/wrapper/gradle-wrapper.jar
 tests/mesh-fixture/.split.bundle.mjs
 tests/mesh-fixture/.backup.bundle.mjs
+
+# CineRoute 下载产物
+cineroute/downloads/
+# CineRoute 检索来源配置：每台机器自己的勾选与取数，不入库
+cineroute/config/
