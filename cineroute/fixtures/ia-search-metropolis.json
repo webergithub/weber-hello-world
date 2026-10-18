@@ -1,0 +1,19 @@
+{
+  "responseHeader": { "status": 0, "QTime": 11 },
+  "response": {
+    "numFound": 1,
+    "start": 0,
+    "docs": [
+      {
+        "identifier": "metropolis_1927_restored",
+        "title": "Metropolis (1927)",
+        "year": "1927",
+        "downloads": 268413,
+        "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+        "collection": ["feature_films", "silent_films", "moviesandfilms"],
+        "avg_rating": "4.80",
+        "description": "Fritz Lang's 1927 expressionist science-fiction feature."
+      }
+    ]
+  }
+}

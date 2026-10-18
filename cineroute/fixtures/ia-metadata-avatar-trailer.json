@@ -1,0 +1,22 @@
+{
+  "_comment": "《阿凡达》官方预告片。片名对得上、地址活着、容器也能播——唯一的问题是它不是正片。这条专门用来看嗅探那一步会不会如实说出理由。",
+  "created": 1724371200,
+  "d1": "ia801509.us.archive.org", "d2": "ia601509.us.archive.org",
+  "dir": "/44/items/avatar_2009_trailer_zh",
+  "metadata": {
+    "identifier": "avatar_2009_trailer_zh",
+    "title": "阿凡达 2009 官方预告片 中文字幕",
+    "mediatype": "movies", "year": "2009"
+  },
+  "files": [
+    { "name": "avatar_2009_official_trailer.mp4", "source": "original", "format": "h.264",
+      "size": "48234496", "md5": "22b3c4d5e6f708192a3b4c5d6e7f8091",
+      "sha1": "bb22cc33dd44ee55ff6677889900aabbccddeeff",
+      "length": "152.00", "height": "1080", "width": "1920" },
+    { "name": "avatar_2009_official_trailer.mkv", "source": "derivative",
+      "original": "avatar_2009_official_trailer.mp4", "format": "Matroska",
+      "size": "96468992", "md5": "33c4d5e6f708192a3b4c5d6e7f809122",
+      "sha1": "cc33dd44ee55ff6677889900aabbccddeeff0011",
+      "length": "152.00", "height": "1080", "width": "1920" }
+  ]
+}

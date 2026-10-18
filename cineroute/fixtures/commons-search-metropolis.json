@@ -1,0 +1,52 @@
+{
+  "batchcomplete": true,
+  "continue": { "gsroffset": 20, "continue": "gsroffset||" },
+  "query": {
+    "pages": [
+      {
+        "pageid": 41857203,
+        "ns": 6,
+        "title": "File:Metropolis (1927) - restored fragment.webm",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/4/4e/Metropolis_%281927%29_-_restored_fragment.webm",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Metropolis_(1927)_-_restored_fragment.webm",
+            "size": 268435456,
+            "width": 960,
+            "height": 720,
+            "duration": 8935.4,
+            "mime": "video/webm",
+            "sha1": "9c0a34f17be25d8046a1cf3b790d2e5817a4c063",
+            "extmetadata": {
+              "LicenseShortName": { "value": "Public domain" },
+              "LicenseUrl": { "value": "http://creativecommons.org/publicdomain/mark/1.0/" },
+              "Artist": { "value": "Fritz Lang" },
+              "DateTimeOriginal": { "value": "1927" }
+            }
+          }
+        ]
+      },
+      {
+        "pageid": 41857999,
+        "ns": 6,
+        "title": "File:Metropolis trailer 1927.ogv",
+        "imageinfo": [
+          {
+            "url": "https://upload.wikimedia.org/wikipedia/commons/7/7a/Metropolis_trailer_1927.ogv",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Metropolis_trailer_1927.ogv",
+            "size": 12582912,
+            "width": 640,
+            "height": 480,
+            "duration": 118.2,
+            "mime": "video/ogg",
+            "sha1": "b71c0e35a94d2f68017ac35be0d4917f2a6c8035",
+            "extmetadata": {
+              "LicenseShortName": { "value": "Public domain" },
+              "LicenseUrl": { "value": "http://creativecommons.org/publicdomain/mark/1.0/" }
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

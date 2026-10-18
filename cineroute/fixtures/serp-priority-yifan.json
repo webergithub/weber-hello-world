@@ -1,0 +1,15 @@
+{
+  "_comment": "优先来源命中示例（离线演示用）。注意结果只是页面地址与标题——本模块不解析播放地址，所以夹具里也不该出现任何 .mp4/.m3u8。",
+  "organic": [
+    {
+      "link": "https://yifan.tv/vod/play/48213-1-1",
+      "title": "活死人之夜 Night of the Living Dead (1968) 在线播放",
+      "snippet": "剧情片，1968 年，导演 George A. Romero。"
+    },
+    {
+      "link": "https://yifan.tv/vod/detail/48213",
+      "title": "活死人之夜 - 详情",
+      "snippet": "影片详情页。"
+    }
+  ]
+}

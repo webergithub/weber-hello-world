@@ -1,0 +1,35 @@
+{
+  "_comment": "Google 引擎（限定站点范围）返回的搜索结果页。用 custom 模板取回，结构与 serper 的 organic 一致。演示三种结局：能解析成片源、解析失败降级为线索、域名没有解析器只列线索。",
+  "organic": [
+    {
+      "link": "https://archive.org/details/night_of_the_living_dead",
+      "title": "Night of the Living Dead (1968) : George A. Romero : Free Download",
+      "snippet": "Public domain horror classic. Multiple formats available."
+    },
+    {
+      "link": "https://archive.org/details/notld_1968_restored_4k",
+      "title": "Night of the Living Dead — 4K restoration scan",
+      "snippet": "Restored from the original 35mm negative."
+    },
+    {
+      "link": "https://archive.org/details/notld_print_not_digitized_yet",
+      "title": "Night of the Living Dead — 16mm print (catalog record)",
+      "snippet": "Catalog record only, no files uploaded."
+    },
+    {
+      "link": "https://www.loc.gov/item/notld-1968/",
+      "title": "Night of the Living Dead | Library of Congress",
+      "snippet": "National Film Registry entry."
+    },
+    {
+      "link": "https://www.europeana.eu/en/item/9200517/notld",
+      "title": "Night of the Living Dead — Europeana",
+      "snippet": "Digitised film record."
+    },
+    {
+      "link": "https://publicdomainmovie.net/movie/night-of-the-living-dead",
+      "title": "Night of the Living Dead - Public Domain Movies",
+      "snippet": "Watch online free."
+    }
+  ]
+}

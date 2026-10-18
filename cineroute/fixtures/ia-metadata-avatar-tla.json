@@ -1,0 +1,17 @@
+{
+  "_comment": "archive.org 上一个粉丝上传的《降世神通》条目。片名里带 Avatar，会被引擎搜出来，但它不是《阿凡达》——准入门槛该把它挡掉。",
+  "created": 1724371200,
+  "d1": "ia801509.us.archive.org", "d2": "ia601509.us.archive.org",
+  "dir": "/31/items/avatar_the_last_airbender_book1",
+  "metadata": {
+    "identifier": "avatar_the_last_airbender_book1",
+    "title": "Avatar: The Last Airbender - Book One",
+    "mediatype": "movies", "year": "2005"
+  },
+  "files": [
+    { "name": "atla_s01e01.mp4", "source": "original", "format": "h.264",
+      "size": "412334592", "md5": "11a2b3c4d5e6f708192a3b4c5d6e7f80",
+      "sha1": "aa11bb22cc33dd44ee55ff6677889900aabbccdd",
+      "length": "1404.00", "height": "480", "width": "640" }
+  ]
+}

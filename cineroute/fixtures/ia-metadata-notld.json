@@ -1,0 +1,127 @@
+{
+  "created": 1724371200,
+  "d1": "ia801509.us.archive.org",
+  "d2": "ia601509.us.archive.org",
+  "dir": "/27/items/night_of_the_living_dead",
+  "files": [
+    {
+      "name": "night_of_the_living_dead.mp4",
+      "source": "original",
+      "format": "h.264",
+      "mtime": "1512142833",
+      "size": "1181745152",
+      "md5": "3f7a1c9e5b2d4a86f0c1e93b7d54a2c8",
+      "crc32": "9ab13c77",
+      "sha1": "b41e7d5a9c3f28e6d017b4a95cf3e28d61b0742a",
+      "length": "5754.00",
+      "height": "720",
+      "width": "960"
+    },
+    {
+      "name": "night_of_the_living_dead_512kb.mp4",
+      "source": "derivative",
+      "original": "night_of_the_living_dead.mp4",
+      "format": "512Kb MPEG4",
+      "mtime": "1512146201",
+      "size": "219544576",
+      "md5": "c19d84be7a05f3126dbb90e4a7c65318",
+      "crc32": "2f60ba14",
+      "sha1": "7d2a5e18c4b09f63a1d8e572b3c04f9a6e2b81d5",
+      "length": "5754.00",
+      "height": "240",
+      "width": "320"
+    },
+    {
+      "name": "night_of_the_living_dead.ogv",
+      "source": "derivative",
+      "original": "night_of_the_living_dead.mp4",
+      "format": "Ogg Video",
+      "mtime": "1512150044",
+      "size": "384991232",
+      "md5": "5b0c73a1f9e8d426c7a35091b4e6d287",
+      "crc32": "d40a1e6b",
+      "sha1": "1f9c07b3d582a4e6910cb7d43f28e015a9c6b374",
+      "length": "5754.00",
+      "height": "360",
+      "width": "480"
+    },
+    {
+      "name": "night_of_the_living_dead.mkv",
+      "source": "original",
+      "format": "Matroska",
+      "mtime": "1512139001",
+      "size": "2415919104",
+      "md5": "a72e15c9b384d06f5e1a7c209db43f68",
+      "crc32": "77e2c410",
+      "sha1": "d5a83f01c927b4e6a1f70d2953bc84e17a09f6d2",
+      "length": "5754.00",
+      "height": "1080",
+      "width": "1440"
+    },
+    {
+      "name": "night_of_the_living_dead.mpg",
+      "source": "original",
+      "format": "MPEG2",
+      "mtime": "1512135422",
+      "size": "4187593216",
+      "md5": "e01b47a35c9d82f61047ba3e5c92d718",
+      "crc32": "1c85fa3d",
+      "sha1": "9b2e05d7a1c43f86015d7be29c0a37f4d8e15b06",
+      "length": "5754.00",
+      "height": "480",
+      "width": "640"
+    },
+    {
+      "name": "night_of_the_living_dead_trailer.mp4",
+      "source": "original",
+      "format": "h.264",
+      "mtime": "1512138800",
+      "size": "31457280",
+      "md5": "6c4a1f92e05b73d8a16c0947fb3e25d1",
+      "crc32": "4a71cb08",
+      "sha1": "3e7c95a0b1d846f2905ac37be5142d09f7a6c831",
+      "length": "142.00",
+      "height": "480",
+      "width": "640"
+    },
+    {
+      "name": "night_of_the_living_dead.gif",
+      "source": "derivative",
+      "original": "night_of_the_living_dead.mp4",
+      "format": "Animated GIF",
+      "size": "184320",
+      "md5": "0a1b2c3d4e5f60718293a4b5c6d7e8f9"
+    },
+    {
+      "name": "__ia_thumb.jpg",
+      "source": "original",
+      "format": "Item Tile",
+      "size": "18422",
+      "md5": "fa93b1c70e28d54617a0b39c8ed24f05"
+    },
+    {
+      "name": "night_of_the_living_dead_meta.xml",
+      "source": "original",
+      "format": "Metadata",
+      "size": "2841",
+      "md5": "bc07e19a35f2d840167cae95b3d70142"
+    }
+  ],
+  "files_count": 9,
+  "item_last_updated": 1724371200,
+  "item_size": 8421093376,
+  "metadata": {
+    "identifier": "night_of_the_living_dead",
+    "title": "Night of the Living Dead",
+    "mediatype": "movies",
+    "year": "1968",
+    "runtime": "96 minutes",
+    "director": "George A. Romero",
+    "licenseurl": "http://creativecommons.org/publicdomain/mark/1.0/",
+    "collection": ["feature_films", "sci-fi_horror", "moviesandfilms"],
+    "description": "George A. Romero's 1968 independent horror film, in the public domain in the United States because the original theatrical distributor omitted the copyright notice."
+  },
+  "server": "ia801509.us.archive.org",
+  "uniq": 481029371,
+  "workable_servers": ["ia801509.us.archive.org", "ia601509.us.archive.org"]
+}

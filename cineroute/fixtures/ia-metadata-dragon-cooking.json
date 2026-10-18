@@ -1,0 +1,17 @@
+{
+  "_comment": "一档 1998 年的地方美食节目，名字里带 Dragon Restaurant。跟《欢迎来到龙餐厅》毫无关系，是引擎按关键词撞出来的。",
+  "created": 1724371200,
+  "d1": "ia801509.us.archive.org", "d2": "ia601509.us.archive.org",
+  "dir": "/63/items/dragon_restaurant_cooking_show_1998",
+  "metadata": {
+    "identifier": "dragon_restaurant_cooking_show_1998",
+    "title": "The Dragon Restaurant — regional cooking show",
+    "mediatype": "movies", "year": "1998"
+  },
+  "files": [
+    { "name": "dragon_restaurant_ep03.mpg", "source": "original", "format": "MPEG2",
+      "size": "734003200", "md5": "55e6f708192a3b4c5d6e7f8091223344",
+      "sha1": "ee55ff6677889900aabbccddeeff0011223344",
+      "length": "1680.00", "height": "480", "width": "720" }
+  ]
+}

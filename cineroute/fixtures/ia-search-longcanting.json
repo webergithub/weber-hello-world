@@ -1,0 +1,12 @@
+{
+  "_comment": "archive.org 搜「欢迎来到龙餐厅」：按关键词撞出一档同名的地方美食节目。",
+  "responseHeader": { "status": 0, "QTime": 11, "params": { "q": "title:(\"欢迎来到龙餐厅\") AND mediatype:(movies)", "rows": "24", "wt": "json" } },
+  "response": {
+    "numFound": 1, "start": 0,
+    "docs": [
+      { "identifier": "dragon_restaurant_cooking_show_1998", "title": "The Dragon Restaurant — regional cooking show", "year": "1998",
+        "downloads": 402, "collection": ["opensource_movies"], "avg_rating": "0",
+        "description": "Regional cooking programme, 28 minutes per episode." }
+    ]
+  }
+}

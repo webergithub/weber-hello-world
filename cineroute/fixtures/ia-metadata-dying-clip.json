@@ -1,0 +1,16 @@
+{
+  "_comment": "《我不是药神》的片段合集。片名跟《我不是酒神》差一个字——准入门槛该认出这是另一部片。",
+  "created": 1724371200,
+  "d1": "ia801509.us.archive.org", "d2": "ia601509.us.archive.org",
+  "dir": "/52/items/dying_to_survive_2018_clip",
+  "metadata": {
+    "identifier": "dying_to_survive_2018_clip",
+    "title": "我不是药神 片段合集", "mediatype": "movies", "year": "2018"
+  },
+  "files": [
+    { "name": "dying_to_survive_clips.mp4", "source": "original", "format": "h.264",
+      "size": "134217728", "md5": "44d5e6f708192a3b4c5d6e7f80912233",
+      "sha1": "dd44ee55ff6677889900aabbccddeeff00112233",
+      "length": "487.00", "height": "720", "width": "1280" }
+  ]
+}

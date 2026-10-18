@@ -1,0 +1,21 @@
+{
+  "_comment": "自建媒体库（Jellyfin）返回的条目。离线演示里指向本地测试文件，让第五步能真的打开解码。",
+  "Items": [
+    {
+      "Id": "good-copy", "Name": "Night of the Living Dead", "ProductionYear": 1968,
+      "RunTimeTicks": 199600000,
+      "MediaSources": [{
+        "Id": "ms1", "Container": "webm", "Size": 322851,
+        "MediaStreams": [{ "Type": "Video", "Codec": "vp8", "Width": 640, "Height": 360 }]
+      }]
+    },
+    {
+      "Id": "bad-copy", "Name": "Night of the Living Dead", "ProductionYear": 1968,
+      "RunTimeTicks": 199600000,
+      "MediaSources": [{
+        "Id": "ms2", "Container": "webm", "Size": 40000,
+        "MediaStreams": [{ "Type": "Video", "Codec": "vp8", "Width": 1920, "Height": 1080 }]
+      }]
+    }
+  ]
+}
