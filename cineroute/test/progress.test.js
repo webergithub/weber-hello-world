@@ -10,7 +10,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { PHASES, phaseStart, phaseWeight, createReporter } from '../src/core/progress.js';
+import { PHASES, phaseStart, phaseWeight, createReporter, describeRunStats } from '../src/core/progress.js';
 import { searchAll } from '../src/core/pipeline.js';
 import { createFixtureFetch, createFixtureProbe, FIXTURE_SERP_CONFIG } from '../src/core/fixtureFetch.js';
 import { defaultConfig } from '../src/core/sourceConfig.js';
@@ -176,5 +176,61 @@ test('不带 stream=1 时仍返回一整个 JSON，脚本调用方不受影响',
     assert.ok(data.top.length > 0);
   } finally {
     await new Promise((r) => server.close(r));
+  }
+});
+
+/* ── 数据源收工状态翻成人话 ──────────────────────────────── */
+
+test('每种源的 stats 形状不同，不能拿一套字段去套所有源', () => {
+  // 这条守的是一个出现过两次的 bug：同一段"stats → 一行人话"的逻辑
+  // 原来有两份（SSE 一份、命令行一份），修了一份另一份照样打
+  // 「引擎返回 undefined」，而且命令行那份没有任何测试覆盖。
+  // 现在只有一份实现，这条用例守着它。
+
+  // 引擎源：有 returned / resolved / unresolved
+  assert.match(
+    describeRunStats({
+      status: 'ok', count: 27,
+      stats: { terms: 3, returned: 18, resolved: 27, unresolved: 5 },
+    }),
+    /返回 18 条，解析出 27 个片源、5 条线索/,
+  );
+
+  // 优先来源：形状完全不同，是 domains / hits
+  const pri = describeRunStats({
+    status: 'ok', count: 0, stats: { domains: 2, hits: 2 },
+  });
+  assert.match(pri, /查了 2 个站点，命中 2 条/);
+  assert.ok(!/undefined/.test(pri), `打出了 undefined：${pri}`);
+
+  // 专用适配器：压根没有 stats，退回"几条"
+  assert.equal(describeRunStats({ status: 'ok', count: 10, stats: null }), '10 条');
+  assert.equal(describeRunStats({ status: 'ok', count: 0 }), '0 条');
+});
+
+test('没跑成的源报原因，不报条数', () => {
+  assert.equal(
+    describeRunStats({ status: 'skipped', reason: '设置环境变量 TMDB_API_KEY', count: 0 }),
+    '设置环境变量 TMDB_API_KEY',
+  );
+  assert.equal(describeRunStats({ status: 'error', reason: 'HTTP 403' }), 'HTTP 403');
+  // 连原因都没给时也不能打 undefined
+  assert.ok(!/undefined/.test(describeRunStats({ status: 'error' })));
+});
+
+test('任何一种形状都不该让 undefined 漏到界面上', () => {
+  // 穷举一遍：缺字段、空对象、怪形状——人看见的那行里永远不能有 undefined
+  const shapes = [
+    { status: 'ok', count: 3, stats: {} },
+    { status: 'ok', count: 3, stats: { returned: 0, resolved: 0, unresolved: 0 } },
+    { status: 'ok', count: 3, stats: { hits: 0, domains: 0 } },
+    { status: 'ok', count: 3, stats: { 某个没见过的字段: 1 } },
+    { status: 'ok' },
+    {},
+  ];
+  for (const s of shapes) {
+    const line = describeRunStats(s);
+    assert.ok(!/undefined|NaN|\[object/.test(line),
+      `${JSON.stringify(s)} → 「${line}」`);
   }
 });

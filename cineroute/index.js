@@ -9,6 +9,7 @@
  */
 
 import { searchAll } from './src/core/pipeline.js';
+import { describeRunStats } from './src/core/progress.js';
 import {
   createFixtureFetch, createFixtureProbe, applyFixtureSerpEnv, FIXTURE_SERP_CONFIG,
 } from './src/core/fixtureFetch.js';
@@ -69,10 +70,10 @@ function printReport(result) {
   console.log('\n📡  数据源（勾选与取数由配置决定，见 --sources）');
   for (const p of providers) {
     const icon = p.status === 'ok' ? '✅' : p.status === 'skipped' ? '⏭️ ' : '⚠️ ';
+    // 形状判断统一走 describeRunStats，见 core/progress.js 里的说明。
     const detail = p.status === 'ok'
       ? [
-          `${p.count} 条`,
-          p.stats ? `引擎返回 ${p.stats.returned}` : null,
+          describeRunStats(p),
           p.limit ? `上限 ${p.limit}` : null,
           `${p.elapsedMs}ms`,
         ].filter(Boolean).join(' · ')

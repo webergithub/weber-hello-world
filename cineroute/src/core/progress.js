@@ -109,3 +109,30 @@ export function createReporter(onProgress) {
     },
   };
 }
+
+/**
+ * 把一个数据源的收工状态翻成一句人话。
+ *
+ * **stats 的形状按源的种类不同**：引擎源报"引擎返回几条"，优先来源报
+ * "查了几个站、命中几条"，专用适配器干脆没有 stats。拿一套字段去套所有源，
+ * 就会打出一行「引擎返回 undefined」——这行是给人看的，一眼就能看出坏了。
+ *
+ * 抽到这里是因为**这段逻辑原来有两份**：SSE 那条路（pipeline.reportRun）
+ * 和命令行那条路（index.js 的 printReport）各写各的。修了一份，另一份
+ * 照样打 undefined，而且谁都没发现——命令行那条没有任何测试覆盖。
+ * 两份同样的判断必然只修一半，所以合并成一份，并且这一份有用例守着。
+ *
+ * @param {{status: string, count?: number, reason?: string|null, stats?: object|null}} run
+ * @returns {string}
+ */
+export function describeRunStats(run) {
+  if (run?.status !== 'ok') return run?.reason || run?.status || '';
+  const st = run.stats;
+  if (st && st.returned != null) {
+    return `返回 ${st.returned} 条，解析出 ${st.resolved} 个片源、${st.unresolved} 条线索`;
+  }
+  if (st && st.hits != null) {
+    return `查了 ${st.domains} 个站点，命中 ${st.hits} 条存在性记录`;
+  }
+  return `${run.count ?? 0} 条`;
+}

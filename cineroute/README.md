@@ -8,7 +8,7 @@
 cd cineroute
 node index.js --offline "Night of the Living Dead"   # 离线夹具，无需联网与 API key
 node index.js --serve                                 # 启动 Web 界面 http://localhost:8787
-npm test                                              # 365 个用例，全部离线
+npm test                                              # 368 个用例，全部离线
 ```
 
 ---
@@ -515,7 +515,7 @@ cineroute/
     serp_search.py          Python 检索执行器（curl_cffi > httpx > requests > urllib）
     demo-steps.mjs          把检索的三步摊开打印
     test-report.mjs         跑全量测试并生成 HTML 报告
-  test/                     365 个用例，全部离线可跑
+  test/                     368 个用例，全部离线可跑
                             （serpBackend / webRender 会真开 Chromium，没装就自动跳过）
     corpus/titles.json      片名测试清单：近年热门中英文电影 + 解析边界样本
   deploy/                   部署到服务器：systemd 单元 · Nginx 反代 · 安装/更新脚本

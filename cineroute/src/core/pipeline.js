@@ -14,7 +14,7 @@ import { probeAll } from './probe.js';
 import { buildAdapters, adapterAvailability } from '../adapters/registry.js';
 import { defaultConfig } from './sourceConfig.js';
 import { planFirstRound, planSecondRound } from './expand.js';
-import { createReporter } from './progress.js';
+import { createReporter, describeRunStats } from './progress.js';
 import { summarizeVideos } from './videoSanity.js';
 
 /**
@@ -102,19 +102,9 @@ async function runAdapter({ adapter, limit }, query, opts, onSettled = null) {
  */
 function reportRun(report, rec, done, total) {
   const status = { ok: 'ok', skipped: 'warn', error: 'err' }[rec.status] ?? 'info';
-  const st = rec.stats;
-  // stats 的形状按源的种类不同：引擎源报"搜到/解析出/没解析器"，
-  // 优先来源报"查了几个站、命中几条"。不能拿一套字段去套所有源，
-  // 否则会打出一行「返回 undefined 条」。
-  let detail;
-  if (rec.status !== 'ok') detail = rec.reason;
-  else if (st && st.returned != null) {
-    detail = `返回 ${st.returned} 条，解析出 ${st.resolved} 个片源、${st.unresolved} 条线索`;
-  } else if (st && st.hits != null) {
-    detail = `查了 ${st.domains} 个站点，命中 ${st.hits} 条存在性记录`;
-  } else {
-    detail = `${rec.count} 条`;
-  }
+  // 形状判断统一在 describeRunStats 里，见那儿的说明——这段逻辑
+  // 以前命令行和 SSE 各写了一份，修了一份另一份照样打 undefined。
+  const detail = describeRunStats(rec);
   report.step(`${rec.label} · ${{ ok: '完成', skipped: '跳过', error: '出错' }[rec.status] ?? rec.status}`, {
     done, total, status, detail,
   });
