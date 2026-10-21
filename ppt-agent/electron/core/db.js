@@ -49,10 +49,16 @@ CREATE TABLE IF NOT EXISTS slides (
 CREATE INDEX IF NOT EXISTS idx_slides_file ON slides(file_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS slides_fts USING fts5(title, body, notes, meta, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS pairs (slide_id INTEGER, other_id INTEGER, score REAL, PRIMARY KEY (slide_id, other_id));
+CREATE TABLE IF NOT EXISTS file_views (file_id INTEGER, kind TEXT, at INTEGER);
+CREATE INDEX IF NOT EXISTS idx_views_file ON file_views(file_id);
+CREATE TABLE IF NOT EXISTS recycle (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, name TEXT, orig_path TEXT, bin_path TEXT, moved INTEGER,
+  prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER
+);
 `;
 
 const toBlob = (v) => (v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : null);
-const fromBlob = (b) => (b ? new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)) : null);
+const fromBlob = (b) => (b && ArrayBuffer.isView(b) ? new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)) : null);
 const J = (s, d = null) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 
 class Store {
@@ -67,9 +73,17 @@ class Store {
     const cols = (t) => new Set(this.db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name));
     const f = cols('files');
     if (!f.has('kind')) this.db.exec("ALTER TABLE files ADD COLUMN kind TEXT DEFAULT 'ppt'");
+    if (!f.has('atime_pre')) this.db.exec('ALTER TABLE files ADD COLUMN atime_pre INTEGER');
+    if (!f.has('ctime')) this.db.exec('ALTER TABLE files ADD COLUMN ctime INTEGER');
     const t = cols('tasks');
     if (!t.has('roots')) this.db.exec('ALTER TABLE tasks ADD COLUMN roots TEXT');
     if (!t.has('deleted')) this.db.exec('ALTER TABLE tasks ADD COLUMN deleted INTEGER DEFAULT 0');
+    if (!t.has('run_started')) this.db.exec('ALTER TABLE tasks ADD COLUMN run_started INTEGER');
+    if (!t.has('scan_list')) this.db.exec('ALTER TABLE tasks ADD COLUMN scan_list TEXT');
+    const sl = cols('slides');
+    if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
+    if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');
+    if (!sl.has('notes_ai')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_ai TEXT');
   }
 
   q(sql) {
@@ -100,7 +114,8 @@ class Store {
     const vals = keys.map((k) => {
       const v = f[k];
       if (v instanceof Float32Array) return toBlob(v);
-      if (v && typeof v === 'object' && !Buffer.isBuffer(v)) return JSON.stringify(v);
+      if (ArrayBuffer.isView(v)) return v;
+      if (v && typeof v === 'object') return JSON.stringify(v);
       if (typeof v === 'boolean') return v ? 1 : 0;
       return v === undefined ? null : v;
     });
@@ -109,6 +124,10 @@ class Store {
 
   linkTaskFile(taskId, fileId, filePath, action, message = '') {
     this.q('INSERT INTO task_files(task_id, file_id, path, action, message, at) VALUES (?, ?, ?, ?, ?, ?)').run(taskId, fileId, filePath, action, message, Date.now());
+  }
+  /** 本轮（run_started 之后）已处理过的文件路径，用于断点继续 */
+  handledSince(taskId, since) {
+    return new Set(this.q('SELECT path FROM task_files WHERE task_id = ? AND at >= ?').all(taskId, since || 0).map((r) => r.path));
   }
   taskFiles(taskId) {
     return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id = ? ORDER BY tf.rowid`).all(taskId).map(this.fileRow);
@@ -124,6 +143,25 @@ class Store {
       ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY tf.rowid DESC LIMIT ?`).all(...args, limit);
   }
 
+  // ---------- 本工具内的查看 / 打开记录 ----------
+  addView(fileId, kind) {
+    const last = this.q('SELECT at FROM file_views WHERE file_id = ? AND kind = ? ORDER BY at DESC LIMIT 1').get(fileId, kind);
+    if (kind === 'view' && last && Date.now() - last.at < 10 * 60 * 1000) return; // 10 分钟内重复浏览只记一次
+    this.q('INSERT INTO file_views(file_id, kind, at) VALUES (?, ?, ?)').run(fileId, kind, Date.now());
+  }
+  viewStats() { return this.q("SELECT file_id, SUM(kind = 'view') views, SUM(kind = 'open') opens, MAX(at) last FROM file_views GROUP BY file_id").all(); }
+  viewDaily(since) { return this.q('SELECT at FROM file_views WHERE at >= ?').all(since).map((r) => r.at); }
+  historyDaily(since) { return this.q('SELECT at, action FROM task_files WHERE at >= ?').all(since); }
+
+  // ---------- 回收站 ----------
+  addRecycle(r) { return Number(this.q('INSERT INTO recycle(file_id, name, orig_path, bin_path, moved, prev_status, size, kind, slide_count, reason, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(r.file_id, r.name, r.orig_path, r.bin_path, r.moved ? 1 : 0, r.prev_status, r.size, r.kind, r.slide_count, r.reason || '', Date.now()).lastInsertRowid); }
+  listRecycle() { return this.q('SELECT * FROM recycle ORDER BY id DESC').all(); }
+  getRecycle(id) { return this.q('SELECT * FROM recycle WHERE id = ?').get(id) || null; }
+  removeRecycle(id) { this.q('DELETE FROM recycle WHERE id = ?').run(id); }
+  setFilePath(id, p) { this.q('UPDATE files SET path = ? WHERE id = ?').run(p, id); }
+  moveSlides(fromId, toId) { this.q('UPDATE slides SET file_id = ? WHERE file_id = ?').run(toId, fromId); }
+  duplicatesOf(id) { return this.q("SELECT * FROM files WHERE dup_of = ? AND status = 'duplicate' ORDER BY id").all(id).map(this.fileRow); }
+
   // ---------- 文件 ----------
   fileRow = (r) => (r ? { ...r, tags: J(r.tags, []), terms: undefined, meta: J(r.meta, {}), preview: J(r.preview, null), vec: undefined, emb: undefined } : null);
   fileByPath(p) { return this.fileRow(this.q('SELECT * FROM files WHERE path = ?').get(p)); }
@@ -136,6 +174,7 @@ class Store {
     const r = this.q(`INSERT INTO files(${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => {
       const v = f[k];
       if (v instanceof Float32Array) return toBlob(v);
+      if (ArrayBuffer.isView(v)) return v;
       if (v && typeof v === 'object') return JSON.stringify(v);
       return v === undefined ? null : v;
     }));
@@ -181,6 +220,11 @@ class Store {
     if (!r) return null;
     const o = { ...r, bg: J(r.bg, {}), media: J(r.media, []), hidden: !!r.hidden, has_video: !!r.has_video, vec: undefined, emb: undefined };
     o.layout = full ? J(r.layout, null) : undefined;
+    // 用户编辑过的讲解词 / Markdown 优先生效，原文保留在 *_orig
+    o.notes_orig = r.notes; o.md_orig = r.md;
+    if (r.notes_user !== null && r.notes_user !== undefined) o.notes = r.notes_user;
+    if (r.md_user !== null && r.md_user !== undefined) o.md = r.md_user;
+    o.edited = r.notes_user != null || r.md_user != null;
     return o;
   };
   slidesOf(fileId, full = false) {
@@ -200,6 +244,15 @@ class Store {
   slideVectors() {
     return this.q(`SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
       .map((r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb) }));
+  }
+  setSlideUser(id, f) {
+    const sets = [], vals = [];
+    for (const k of ['notes_user', 'md_user', 'notes_ai']) if (k in f) { sets.push(`${k} = ?`); vals.push(f[k]); }
+    if (sets.length) this.q(`UPDATE slides SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+  updateFts(id, fts) {
+    this.q('DELETE FROM slides_fts WHERE rowid = ?').run(id);
+    this.q('INSERT INTO slides_fts(rowid, title, body, notes, meta) VALUES (?, ?, ?, ?, ?)').run(id, fts.title, fts.body, fts.notes, fts.meta);
   }
   setSlideEmb(id, emb) { this.q('UPDATE slides SET emb = ? WHERE id = ?').run(toBlob(emb), id); }
   setSlideThumb(id, thumb) { this.q('UPDATE slides SET thumb = ? WHERE id = ?').run(thumb, id); }

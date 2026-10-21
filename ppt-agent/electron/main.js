@@ -38,6 +38,46 @@ function createWindow() {
   if (devUrl) win.loadURL(devUrl); else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.on('closed', () => { win = null; });
+  // 关闭窗口：询问“完全退出”还是“最小化到任务栏”，可记住选择
+  win.on('close', (e) => {
+    if (quitting || !service) return;
+    e.preventDefault();
+    handleClose();
+  });
+}
+
+let quitting = false;
+let closeDialogOpen = false;
+async function handleClose() {
+  if (closeDialogOpen) return;
+  const action = service.getConfig().closeAction || 'ask';
+  if (action === 'minimize') { win.minimize(); return; }
+  if (action === 'quit') { await confirmQuit(); return; }
+  closeDialogOpen = true;
+  try {
+    const running = service.running ? '\n\n当前有解析任务正在运行；完全退出后，下次启动可点击“继续”从断点继续。' : '';
+    const r = await dialog.showMessageBox(win, {
+      type: 'question', title: '退出 PPT智能体', message: '要完全关闭程序，还是最小化到任务栏？',
+      detail: '最小化后程序继续在后台运行（解析任务不中断），点击任务栏图标即可恢复。' + running,
+      buttons: ['最小化到任务栏', '完全退出', '取消'], defaultId: 0, cancelId: 2, noLink: true,
+      checkboxLabel: '记住我的选择（可在“设置”中修改）', checkboxChecked: false,
+    });
+    if (r.response === 2) return;
+    const choice = r.response === 0 ? 'minimize' : 'quit';
+    if (r.checkboxChecked) service.setConfig({ closeAction: choice });
+    logger.child('app').info(`关闭窗口：用户选择${choice === 'minimize' ? '最小化到任务栏' : '完全退出'}${r.checkboxChecked ? '（已记住）' : ''}`);
+    if (choice === 'minimize') win.minimize(); else await confirmQuit(true);
+  } finally { closeDialogOpen = false; }
+}
+
+async function confirmQuit(skipAsk = false) {
+  if (service.running && !skipAsk) {
+    const r = await dialog.showMessageBox(win, { type: 'warning', title: '退出', message: '有解析任务正在运行，确定退出？', detail: '退出后任务会中断，下次启动可点击“继续”从断点继续。', buttons: ['退出', '取消'], defaultId: 1, cancelId: 1, noLink: true });
+    if (r.response !== 0) return;
+  }
+  if (service.running) { service.pauseTask(service.running); logger.child('app').info('退出前中断正在运行的任务（可继续）'); }
+  quitting = true;
+  app.quit();
 }
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
@@ -74,7 +114,9 @@ app.whenReady().then(async () => {
     tasks: () => service.tasks(),
     addTask: (dir, opts) => service.addTask(dir, opts),
     addAllLocalTask: () => service.addAllLocalTask(),
-    startTask: (id) => service.startTask(id),
+    startTask: (id, opts) => service.startTask(id, opts),
+    resumeTask: (id) => service.resumeTask(id),
+    pauseTask: (id) => service.pauseTask(id),
     startAll: () => service.startAll(),
     moveTask: (id, d) => service.moveTask(id, d),
     queueState: () => service.queueState(),
@@ -84,6 +126,17 @@ app.whenReady().then(async () => {
     docTypes: () => service.docTypes(),
     convertSlides: (items, out) => service.convertSlides(items, out),
     smartCandidates: (desc, opts) => service.smartCandidates(desc, opts),
+    updateSlideText: (id, f) => service.updateSlideText(id, f),
+    recycleFiles: (ids, opts) => service.recycleFiles(ids, opts),
+    recycleList: () => service.recycleList(),
+    restoreRecycled: (ids) => service.restoreRecycled(ids),
+    purgeRecycled: (ids) => service.purgeRecycled(ids),
+    generateNotes: (id) => service.generateNotes(id),
+    getConvertRules: () => service.getConvertRules(),
+    defaultConvertRules: () => require('./core/converter').normalizeRules(null),
+    setConvertRules: (r) => service.setConvertRules(r),
+    resetConvertRules: () => service.resetConvertRules(),
+    convertRulesFromText: (t) => service.convertRulesFromText(t),
     generateDeck: (ids, out, opts) => service.generateDeck(ids, out, opts),
     localRoots: () => require('./core/service').localRoots(),
     systemTheme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
@@ -135,12 +188,19 @@ app.whenReady().then(async () => {
       const r = await dialog.showOpenDialog(win, { title: title || '选择要解析的 PPT / Word 目录', properties: single ? ['openDirectory', 'createDirectory'] : ['openDirectory', 'multiSelections'] });
       return r.canceled ? [] : r.filePaths;
     },
-    saveFile: async (defaultName, kind = 'pptx') => {
+    // 保存对话框：按用途（key）记住上一次选择的目录
+    saveFile: async (defaultName, kind = 'pptx', key = 'export') => {
       const filters = kind === 'md' ? [{ name: 'Markdown', extensions: ['md'] }] : [{ name: 'PowerPoint', extensions: ['pptx'] }];
-      const r = await dialog.showSaveDialog(win, { title: '导出', defaultPath: path.join(app.getPath('documents'), defaultName), filters });
-      return r.canceled ? null : r.filePath;
+      const b = readBootstrap();
+      const last = (b.lastDirs || {})[key];
+      const dir = last && fs.existsSync(last) ? last : app.getPath('documents');
+      const r = await dialog.showSaveDialog(win, { title: key === 'convert' ? '保存黑白底转换结果' : '导出', defaultPath: path.join(dir, defaultName), filters });
+      if (r.canceled) return null;
+      writeBootstrap({ ...readBootstrap(), lastDirs: { ...(b.lastDirs || {}), [key]: path.dirname(r.filePath) } });
+      return r.filePath;
     },
-    openPath: (p) => shell.openPath(p),
+    openPath: (p) => { service.recordOpenPath(p); return shell.openPath(p); },
+    analytics: () => service.analytics(),
     showItem: (p) => shell.showItemInFolder(p),
     openDataDir: () => shell.openPath(service.dataDir),
   };
@@ -162,6 +222,7 @@ app.whenReady().then(async () => {
   app.on('activate', () => { if (!BrowserWindow.getAllWindows().length) createWindow(); });
 });
 
+app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => {
   if (logger) logger.child('app').info('程序退出');
   if (service) service.close();

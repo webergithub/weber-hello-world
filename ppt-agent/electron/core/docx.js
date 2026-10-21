@@ -173,7 +173,7 @@ async function parseDocx(file, opts = {}) {
       notes: [...new Set(s.notes)].join('\n'), errors: [], theme: 'light', bg: { color: '#ffffff', lum: 1, source: 'word' }, layout: null, section: s.cont ? '续' : '',
     }));
     const { blocksToText } = require('./pptx');
-    for (const s of slides) { s.text = blocksToText(s.blocks.filter((b) => b.kind !== 'title')); if (opts.onSlide) opts.onSlide(s.index, slides.length, s.title); }
+    for (const s of slides) { s.text = blocksToText(s.blocks.filter((b) => b.kind !== 'title')); if (opts.onSlide) opts.onSlide(s.index, slides.length, s.title, s); }
     return { props, size: null, slides, mediaKey, kind: 'word' };
   } finally { zip.close(); }
 }

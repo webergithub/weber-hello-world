@@ -32,6 +32,19 @@ function client(cfg) {
       const arr = json(out);
       return Array.isArray(arr) ? arr.map(String).filter(Boolean).slice(0, 20) : [];
     },
+    async speakerNotes({ fileName, title, text, md, notes }) {
+      return chat([
+        { role: 'system', content: '你是资深演讲教练。根据幻灯片内容写一段中文讲解词（150~300 字），口语化、条理清楚，先点题再分点讲解，最后一句承上启下。只输出讲解词正文。' },
+        { role: 'user', content: `文件：${fileName}\n标题：${title}\n页面内容：\n${String(text || '').slice(0, 2500)}\n${notes ? '原讲解词（可参考）：' + String(notes).slice(0, 800) : ''}` },
+      ], { maxTokens: 800, timeoutMs: 60000 });
+    },
+    async convertRules(current, request) {
+      const out = await chat([
+        { role: 'system', content: '你是 PPT 配色转换规则助手。根据用户要求修改给定的 JSON 规则，只输出修改后的完整 JSON。颜色使用 6 位十六进制（不带#），null 表示无/透明。' },
+        { role: 'user', content: `当前规则：${JSON.stringify(current)}\n修改要求：${request}` },
+      ], { maxTokens: 1200, timeoutMs: 60000 });
+      return json(out);
+    },
     async answer(q, contexts) {
       const ctx = contexts.map((c, i) => `[${i + 1}] 《${c.file}》第${c.idx}页 ${c.title}\n${c.text}\n讲解词：${c.notes}`).join('\n\n').slice(0, 14000);
       return chat([

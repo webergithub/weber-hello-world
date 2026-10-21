@@ -9,6 +9,8 @@ import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
+import AnalyticsView from './components/AnalyticsView';
+import RecycleView from './components/Recycle';
 import SettingsView from './components/SettingsView';
 import LogView from './components/LogView';
 import SlideWorkspace, { clearSlideCache, loadSlide } from './components/SlideWorkspace';
@@ -29,11 +31,14 @@ function reduceProgress(prev, e) {
     case 'scanned': cur.total = e.total; cur.files = []; cur.index = 0; feed(`${t} 🔍 扫描完成：共发现 ${e.total} 个文档`); break;
     case 'file': Object.assign(cur, { stage: 'file', index: e.index, total: e.total, file: e.file, slide: 0, slideTotal: 0, slideTitle: '' }); feed(`${t} 📄 [${e.index}/${e.total}] ${base(e.file)}`); break;
     case 'parse': case 'thumb': case 'store': cur.stage = e.stage; if (e.stage === 'thumb') feed(`${t}    🖼 生成页面截图…`); break;
-    case 'slide': Object.assign(cur, { stage: 'slide', slide: e.slide, slideTotal: e.slideTotal, slideTitle: e.slideTitle, unit: e.unit }); feed(`${t}    第 ${e.slide}/${e.slideTotal} ${e.unit || '页'}：${e.slideTitle || '（无标题）'}`); break;
+    case 'slide': Object.assign(cur, { stage: 'slide', slide: e.slide, slideTotal: e.slideTotal, slideTitle: e.slideTitle, unit: e.unit });
+      cur.scans = [...(cur.scans || []).slice(-80), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, index: cur.index, total: cur.total, slide: e.slide, slideTotal: e.slideTotal, title: e.slideTitle, unit: e.unit, kind: e.kind, detail: e.detail }];
+      feed(`${t}    第 ${e.slide}/${e.slideTotal} ${e.unit || '页'}：${e.slideTitle || '（无标题）'}`); break;
     case 'parsed': cur.stage = 'parsed'; cur.files = [...cur.files, { file: e.file, kind: e.kind, slides: e.slides, unit: e.unit, dark: e.dark, notes: e.notes, videos: e.videos, ms: e.ms, titles: e.titles, action: 'parsed' }];
       feed(`${t}    ✅ 解析完成：${e.slides} ${e.unit || '页'}，${e.ms}ms`); break;
     case 'result': cur.files = [...cur.files, { file: e.file, action: e.action }]; feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
-    case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f)); feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
+    case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f));
+      cur.tagFeed = [...(cur.tagFeed || []).slice(-60), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, tags: e.tags, category: e.category }]; feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
     case 'done': cur.stage = 'done'; cur.message = e.message; feed(`${t} 🏁 任务结束：${e.message}`); break;
     default: break;
   }
@@ -115,7 +120,7 @@ export default function App() {
   const exportSlides = async (ids, kind) => {
     if (!ids.length) return;
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-T:]/g, '');
-    const out = await api.saveFile(`PPT智能体导出_${stamp}.${kind === 'md' ? 'md' : 'pptx'}`, kind);
+    const out = await api.saveFile(`PPT智能体导出_${stamp}.${kind === 'md' ? 'md' : 'pptx'}`, kind, kind === 'md' ? 'exportMd' : 'export');
     if (!out) return;
     setExporting({ n: ids.length });
     try {
@@ -147,11 +152,13 @@ export default function App() {
   ];
   const nav = [
     { key: 'search', icon: '🔍', label: '智能搜索' },
+    { key: 'analytics', icon: '📈', label: '总览分析' },
     { key: 'monitor', icon: '⚙️', label: `解析任务${tasks.some((t) => t.status === 'running') ? ' ●' : ''}` },
     { key: 'library', icon: '📚', label: '资料库浏览' },
     { key: 'groups', icon: '🧩', label: '相似分组' },
     { key: 'basket', icon: '🧺', label: `导出篮${basket.length ? `（${basket.length}）` : ''}` },
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
+    { key: 'recycle', icon: '🗑', label: '回收站' },
     { key: 'logs', icon: '📜', label: '运行日志' },
     { key: 'settings', icon: '🛠', label: '设置' },
   ];
@@ -183,16 +190,19 @@ export default function App() {
               const live = liveTasks[t.id];
               const pct = t.total ? Math.round(((live && live.done) || (t.parsed + t.skipped + t.duplicate + t.failed)) / t.total * 100) : 0;
               return (
-                <div key={t.id} className={`sb-task ${view.type === 'task' && view.id === t.id ? 'active' : ''}`} onClick={() => setView({ type: 'task', id: t.id })} title={t.dir}>
+                <div key={t.id} className={`sb-task ${(view.type === 'task' && view.id === t.id) || (view.type === 'monitor' && view.taskId === t.id) ? 'active' : ''}`} onClick={() => setView(['running', 'pending'].includes(t.status) ? { type: 'monitor', tab: 'live', taskId: t.id } : { type: 'task', id: t.id })} title={t.dir}>
                   <span className={`dot s-${t.status}`} />
                   {!collapsed && (
                     <div className="sbt-main">
                       <div className="sbt-name">#{t.id} {t.name}</div>
-                      <div className="sbt-meta">{STATUS_LABEL[t.status]}{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
+                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
                     </div>
                   )}
-                  {!collapsed && ['draft', 'interrupted', 'cancelled'].includes(t.status) && (
-                    <button className="icon-btn tiny start" title="开始解析" onClick={(e) => { e.stopPropagation(); api.startTask(t.id).then(refreshTasks); }}>▶</button>
+                  {!collapsed && ['draft', 'interrupted', 'paused', 'cancelled'].includes(t.status) && (
+                    <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); (t.status === 'draft' ? api.startTask(t.id) : api.resumeTask(t.id)).then(refreshTasks); setView({ type: 'monitor', tab: 'live', taskId: t.id }); }}>▶</button>
+                  )}
+                  {!collapsed && t.status === 'running' && (
+                    <button className="icon-btn tiny pause" title="中断（可继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
                   )}
                   {!collapsed && !['running', 'pending'].includes(t.status) && (
                     <button className="icon-btn tiny" title="删除任务（解析历史保留）" onClick={async (e) => {
@@ -205,24 +215,24 @@ export default function App() {
               );
             })}
           </div>
-          <div className="sb-section">{!collapsed && '智能模块'}</div>
-          {smartNav.map((n) => (
-            <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
-              <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
-            </div>
-          ))}
           <div className="sb-section">{!collapsed && '功能'}</div>
           {nav.map((n) => (
             <React.Fragment key={n.key}>
               <div className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
                 <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
               </div>
-              {n.key === 'library' && view.type === 'library' && !collapsed && (
-                <div className="sb-sub">
-                  {[['overview', '总览'], ['folder', '按文件夹'], ['name', '按文件名称'], ['tags', '按内容归类（标签）']].map(([k, v]) => <div key={k} className={`sb-subitem ${libMode === k ? 'active' : ''}`} onClick={() => setLibMode(k)}>{v}</div>)}
+              {n.key === 'monitor' && view.type === 'monitor' && (
+                <div className={`sb-sub ${collapsed ? 'mini' : ''}`}>
+                  {[['queue', '📋', '任务队列'], ['live', '📡', '解析动态（实时）'], ['history', '🕘', '解析历史']].map(([k, ic, v]) => <div key={k} title={v} className={`sb-subitem ${(view.tab || 'queue') === k ? 'active' : ''}`} onClick={() => setView({ ...view, tab: k })}>{collapsed ? ic : v}</div>)}
                 </div>
               )}
             </React.Fragment>
+          ))}
+          <div className="sb-section">{!collapsed ? '智能模块（建设中）' : '智能'}</div>
+          {smartNav.map((n) => (
+            <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
+              <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label} <span className="wip">建设中</span></span>}
+            </div>
           ))}
           <div className="spacer" />
           <div className="sb-theme" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
@@ -231,12 +241,14 @@ export default function App() {
         </aside>
         <main className="main">
           {view.type === 'task' && <TaskView taskId={view.id} />}
-          {view.type === 'monitor' && <TaskMonitor />}
+          {view.type === 'monitor' && <TaskMonitor tab={view.tab || 'queue'} taskId={view.taskId} setTab={(tab, taskId) => setView({ type: 'monitor', tab, taskId: taskId || view.taskId })} />}
           {view.type === 'library' && <LibraryView mode={libMode} setMode={setLibMode} />}
           {view.type === 'search' && <SearchView state={searchState} setState={setSearchState} />}
           {view.type === 'groups' && <GroupsView />}
           {view.type === 'basket' && <BasketView />}
           {view.type === 'convert' && <ConvertView />}
+          {view.type === 'analytics' && <AnalyticsView />}
+          {view.type === 'recycle' && <RecycleView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}

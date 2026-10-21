@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, THEME_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown, highlight } from '../md';
+import { PanelLayout, useStoredLayout, DEFAULT_LAYOUT, NotesBody, MdBody, onSlideUpdated } from './Panels';
 
 const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 import SlidePreview from './SlidePreview';
@@ -19,7 +20,7 @@ export function clearFileCache() { fileCache.clear(); }
  * ← →：当前文件的上一页 / 下一页；↑ ↓：上一个 / 下一个文件；Home / End：首页 / 末页；空格：加入 / 移出导出篮。
  * fileIds：可切换的文件顺序（如搜索结果的文件顺序）；matched：命中的页面 id（在缩略条上标记）
  */
-export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], onClose, active = true, compact = false }) {
+export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], onClose, active = true, compact = false, onFileChange }) {
   const app = useApp();
   const ids = useMemo(() => (fileIds && fileIds.length ? fileIds : initialFileId ? [initialFileId] : []), [fileIds, initialFileId]);
   const [fileId, setFileId] = useState(initialFileId || ids[0]);
@@ -32,8 +33,9 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   const root = useRef(null);
   const [maxed, setMaxed] = useState(() => { try { return localStorage.getItem('ppta.viewerMax') === '1'; } catch { return false; } });
   const [panes, setPanes] = useState(true);
-  const [layout, setLayoutState] = useState(loadLayout);
-  const setLayout = useCallback((upd) => setLayoutState((cur) => { const n = typeof upd === 'function' ? upd(cur) : upd; saveLayout(n); return n; }), []);
+  const [layout, setLayout] = useStoredLayout('ppta.viewerLayout');
+  const [notesTab, setNotesTab] = useState('orig');
+  useEffect(() => onSlideUpdated((s2) => setSlide((cur) => (cur && cur.id === s2.id ? s2 : cur))), []);
   const [osd, setOsd] = useState(null);
   const osdTimer = useRef(null);
   const toggleMax = useCallback(() => setMaxed((m) => { try { localStorage.setItem('ppta.viewerMax', m ? '0' : '1'); } catch { /* ignore */ } return !m; }), []);
@@ -44,6 +46,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   const matchedSet = useMemo(() => new Set(matched), [matched]);
 
   useEffect(() => { if (initialFileId) setFileId(initialFileId); if (initialSlideId) setSlideId(initialSlideId); }, [initialFileId, initialSlideId]);
+  useEffect(() => { if (onFileChange && fileId) onFileChange(fileId); }, [fileId]);
   useEffect(() => {
     let off = false;
     if (!fileId) return;
@@ -191,17 +194,11 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
           },
           notes: {
             title: unit === '节' ? '💬 批注' : '🗣 讲解词（备注）',
-            body: <div className="pane-body notes" dangerouslySetInnerHTML={{ __html: slide.notes ? highlight(esc(slide.notes), terms) : '<span class="muted">（无）</span>' }} />,
+            body: <NotesBody slide={slide} terms={terms} unit={unit} tab={notesTab} setTab={setNotesTab} />,
           },
           md: {
             title: '📝 解析 Markdown',
-            extra: (
-              <>
-                <button className={`btn tiny ${mdMode === 'render' ? 'on' : ''}`} onClick={() => setMdMode('render')}>预览</button>
-                <button className={`btn tiny ${mdMode === 'raw' ? 'on' : ''}`} onClick={() => setMdMode('raw')}>源码</button>
-              </>
-            ),
-            body: mdMode === 'raw' ? <pre className="pane-body md-raw">{slide.md}</pre> : <div className="pane-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(slide.md, terms) }} />,
+            body: <MdBody slide={slide} terms={terms} onGenerated={() => setNotesTab('ai')} />,
           },
         };
         return <PanelLayout panels={panels} layout={layout} setLayout={setLayout} hideSub={!panes} />;
@@ -210,98 +207,3 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   );
 }
 
-// ================= 三模块布局：主区 1 个 + 副区 2 个 =================
-const DEFAULT_LAYOUT = { mode: 'tb', slots: ['slide', 'notes', 'md'], main: 64, sub: 50, min: [] };
-function loadLayout() {
-  try {
-    const l = { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem('ppta.viewerLayout') || '{}') };
-    if (!Array.isArray(l.slots) || l.slots.slice().sort().join() !== 'md,notes,slide') l.slots = DEFAULT_LAYOUT.slots;
-    if (!Array.isArray(l.min)) l.min = [];
-    return l;
-  } catch { return DEFAULT_LAYOUT; }
-}
-function saveLayout(l) { try { localStorage.setItem('ppta.viewerLayout', JSON.stringify(l)); } catch { /* ignore */ } }
-
-/** 拖动分隔条：返回 onMouseDown，按容器尺寸换算为百分比 */
-function useSplitter(getBox, horizontal, onChange) {
-  return (e) => {
-    e.preventDefault();
-    const box = getBox();
-    if (!box) return;
-    const rect = box.getBoundingClientRect();
-    const move = (ev) => {
-      const pct = horizontal ? ((ev.clientX - rect.left) / rect.width) * 100 : ((ev.clientY - rect.top) / rect.height) * 100;
-      onChange(Math.max(12, Math.min(88, Math.round(pct * 10) / 10)));
-    };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('dragging'); };
-    document.body.classList.add('dragging', horizontal ? 'drag-h' : 'drag-v');
-    document.body.classList.remove(horizontal ? 'drag-v' : 'drag-h');
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-  };
-}
-
-function PanelLayout({ panels, layout, setLayout, hideSub }) {
-  const outer = useRef(null);
-  const subBox = useRef(null);
-  const [dragOver, setDragOver] = useState(null);
-  const lr = layout.mode === 'lr';
-  const minimized = new Set(layout.min.filter((k) => panels[k]));
-  const visible = (k) => !minimized.has(k) && !(hideSub && k !== 'slide');
-  const [mainKey, subA, subB] = layout.slots;
-  const subKeys = [subA, subB].filter(visible);
-  const showMain = visible(mainKey);
-  const minimize = (k) => setLayout((l) => ({ ...l, min: [...new Set([...l.min, k])] }));
-  const restore = (k) => setLayout((l) => ({ ...l, min: l.min.filter((x) => x !== k) }));
-  const swap = (a, b) => {
-    if (!a || !b || a === b) return;
-    setLayout((l) => { const slots = [...l.slots]; const i = slots.indexOf(a), j = slots.indexOf(b); [slots[i], slots[j]] = [slots[j], slots[i]]; return { ...l, slots }; });
-  };
-  const onMain = useSplitter(() => outer.current, lr, (v) => setLayout((l) => ({ ...l, main: v })));
-  const onSub = useSplitter(() => subBox.current, !lr, (v) => setLayout((l) => ({ ...l, sub: v })));
-
-  const panel = (k, style) => {
-    const p = panels[k];
-    return (
-      <div key={k} className={`vpanel vp-${k} ${dragOver === k ? 'drop' : ''}`} style={style}
-        onDragOver={(e) => { if (e.dataTransfer.types.includes('text/ppta-panel')) { e.preventDefault(); setDragOver(k); } }}
-        onDragLeave={() => setDragOver((d) => (d === k ? null : d))}
-        onDrop={(e) => { e.preventDefault(); setDragOver(null); swap(e.dataTransfer.getData('text/ppta-panel'), k); }}>
-        <div className="vpanel-head" draggable onDragStart={(e) => { e.dataTransfer.setData('text/ppta-panel', k); e.dataTransfer.effectAllowed = 'move'; }} title="拖动标题栏到其他模块上可交换位置">
-          <span className="grip">⠿</span><span className="vph-title">{p.title}</span>
-          <div className="spacer" />{p.extra}
-          <button className="icon-btn tiny" title="最小化到底部" onClick={() => minimize(k)}>▁</button>
-        </div>
-        <div className="vpanel-body">{p.body}</div>
-      </div>
-    );
-  };
-  const subArea = subKeys.length ? (
-    <div ref={subBox} className="vsub" style={{ flexDirection: lr ? 'column' : 'row', flex: showMain ? `0 0 ${100 - layout.main}%` : '1 1 auto' }}>
-      {subKeys.length === 2 ? (
-        <>
-          {panel(subKeys[0], { flex: `0 0 calc(${layout.sub}% - 3px)` })}
-          <div className={`vsplit ${lr ? 'h' : 'v'}`} onMouseDown={onSub} title="拖动调整大小" />
-          {panel(subKeys[1], { flex: '1 1 0' })}
-        </>
-      ) : panel(subKeys[0], { flex: '1 1 0' })}
-    </div>
-  ) : null;
-  const dock = [...minimized].concat(hideSub ? layout.slots.filter((k) => k !== 'slide' && !minimized.has(k)) : []);
-  return (
-    <div className="vlayout-wrap">
-      <div ref={outer} className={`vlayout ${lr ? 'lr' : 'tb'}`}>
-        {showMain && panel(mainKey, { flex: subArea ? `0 0 calc(${layout.main}% - 3px)` : '1 1 auto' })}
-        {showMain && subArea && <div className={`vsplit ${lr ? 'v' : 'h'}`} onMouseDown={onMain} title="拖动调整大小" />}
-        {subArea}
-        {!showMain && !subArea && <div className="empty-tip">所有模块都已最小化，点击底部按钮恢复</div>}
-      </div>
-      {dock.length > 0 && (
-        <div className="vdock">
-          <span className="muted small">已最小化：</span>
-          {[...new Set(dock)].map((k) => <button key={k} className="btn small" onClick={() => (minimized.has(k) ? restore(k) : null)} disabled={!minimized.has(k)}>{panels[k].title} ▴</button>)}
-        </div>
-      )}
-    </div>
-  );
-}

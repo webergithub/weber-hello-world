@@ -184,3 +184,56 @@ test('智能生成：版式意图识别与相似聚类', () => {
   const two = gen.slideFeatures({ idx: 3, title: 'A', text: 'x', layout: { items: [{ t: 'text', x: 0.05, y: 0.3, w: 0.42, h: 0.5, paras: [{ text: '左' }] }, { t: 'text', x: 0.53, y: 0.3, w: 0.42, h: 0.5, paras: [{ text: '右' }] }] } });
   assert.strictEqual(two.twoCol, true);
 });
+
+test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除；讲解词编辑与 Agent 生成；转换规则脚本', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const lib = path.join(tmp, 'lib2');
+  fs.cpSync(P('机场运营'), path.join(lib, '机场运营'), { recursive: true });
+  fs.cpSync(P('技术方案'), path.join(lib, '技术方案'), { recursive: true });
+  const svc = new AgentService(path.join(tmp, 'data2'));
+  svc.setConfig({ thumbnails: 'off' });
+  const done = (id, st) => new Promise((res) => svc.on('task', (t) => { if (t.id === id && st.includes(t.status) && t.finished_at) res(t); }));
+  const id = svc.addTask(lib);
+  svc.on('progress', (p) => { if (p.taskId === id && p.stage === 'file' && p.index === 3) svc.pauseTask(id); });
+  svc.startTask(id);
+  const t1 = await done(id, ['paused']);
+  assert.match(t1.message, /已中断/);
+  let first = null;
+  svc.on('progress', (p) => { if (p.taskId === id && p.stage === 'file' && first === null) first = p.index; });
+  svc.resumeTask(id);
+  const t2 = await done(id, ['done']);
+  assert.strictEqual(first, 4, '应从第 4 个文件继续');
+  assert.ok(t2.parsed >= 8);
+  // 回收站
+  const f = svc.library().find((x) => x.name.includes('A-CDM'));
+  await svc.recycleFiles([f.id], { moveFile: true });
+  assert.ok(!fs.existsSync(f.path));
+  assert.ok(!svc.library().some((x) => x.id === f.id));
+  const bin = svc.recycleList();
+  await svc.restoreRecycled([bin[0].id]);
+  assert.ok(fs.existsSync(f.path));
+  await svc.recycleFiles([f.id], { moveFile: false });
+  svc.purgeRecycled(svc.recycleList().map((r) => r.id));
+  assert.ok(fs.existsSync(f.path), '仅移出资料库时彻底删除不应删除原文件');
+  assert.strictEqual(svc.recycleList().length, 0);
+  // 讲解词编辑与 Agent 生成（未配置大模型时使用内置模板）
+  const any = svc.library().find((x) => x.status === 'parsed' && x.slide_count > 2);
+  const sl = svc.store.slidesOf(any.id)[1];
+  const g = await svc.generateNotes(sl.id);
+  assert.match(g.source, /内置模板/);
+  assert.ok(g.text.length > 10);
+  const e = svc.updateSlideText(sl.id, { notes: '唯一测试讲解词XYZ' });
+  assert.strictEqual(e.notes, '唯一测试讲解词XYZ');
+  const r = await svc.searchQuery('唯一测试讲解词XYZ');
+  assert.ok([...r.slides.light, ...r.slides.dark].some((x) => x.id === sl.id));
+  assert.strictEqual(svc.updateSlideText(sl.id, { notes: null }).edited, false);
+  // 规则脚本
+  const rules = svc.setConvertRules({ toLight: { text: '1F3864' } });
+  assert.strictEqual(svc.getConvertRules().toLight.text, '1F3864');
+  assert.strictEqual(rules.toDark.text, 'FFFFFF');
+  svc.resetConvertRules();
+  // 总览分析
+  const a = svc.analytics();
+  assert.ok(a.files.length >= 8 && a.files.every((x) => 'lastOpen' in x));
+  svc.close();
+});

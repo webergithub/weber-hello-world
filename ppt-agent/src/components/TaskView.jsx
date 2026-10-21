@@ -4,6 +4,8 @@ import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
 import LogView from './LogView';
 import { ReparseDialog } from './TaskMonitor';
+import DataTable from './DataTable';
+import { RecycleButton } from './Recycle';
 
 export default function TaskView({ taskId }) {
   const app = useApp();
@@ -49,7 +51,7 @@ export default function TaskView({ taskId }) {
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
       </div>
       <div className="tab-body">
-        {tab === 'slides' && <SlideWorkspace files={files.filter((f) => f.id)} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
+        {tab === 'slides' && <SlideWorkspace files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
         {tab === 'files' && <FilesStats files={files} stats={stats} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
         {tab === 'log' && <LogView taskId={taskId} />}
       </div>
@@ -65,19 +67,41 @@ function dedupe(rows) {
 }
 
 export function FilesStats({ files, stats, onOpen }) {
-  const [sort, setSort] = useState({ k: 'name', d: 1 });
   const [q, setQ] = useState('');
   const [act, setAct] = useState('');
+  const [sel, setSel] = useState(() => new Set());
   const rows = useMemo(() => {
     const f = q.trim().toLowerCase();
-    const list = files.filter((r) => (!act || r.action === act) && (!f || (r.link_path || '').toLowerCase().includes(f) || (r.tags || []).join(' ').toLowerCase().includes(f)));
-    const get = (r) => (sort.k === 'name' ? r.name || '' : sort.k === 'size' ? r.size || 0 : sort.k === 'pages' ? r.slide_count || 0 : sort.k === 'mtime' ? r.mtime || 0 : r[sort.k] || '');
-    return list.sort((a, b) => { const x = get(a), y = get(b); return (typeof x === 'string' ? x.localeCompare(y, 'zh') : x - y) * sort.d; });
-  }, [files, sort, q, act]);
-  const th = (k, label) => <th onClick={() => setSort({ k, d: sort.k === k ? -sort.d : 1 })} className="sortable">{label}{sort.k === k ? (sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>;
+    return files.filter((r) => (!act || r.action === act) && (!f || (r.link_path || '').toLowerCase().includes(f) || (r.tags || []).join(' ').toLowerCase().includes(f)));
+  }, [files, q, act]);
   const cards = [
     ['文件总数', stats.files], ['本次解析', stats.parsed || 0], ['已解析过·跳过', stats.skipped || 0], ['重复文件', stats.duplicate || 0], ['失败', stats.failed || 0],
     ['页面总数', stats.slides], ['含备注页', stats.notes], ['视频', stats.videos], ['含字幕页', stats.subtitles], ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`], ['隐藏页', stats.hidden], ['文件总大小', fmtSize(stats.size)],
+  ];
+  const columns = [
+    { key: 'action', label: '状态', sort: (r) => ACTION_LABEL[r.action] || r.action, render: (r) => <span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span> },
+    { key: 'name', label: '文件名', sort: (r) => r.name || r.link_path, render: (r) => <span className="link" onClick={() => r.id && onOpen(r.id)} title={r.link_path}>{r.name || r.link_path}</span> },
+    { key: 'kind', label: '类型', sort: (r) => r.kind || 'ppt', render: (r) => KIND_LABEL[r.kind || 'ppt'] },
+    { key: 'dir', label: '目录', className: 'muted small ellipsis', render: (r) => <span title={r.dir}>{r.dir}</span> },
+    { key: 'slide_count', label: '页数/节数', sort: (r) => r.slide_count || 0, render: (r) => (r.slide_count ? `${r.slide_count} ${unitOf(r)}` : '') },
+    { key: 'size', label: '大小', sort: (r) => r.size || 0, render: (r) => fmtSize(r.size), className: 'nowrap' },
+    { key: 'author', label: '作者' },
+    { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, render: (r) => fmtTime(r.mtime), className: 'small nowrap' },
+    { key: 'theme', label: '底色', render: (r) => (r.theme && (r.kind || 'ppt') === 'ppt' ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
+    { key: 'dark_slides', label: '黑底页', sort: (r) => r.dark_slides || 0, hidden: true },
+    { key: 'notes_count', label: '含备注页', sort: (r) => r.notes_count || 0, hidden: true },
+    { key: 'video_count', label: '视频', sort: (r) => r.video_count || 0, render: (r) => r.video_count || '' },
+    { key: 'category', label: '分类' },
+    { key: 'tags', label: '标签（20 个）', sort: (r) => (r.tags || []).join(' '), className: 'tags-cell', render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
+    { key: 'message', label: '说明', sort: (r) => r.error || r.message, className: 'small muted', render: (r) => r.error || r.message },
+    { key: 'at', label: '处理时间', sort: (r) => r.at || 0, render: (r) => fmtTime(r.at), className: 'small nowrap', hidden: true },
+    { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => (
+      <>
+        {r.path && <button className="btn tiny" onClick={() => api.openPath(r.path)}>打开</button>}
+        {r.path && <button className="btn tiny" onClick={() => api.showItem(r.path)}>位置</button>}
+        {r.md_path && <button className="btn tiny" onClick={() => api.openPath(r.md_path)}>MD</button>}
+      </>
+    ) },
   ];
   return (
     <div className="files-stats">
@@ -86,42 +110,17 @@ export function FilesStats({ files, stats, onOpen }) {
         {Object.entries(stats.byCategory || {}).map(([k, v]) => <span key={k} className="chip">{k} {v}</span>)}
         {Object.entries(stats.byExt || {}).map(([k, v]) => <span key={k} className="chip ghost">{k} × {v}</span>)}
       </div>
-      <div className="ws-toolbar">
-        <input className="input" placeholder="按路径 / 标签过滤" value={q} onChange={(e) => setQ(e.target.value)} />
-        <select className="input" value={act} onChange={(e) => setAct(e.target.value)}>
-          <option value="">全部状态</option>{Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
-        <span className="muted">{rows.length} 个</span>
-      </div>
-      <div className="table-wrap">
-        <table className="grid">
-          <thead><tr>{th('action', '状态')}{th('name', '文件名')}<th>类型</th><th>目录</th>{th('pages', '页数/节数')}{th('size', '大小')}<th>作者</th>{th('mtime', '修改时间')}<th>底色</th><th>视频</th><th>分类</th><th>标签（20 个）</th><th>说明</th><th>操作</th></tr></thead>
-          <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className={`row-${r.action}`}>
-                <td><span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span></td>
-                <td className="link" onClick={() => r.id && onOpen(r.id)} title={r.link_path}>{r.name || r.link_path}</td>
-                <td>{KIND_LABEL[r.kind || 'ppt']}</td>
-                <td className="muted small ellipsis" title={r.dir}>{r.dir}</td>
-                <td>{r.slide_count ? `${r.slide_count} ${unitOf(r)}` : ''}</td>
-                <td>{fmtSize(r.size)}</td>
-                <td>{r.author}</td>
-                <td className="small">{fmtTime(r.mtime)}</td>
-                <td>{r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : ''}</td>
-                <td>{r.video_count || ''}</td>
-                <td>{r.category}</td>
-                <td className="tags-cell">{(r.tags || []).map((t) => <span key={t} className="tag">{t}</span>)}</td>
-                <td className="small muted">{r.error || r.message}</td>
-                <td className="nowrap">
-                  {r.path && <button className="btn tiny" onClick={() => api.openPath(r.path)}>打开</button>}
-                  {r.path && <button className="btn tiny" onClick={() => api.showItem(r.path)}>位置</button>}
-                  {r.md_path && <button className="btn tiny" onClick={() => api.openPath(r.md_path)}>MD</button>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <DataTable id="taskFiles" columns={columns} rows={rows} rowKey={(r, i) => r.link_path || i} rowClass={(r) => `row-${r.action}`} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文件"
+        selectable selected={sel} onSelect={setSel} selectableRow={(r) => r.id && r.status !== 'recycled'}
+        actions={<RecycleButton ids={rows.filter((r) => sel.has(r.link_path) && r.id).map((r) => r.id)} done={() => setSel(new Set())} />}
+        toolbar={(
+          <>
+            <input className="input" placeholder="按路径 / 标签过滤" value={q} onChange={(e) => setQ(e.target.value)} />
+            <select className="input" value={act} onChange={(e) => setAct(e.target.value)}>
+              <option value="">全部状态</option>{Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </>
+        )} />
     </div>
   );
 }

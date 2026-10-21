@@ -3,6 +3,7 @@ import { api, fmtSize, THEME_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
+import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
 
 const slideCache = new Map();
 export async function loadSlide(id) {
@@ -10,6 +11,10 @@ export async function loadSlide(id) {
   return slideCache.get(id);
 }
 export function clearSlideCache() { slideCache.clear(); }
+// 编辑保存后同步更新缓存
+onSlideUpdated((s) => slideCache.set(s.id, Promise.resolve(s)));
+
+const WS_LAYOUT = { mode: 'tb', slots: ['slide', 'notes', 'md'], main: 58, sub: 50, min: [] };
 
 // 主视图：左 文件列表 · 中 页面列表（可多选）· 右 PPT 原始页 + 备注讲解词 + 解析 Markdown
 export default function SlideWorkspace({ files, initialFileId, initialSlideId, emptyText = '暂无已解析的 PPT', highlight = [] }) {
@@ -20,12 +25,15 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
   const [slideId, setSlideId] = useState(initialSlideId || null);
   const [slide, setSlide] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
-  const [mdMode, setMdMode] = useState('render');
   const lastClick = useRef(null);
   const listRef = useRef(null);
   const [cols, setCols] = useState(() => { try { return { files: true, slides: true, ...JSON.parse(localStorage.getItem('ppta.cols') || '{}') }; } catch { return { files: true, slides: true }; } });
   const setCol = (k, v) => { const n = { ...cols, [k]: v }; setCols(n); try { localStorage.setItem('ppta.cols', JSON.stringify(n)); } catch { /* ignore */ } };
   const maximized = !cols.files && !cols.slides;
+  // 资料库详情的三个模块（原始页 / 讲解词 / Markdown）可拖动调整大小、换位，下次打开时恢复
+  const [layout, setLayout] = useStoredLayout('ppta.wsLayout', WS_LAYOUT);
+  const [notesTab, setNotesTab] = useState('orig');
+  useEffect(() => onSlideUpdated((s2) => setSlide((cur) => (cur && cur.id === s2.id ? s2 : cur))), []);
 
   const visible = useMemo(() => {
     const f = filter.trim().toLowerCase();
@@ -169,33 +177,35 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                   <button className="btn small" onClick={() => goCounterpart(slide.counterpart)}>切换到{THEME_LABEL[slide.counterpart.theme]}查看</button>
                 </div>
               )}
-              <div className={`detail-preview ${maximized ? 'max' : ''}`}><SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /></div>
-              <div className="detail-panes">
-                <div className="pane">
-                  <div className="pane-head">{isWord ? '💬 批注' : '🗣 备注（讲解词）'}</div>
-                  <div className="pane-body notes">{slide.notes ? slide.notes : <span className="muted">（本页无备注）</span>}</div>
-                  {slide.media && slide.media.length > 0 && (
-                    <div className="media-list">
-                      {slide.media.map((m, i) => (
-                        <div key={i} className="media-item">
-                          <div>{m.type === 'audio' ? '🎵' : m.type === 'caption' ? '💬' : '🎬'} <b>{m.name}</b> <span className="muted">{m.external ? '外链' : '内嵌'} {m.size ? fmtSize(m.size) : ''} {m.duration ? `· ${Math.round(m.duration)}s` : ''}</span></div>
-                          {(m.subtitles || []).length === 0 && <div className="muted small">未发现字幕（仅解析字幕，不解析视频画面）</div>}
-                          {(m.subtitles || []).map((s, k) => <div key={k} className="small">字幕来源：{s.source}（{s.cues.length} 条）</div>)}
-                        </div>
-                      ))}
+              <PanelLayout layout={layout} setLayout={setLayout} panels={{
+                slide: {
+                  title: isWord ? '📄 文档内容' : '🖼 PPT 原始页',
+                  extra: (
+                    <div className="seg small" title="三个模块的排列方式">
+                      <button className={layout.mode === 'tb' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'tb' }))}>上1下2</button>
+                      <button className={layout.mode === 'lr' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'lr' }))}>左1右2</button>
                     </div>
-                  )}
-                </div>
-                <div className="pane">
-                  <div className="pane-head">📝 解析 Markdown
-                    <div className="spacer" />
-                    <button className={`btn tiny ${mdMode === 'render' ? 'on' : ''}`} onClick={() => setMdMode('render')}>预览</button>
-                    <button className={`btn tiny ${mdMode === 'raw' ? 'on' : ''}`} onClick={() => setMdMode('raw')}>源码</button>
-                    <button className="btn tiny" onClick={() => navigator.clipboard.writeText(slide.md)}>复制</button>
-                  </div>
-                  {mdMode === 'raw' ? <pre className="pane-body md-raw">{slide.md}</pre> : <div className="pane-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(slide.md, highlight) }} />}
-                </div>
-              </div>
+                  ),
+                  body: (
+                    <div className="ws-stage" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>
+                      <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} />
+                      {slide.media && slide.media.length > 0 && (
+                        <div className="media-list">
+                          {slide.media.map((m, i) => (
+                            <div key={i} className="media-item">
+                              <div>{m.type === 'audio' ? '🎵' : m.type === 'caption' ? '💬' : '🎬'} <b>{m.name}</b> <span className="muted">{m.external ? '外链' : '内嵌'} {m.size ? fmtSize(m.size) : ''} {m.duration ? `· ${Math.round(m.duration)}s` : ''}</span></div>
+                              {(m.subtitles || []).length === 0 && <div className="muted small">未发现字幕（仅解析字幕，不解析视频画面）</div>}
+                              {(m.subtitles || []).map((st, k) => <div key={k} className="small">字幕来源：{st.source}（{st.cues.length} 条）</div>)}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ),
+                },
+                notes: { title: isWord ? '💬 批注' : '🗣 讲解词（备注）', body: <NotesBody slide={slide} terms={highlight} unit={unit} tab={notesTab} setTab={setNotesTab} /> },
+                md: { title: '📝 解析 Markdown', body: <MdBody slide={slide} terms={highlight} onGenerated={() => setNotesTab('ai')} /> },
+              }} />
             </>
           )}
         </div>

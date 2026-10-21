@@ -1,34 +1,37 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmtSize, fmtTime, STATUS_LABEL, ACTION_LABEL, KIND_LABEL } from '../api';
 import { useApp } from '../ctx';
+import LiveScan from './LiveScan';
+import DataTable from './DataTable';
 
 // 解析任务：任务队列（手动开始、排队、调整顺序）+ 实时解析动态 + 全部解析历史
-export default function TaskMonitor() {
+const SUB_TITLE = { queue: '任务队列', live: '解析动态（实时）', history: '解析历史' };
+
+// 解析任务：子视图（任务队列 / 解析动态 / 解析历史）由左侧子菜单切换；添加目录等入口统一在左侧
+export default function TaskMonitor({ tab = 'queue', taskId, setTab }) {
   const app = useApp();
-  const [tab, setTab] = useState('queue');
   return (
     <div className="view">
       <div className="view-head">
-        <div className="vh-title">⚙️ 解析任务 <span className="muted small">添加目录后手动开始；多个任务排队依次解析</span></div>
+        <div className="vh-title">⚙️ 解析任务 <span className="crumb">› {SUB_TITLE[tab]}</span></div>
+        <span className="muted small">{tab === 'queue' ? '添加目录后手动开始；多个任务排队依次解析；可中断与继续' : tab === 'live' ? '实时展示扫描读取、生成 Markdown 与标签标注的过程' : '每个文件每次被处理的完整记录'}</span>
         <div className="spacer" />
-        <button className="btn" onClick={app.addDir}>＋ 添加目录</button>
-        <button className="btn" onClick={app.addAllLocal}>🖥 扫描本机所有文档</button>
-        <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待开始的任务'); }}>▶ 全部开始</button>
+        {tab === 'queue' && <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待解析的任务'); }}>▶ 全部开始</button>}
       </div>
-      <div className="tabs">
-        <button className={tab === 'queue' ? 'on' : ''} onClick={() => setTab('queue')}>任务队列与实时进度</button>
-        <button className={tab === 'history' ? 'on' : ''} onClick={() => setTab('history')}>全部解析历史</button>
+      <div className="tab-body">
+        {tab === 'queue' && <QueuePanel initial={taskId} onLive={(id) => setTab('live', id)} />}
+        {tab === 'live' && <LiveScan taskId={taskId} onPick={(id) => setTab('live', id)} />}
+        {tab === 'history' && <HistoryPanel />}
       </div>
-      <div className="tab-body">{tab === 'queue' ? <QueuePanel /> : <HistoryPanel />}</div>
     </div>
   );
 }
 
-function QueuePanel() {
+function QueuePanel({ initial, onLive }) {
   const app = useApp();
   const { tasks } = app;
   const runningId = (tasks.find((t) => t.status === 'running') || {}).id;
-  const [sel, setSel] = useState(null);
+  const [sel, setSel] = useState(initial || null);
   const cur = sel || runningId || (tasks[0] && tasks[0].id);
   const queued = tasks.filter((t) => t.queuePos > 0).sort((a, b) => a.queuePos - b.queuePos);
   const others = tasks.filter((t) => !(t.queuePos > 0));
@@ -51,8 +54,11 @@ function QueuePanel() {
         )}
         {t.status !== 'draft' && t.status !== 'pending' && <div className="small muted">解析 {t.parsed} · 已解析过 {t.skipped} · 重复 {t.duplicate} · 失败 {t.failed}</div>}
         <div className="tc-ops" onClick={(e) => e.stopPropagation()}>
-          {['draft', 'done', 'cancelled', 'interrupted', 'failed'].includes(t.status) && <button className="btn tiny primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>{t.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button>}
-          {(t.status === 'running' || t.status === 'pending') && <button className="btn tiny" onClick={() => api.cancelTask(t.id).then(app.refreshTasks)}>取消</button>}
+          {t.status === 'draft' && <button className="btn tiny primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button>}
+          {['paused', 'interrupted'].includes(t.status) && <button className="btn tiny primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 继续</button>}
+          {['done', 'cancelled', 'interrupted', 'paused', 'failed'].includes(t.status) && <button className="btn tiny" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>↻ 重新扫描</button>}
+          {(t.status === 'running' || t.status === 'pending') && <button className="btn tiny" onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>⏸ 中断</button>}
+          {t.status === 'running' && <button className="btn tiny" onClick={() => onLive(t.id)}>解析动态</button>}
           {t.queuePos > 0 && <><button className="btn tiny" onClick={() => api.moveTask(t.id, -1).then(app.refreshTasks)}>上移</button><button className="btn tiny" onClick={() => api.moveTask(t.id, 1).then(app.refreshTasks)}>下移</button></>}
           <button className="btn tiny" onClick={() => app.go({ type: 'task', id: t.id })}>查看结果</button>
         </div>
@@ -62,7 +68,7 @@ function QueuePanel() {
   return (
     <div className="monitor">
       <div className="mon-list">
-        {!tasks.length && <div className="empty-tip">还没有任务。点击右上角“添加目录”或“扫描本机所有文档”。</div>}
+        {!tasks.length && <div className="empty-tip">还没有任务。点击左上角“＋ 添加目录”（或其下拉菜单中的“添加所有本地文档”）。</div>}
         {queued.length > 0 && <div className="side-title">排队中（{queued.length}）</div>}
         {queued.map(card)}
         {others.length > 0 && <div className="side-title">全部任务</div>}
@@ -94,6 +100,7 @@ function LivePanel({ taskId }) {
         <div className="muted small">{t.dir}</div>
       </div>
       {t.status === 'draft' && <div className="notice">任务已添加，尚未开始。点击 <button className="btn small primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button> 加入解析队列。</div>}
+      {['paused', 'interrupted'].includes(t.status) && <div className="notice">{t.message || '任务已中断'} <button className="btn small primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 从断点继续</button></div>}
       {t.status === 'pending' && <div className="notice">排队中：第 {t.queuePos} 位，前面的任务完成后自动开始。</div>}
       <div className="live-stats">
         <div className="card"><div className="card-v">{t.total || (p.scan ? p.scan.found : 0)}</div><div className="card-k">{t.status === 'running' && !t.total ? '已发现文档' : '文档总数'}</div></div>
@@ -158,16 +165,14 @@ export function ReparseDialog({ files, onClose }) {
         <div className="detail-head"><div className="dh-title">这些文件已解析过，是否重新解析？</div><div className="spacer" /><button className="icon-btn" onClick={onClose}>✕</button></div>
         <div className="pad muted small">文件名、最后修改时间、大小、作者与解析历史中的记录完全一致，因此默认没有重复解析。勾选需要强制重新解析的文件：</div>
         <div className="modal-body pad">
-          <table className="grid">
-            <thead><tr><th><input type="checkbox" checked={sel.size === files.length} onChange={() => setSel(sel.size === files.length ? new Set() : new Set(files.map((f) => f.link_path || f.path)))} /></th><th>状态</th><th>文件</th><th>大小</th><th>修改时间</th><th>作者</th><th>说明</th></tr></thead>
-            <tbody>{files.map((f) => {
-              const p = f.link_path || f.path;
-              return (
-                <tr key={p}><td><input type="checkbox" checked={sel.has(p)} onChange={() => toggle(p)} /></td><td><span className={`tag act-${f.action}`}>{ACTION_LABEL[f.action]}</span></td>
-                  <td className="small" title={p}>{p}</td><td>{fmtSize(f.size)}</td><td className="small">{fmtTime(f.mtime)}</td><td>{f.author}</td><td className="small muted">{f.message}</td></tr>
-              );
-            })}</tbody>
-          </table>
+          <DataTable id="reparse" rows={files} rowKey={(f) => f.link_path || f.path} selectable selected={sel} onSelect={setSel} maxHeight="50vh" columns={[
+            { key: 'action', label: '状态', render: (f) => <span className={`tag act-${f.action}`}>{ACTION_LABEL[f.action]}</span> },
+            { key: 'path', label: '文件', sort: (f) => f.link_path || f.path, className: 'small', render: (f) => f.link_path || f.path },
+            { key: 'size', label: '大小', sort: (f) => f.size || 0, className: 'nowrap', render: (f) => fmtSize(f.size) },
+            { key: 'mtime', label: '修改时间', sort: (f) => f.mtime || 0, className: 'small nowrap', render: (f) => fmtTime(f.mtime) },
+            { key: 'author', label: '作者' },
+            { key: 'message', label: '说明', className: 'small muted' },
+          ]} />
         </div>
         <div className="detail-head"><div className="spacer" /><button className="btn" onClick={onClose}>不重新解析</button>
           <button className="btn primary" disabled={!sel.size} onClick={async () => { try { await api.reparseFiles([...sel]); app.refreshTasks(); app.toast(`已创建重新解析任务：${sel.size} 个文件`); onClose(); } catch (e) { app.toast(e.message, 'error'); } }}>重新解析所选（{sel.size}）</button></div>
@@ -199,18 +204,18 @@ function HistoryPanel() {
         <span className="badge">已选 {sel.size}</span>
         <button className="btn primary" disabled={!sel.size} onClick={() => setDlg(picked.map((r) => ({ ...r, link_path: r.path })))}>重新解析所选…</button>
       </div>
-      <div className="table-wrap">
-        <table className="grid">
-          <thead><tr><th /><th>时间</th><th>任务</th><th>结果</th><th>类型</th><th>文件</th><th>页/节</th><th>大小</th><th>作者</th><th>说明</th></tr></thead>
-          <tbody>{rows.map((r) => (
-            <tr key={r.hid}><td><input type="checkbox" checked={sel.has(r.hid)} onChange={() => toggle(r.hid)} /></td>
-              <td className="small nowrap">{fmtTime(r.at)}</td><td className="small">#{r.task_id} {r.task_name || '（已删除）'}</td>
-              <td><span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span></td><td>{KIND_LABEL[r.kind] || ''}</td>
-              <td className="small link" title={r.path} onClick={() => r.file_id && app.openFile(r.file_id)}>{r.path}</td>
-              <td>{r.slide_count || ''}</td><td className="nowrap">{fmtSize(r.size)}</td><td>{r.author}</td><td className="small muted">{r.message}</td></tr>
-          ))}</tbody>
-        </table>
-      </div>
+      <DataTable id="history" rows={rows} rowKey={(r) => r.hid} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'at', d: -1 }} empty="还没有解析记录" columns={[
+        { key: 'at', label: '时间', sort: (r) => r.at, className: 'small nowrap', render: (r) => fmtTime(r.at) },
+        { key: 'task', label: '任务', sort: (r) => r.task_id, className: 'small', render: (r) => `#${r.task_id} ${r.task_name || '（已删除）'}` },
+        { key: 'action', label: '结果', sort: (r) => ACTION_LABEL[r.action] || r.action, render: (r) => <span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span> },
+        { key: 'kind', label: '类型', render: (r) => KIND_LABEL[r.kind] || '' },
+        { key: 'path', label: '文件', className: 'small', render: (r) => <span className="link" title={r.path} onClick={() => r.file_id && app.openFile(r.file_id)}>{r.path}</span> },
+        { key: 'slide_count', label: '页/节', sort: (r) => r.slide_count || 0, render: (r) => r.slide_count || '' },
+        { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
+        { key: 'author', label: '作者' },
+        { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime), hidden: true },
+        { key: 'message', label: '说明', className: 'small muted' },
+      ]} />
       {dlg && <ReparseDialog files={dlg} onClose={() => { setDlg(null); setSel(new Set()); }} />}
     </div>
   );

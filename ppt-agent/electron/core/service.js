@@ -15,7 +15,7 @@ const { fileTerms, computeTags } = require('./tagger');
 const { computeGroups, computePairs, normSlideTitle } = require('./similarity');
 const { SearchEngine } = require('./search');
 const { exportPptx, exportMarkdown } = require('./exporter');
-const { convertTheme } = require('./converter');
+const { convertTheme, RULES: DEFAULT_RULES, normalizeRules } = require('./converter');
 const gen = require('./generate');
 const { Office } = require('./office');
 const { imageLuminance } = require('./image');
@@ -53,6 +53,7 @@ const DEFAULT_CONFIG = {
   similarityThreshold: 0.82,
   docTypes: ['ppt', 'word'],
   uiTheme: 'system', // dark | light | system
+  closeAction: 'ask', // ask | quit | minimize：关闭窗口时的行为
 };
 
 class AgentService extends EventEmitter {
@@ -76,7 +77,11 @@ class AgentService extends EventEmitter {
     this.cancelled = new Set();
     this.groupsCache = null;
     // 上次异常退出时未完成的任务标记为中断
-    for (const t of this.store.listTasks()) if (t.status === 'running' || t.status === 'pending') this.store.updateTask(t.id, { status: 'interrupted', message: '程序退出时任务未完成，可重新运行' });
+    for (const t of this.store.listTasks()) {
+      if (t.status === 'running' || t.status === 'pending') this.store.updateTask(t.id, { status: 'interrupted', message: t.status === 'running' ? '程序关闭（或异常退出）时任务未完成，可点击“继续”从断点继续' : '程序关闭时仍在排队，可点击“继续”' });
+    }
+    this.resumeFlags = new Map();
+    this.pausing = new Set();
     this.log.info(`服务启动，数据目录 ${dataDir}`);
   }
 
@@ -141,11 +146,14 @@ class AgentService extends EventEmitter {
   }
 
   /** 手动开始（或重新扫描）：加入队列，按顺序依次解析 */
-  startTask(id) {
+  /** resume = true：从断点继续（复用上次扫描清单，跳过本轮已处理的文件）；否则重新扫描 */
+  startTask(id, { resume = false } = {}) {
     const t = this.store.getTask(id);
     if (!t) throw new Error('任务不存在');
     if (this.running === id || this.queue.includes(id)) return id;
     this.cancelled.delete(id);
+    this.pausing.delete(id);
+    this.resumeFlags.set(id, !!(resume && t.run_started && t.scan_list));
     this.store.updateTask(id, { status: 'pending', message: '' });
     this.queue.push(id);
     this.log.info(`[任务#${id}] 加入解析队列（第 ${this.queue.length} 位）`);
@@ -155,10 +163,20 @@ class AgentService extends EventEmitter {
   }
 
   rerunTask(id) { return this.startTask(id); }
+  resumeTask(id) { return this.startTask(id, { resume: true }); }
+
+  /** 中断正在运行或排队的任务（可继续） */
+  pauseTask(id) {
+    this.pausing.add(id);
+    this.cancelled.add(id);
+    const i = this.queue.indexOf(id);
+    if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'paused', message: '已中断，可点击“继续”' }); this.emitTask(id); }
+    this.log.info(`[任务#${id}] 请求中断`);
+  }
 
   startAll() {
-    const ids = this.store.listTasks().filter((t) => ['draft', 'interrupted', 'cancelled', 'failed'].includes(t.status)).map((t) => t.id).reverse();
-    for (const id of ids) this.startTask(id);
+    const ids = this.store.listTasks().filter((t) => ['draft', 'interrupted', 'paused', 'cancelled', 'failed'].includes(t.status)).map((t) => t.id).reverse();
+    for (const id of ids) { const t = this.store.getTask(id); this.startTask(id, { resume: ['interrupted', 'paused'].includes(t.status) }); }
     return ids.length;
   }
 
@@ -249,29 +267,45 @@ class AgentService extends EventEmitter {
     const tag = `[任务#${id}]`;
     const log = logger.child('task');
     const t0 = Date.now();
-    this.store.updateTask(id, { status: 'running', started_at: t0, parsed: 0, skipped: 0, duplicate: 0, failed: 0 });
+    const resume = this.resumeFlags.get(id) && task.run_started && task.scan_list;
+    this.resumeFlags.delete(id);
+    if (resume) this.store.updateTask(id, { status: 'running', started_at: t0 });
+    else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: null, parsed: 0, skipped: 0, duplicate: 0, failed: 0 });
     let roots = null;
     try { roots = task.roots ? JSON.parse(task.roots) : null; } catch { roots = null; }
     const explicit = roots && !Array.isArray(roots) ? roots : null;
     if (explicit) roots = null;
     const fullDisk = !!roots;
-    log.info(`${tag} 开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
     const engines = await this.office.detect();
-    const files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, {
-      fullDisk, isCancelled: () => this.cancelled.has(id),
-      onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
-    });
+    let files;
+    if (resume) {
+      files = JSON.parse(task.scan_list);
+      log.info(`${tag} 从断点继续：沿用上次扫描清单 ${files.length} 个文档`);
+    } else {
+      log.info(`${tag} 开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
+      files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, {
+        fullDisk, isCancelled: () => this.cancelled.has(id),
+        onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
+      });
+      if (!this.cancelled.has(id)) this.store.updateTask(id, { scan_list: JSON.stringify(files) });
+    }
     this.store.updateTask(id, { total: files.length });
     const byKind = {};
     for (const f of files) { const k = KIND_OF.get(path.extname(f).toLowerCase()); byKind[k] = (byKind[k] || 0) + 1; }
     log.info(`${tag} 发现 ${files.length} 个文档（${Object.entries(byKind).map(([k, n]) => `${DOC_TYPES[k].label} ${n}`).join('，')}）`);
     this.emitProgress(id, { stage: 'scanned', total: files.length, byKind });
     this.emitTask(id);
-    const counts = { parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
+    const prev = this.store.getTask(id);
+    const counts = resume ? { parsed: prev.parsed || 0, skipped: prev.skipped || 0, duplicate: prev.duplicate || 0, failed: prev.failed || 0 } : { parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
+    const handled = resume ? this.store.handledSince(id, task.run_started) : new Set();
+    if (resume) log.info(`${tag} 本轮已处理 ${handled.size} 个，剩余 ${files.filter((f) => !handled.has(f)).length} 个`);
     let changed = false;
+    let stoppedAt = -1;
     for (let i = 0; i < files.length; i++) {
-      if (this.cancelled.has(id)) { log.warn(`${tag} 已取消，处理到第 ${i}/${files.length} 个文件`); break; }
+      if (this.cancelled.has(id)) { stoppedAt = i; log.warn(`${tag} 已${this.pausing.has(id) ? '中断' : '取消'}，处理到第 ${i}/${files.length} 个文件`); break; }
       const file = files[i];
+      if (handled.has(file)) continue;
+      if (!fs.existsSync(file)) { counts.failed++; this.store.linkTaskFile(id, null, file, 'failed', '文件已不存在'); continue; }
       this.emitTask(id, { current: file, done: i });
       this.emitProgress(id, { stage: 'file', index: i + 1, total: files.length, file, counts: { ...counts } });
       try {
@@ -291,9 +325,11 @@ class AgentService extends EventEmitter {
       await this.afterLibraryChange(log, tag, id);
     }
     const cancelled = this.cancelled.delete(id);
+    const paused = this.pausing.delete(id);
     const ms = Date.now() - t0;
-    const msg = `解析 ${counts.parsed}，已解析过跳过 ${counts.skipped}，重复文件 ${counts.duplicate}，失败 ${counts.failed}，耗时 ${(ms / 1000).toFixed(1)}s`;
-    this.store.updateTask(id, { status: cancelled ? 'cancelled' : 'done', finished_at: Date.now(), message: msg });
+    let msg = `解析 ${counts.parsed}，已解析过跳过 ${counts.skipped}，重复文件 ${counts.duplicate}，失败 ${counts.failed}，耗时 ${(ms / 1000).toFixed(1)}s`;
+    if (cancelled && stoppedAt >= 0) msg = `已中断（处理到 ${stoppedAt}/${files.length}），可点击“继续”从断点继续；` + msg;
+    this.store.updateTask(id, { status: cancelled ? (paused || stoppedAt >= 0 ? 'paused' : 'cancelled') : 'done', finished_at: Date.now(), message: msg });
     log.info(`${tag} 任务结束：${msg}`);
     this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length });
     if (changed && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
@@ -351,7 +387,11 @@ class AgentService extends EventEmitter {
       }
     }
     const mediaKey = crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
-    const onSlide = (i, n, t) => this.emitProgress(taskId, { stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit });
+    // 逐页进度：附带页面版式、文字、讲解词与生成的 Markdown，用于“解析动态”实时展示
+    const onSlide = (i, n, t, sl) => this.emitProgress(taskId, {
+      stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit, kind,
+      detail: sl ? { theme: sl.theme, bg: sl.bg, layout: sl.layout || null, text: String(sl.text || '').slice(0, 600), notes: String(sl.notes || '').slice(0, 400), md: slideToMd(sl, kind).slice(0, 3000), media: (sl.media || []).map((m) => ({ type: m.type, name: m.name, subtitles: (m.subtitles || []).length })) } : null,
+    });
     this.emitProgress(taskId, { stage: 'parse', file, kind });
     let parsed;
     try {
@@ -390,7 +430,7 @@ class AgentService extends EventEmitter {
     const dark = slides.filter((s) => s.theme === 'dark').length;
     const allText = slides.map((s) => `${s.title}\n${s.text}\n${s.notes}`).join('\n');
     const fileRow = {
-      path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, title: title || (slides[0] && slides[0].title) || '',
+      path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), atime_pre: Math.round(st.atimeMs), ctime: Math.round(st.birthtimeMs || st.ctimeMs), author, title: title || (slides[0] && slides[0].title) || '',
       fingerprint: fp, status: 'parsed', kind, error: null, dup_of: null, slide_count: slides.length,
       theme: !slides.length ? 'light' : dark === 0 ? 'light' : dark === slides.length ? 'dark' : (dark / slides.length >= 0.6 ? 'dark' : dark / slides.length <= 0.4 ? 'light' : 'mixed'),
       dark_slides: dark, light_slides: slides.length - dark,
@@ -521,11 +561,12 @@ class AgentService extends EventEmitter {
     return { task: { ...task, running: this.running === id }, files, stats: st };
   }
 
-  library() { return this.store.listFiles().map((f) => ({ ...f })); }
+  library() { return this.store.listFiles().filter((f) => f.status !== 'recycled'); }
 
-  fileDetail(id) {
+  fileDetail(id, { record = true } = {}) {
     const f = this.store.getFile(id);
     if (!f) return null;
+    if (record) this.recordView(f.status === 'duplicate' && f.dup_of ? f.dup_of : f.id, 'view');
     const target = f.status === 'duplicate' && f.dup_of ? this.store.getFile(f.dup_of) : f;
     const slides = this.store.slidesOf(target.id);
     const cp = this.store.counterparts(slides.map((s) => s.id));
@@ -621,7 +662,7 @@ class AgentService extends EventEmitter {
     const tmp = path.join(this.cacheDir, 'convert', `merge-${Date.now()}.pptx`);
     fs.mkdirSync(path.dirname(tmp), { recursive: true });
     await exportPptx(sels, tmp, { log });
-    const r = await convertTheme(tmp, outPath, dirs, { log });
+    const r = await convertTheme(tmp, outPath, dirs, { log, rules: this.getConvertRules() });
     fs.rmSync(tmp, { force: true });
     // 转换后预览：解析输出文件；有 PowerPoint/LibreOffice 时生成真实截图
     const key = 'conv-' + crypto.createHash('sha1').update(outPath + Date.now()).digest('hex').slice(0, 10);
@@ -631,7 +672,25 @@ class AgentService extends EventEmitter {
       try { thumbs = await this.office.thumbnails(outPath, path.join(this.thumbDir, key), key, this.config.thumbnails, 960); } catch (e) { log.warn('转换结果截图失败', e); }
     }
     const preview = back.slides.map((s, i) => ({ id: `${key}-${i}`, idx: s.index, title: s.title, theme: s.theme, bg: s.bg, layout: s.layout, text: s.text, dir: dirs[i], thumb: thumbs && thumbs.images ? thumbs.images[i] : null }));
-    return { ...r, preview, size: fs.statSync(outPath).size };
+    // 转换结果加入资料库（“黑白底转换结果”任务），便于用逐页浏览窗口查看、检索与再次导出
+    let imported = null;
+    try { imported = await this.importOutput(outPath, '黑白底转换结果'); } catch (e) { log.warn('转换结果加入资料库失败', e); }
+    return { ...r, preview, size: fs.statSync(outPath).size, fileId: imported && imported.fileId, slideIds: imported ? imported.slideIds : [] };
+  }
+
+  /** 把本工具生成的文件（转换结果等）解析进资料库，归入同名的固定任务 */
+  async importOutput(file, taskName) {
+    let task = this.store.listTasks().find((t) => t.name === taskName && t.dir === '（本工具生成）');
+    const id = task ? task.id : this.store.createTask('（本工具生成）', taskName);
+    const log = logger.child('task');
+    const engines = await this.office.detect();
+    const r = await this.processFile(id, file, engines, log, `[任务#${id}]`, { force: true });
+    const counts = this.store.db.prepare("SELECT SUM(action = 'parsed') p, SUM(action = 'failed') f FROM task_files WHERE task_id = ?").get(id);
+    this.store.updateTask(id, { status: 'done', total: (counts.p || 0) + (counts.f || 0), parsed: counts.p || 0, failed: counts.f || 0, finished_at: Date.now(), message: `本工具生成的文件，共 ${counts.p || 0} 个` });
+    await this.afterLibraryChange(log, '', id);
+    this.emitTask(id);
+    const f = this.store.fileByPath(file);
+    return r === 'parsed' && f ? { fileId: f.id, slideIds: this.store.slidesOf(f.id).map((x) => x.id) } : null;
   }
 
   /**
@@ -692,11 +751,211 @@ class AgentService extends EventEmitter {
     return this.convertSlides(items, outPath);
   }
 
+  // ================= 回收站 =================
+  recycleDir() { return path.join(this.dataDir, 'recycle'); }
+
+  /**
+   * 把文档移到回收站。moveFile = true：原文件移动到回收站目录；false：只从资料库移除，原文件不动。
+   * 被回收的若是“主文件”，其重复副本会自动提升为主文件（解析结果保留）。
+   */
+  async recycleFiles(fileIds, { moveFile = true, reason = '' } = {}) {
+    const log = logger.child('recycle');
+    let ok = 0; const errors = [];
+    for (const id of [...new Set(fileIds)]) {
+      const f = this.store.getFile(id);
+      if (!f || f.status === 'recycled') continue;
+      try {
+        let binPath = null, moved = false;
+        if (moveFile && fs.existsSync(f.path)) {
+          const dir = path.join(this.recycleDir(), `${Date.now()}-${id}`);
+          fs.mkdirSync(dir, { recursive: true });
+          binPath = path.join(dir, f.name);
+          moveFileSafe(f.path, binPath);
+          moved = true;
+        }
+        if (f.status === 'parsed') {
+          const dups = this.store.duplicatesOf(id).filter((d) => fs.existsSync(d.path));
+          if (dups.length) {
+            const heir = dups[0];
+            this.store.moveSlides(id, heir.id);
+            const keep = this.store.db.prepare('SELECT * FROM files WHERE id = ?').get(id);
+            this.store.updateFile(heir.id, { status: 'parsed', dup_of: null, theme: keep.theme, slide_count: keep.slide_count, dark_slides: keep.dark_slides, light_slides: keep.light_slides, video_count: keep.video_count, notes_count: keep.notes_count, lang: keep.lang, tags: keep.tags, category: keep.category, terms: keep.terms, md_path: keep.md_path, meta: keep.meta, vec: keep.vec, preview: keep.preview, kind: keep.kind });
+            for (const d of dups.slice(1)) this.store.updateFile(d.id, { dup_of: heir.id });
+            log.info(`回收主文件，其重复副本提升为主文件：${heir.path}`);
+          }
+        }
+        this.store.addRecycle({ file_id: id, name: f.name, orig_path: f.path, bin_path: binPath, moved, prev_status: f.status, size: f.size, kind: f.kind, slide_count: f.slide_count, reason });
+        this.store.updateFile(id, { status: 'recycled' });
+        ok++;
+        log.info(`移到回收站：${f.path}${moved ? ` → ${binPath}` : '（仅从资料库移除，原文件保留）'}`);
+      } catch (e) { errors.push(`${f.name}：${e.message}`); log.error(`移到回收站失败 ${f.path}`, e); }
+    }
+    if (ok) await this.afterLibraryChange(log);
+    return { ok, errors };
+  }
+
+  recycleList() {
+    return this.store.listRecycle().map((r) => ({ ...r, exists: r.moved ? fs.existsSync(r.bin_path) : fs.existsSync(r.orig_path) }));
+  }
+
+  /** 还原：原文件移回原位置（原位置已有同名文件时还原为“名称(还原)”），恢复解析结果 */
+  async restoreRecycled(ids) {
+    const log = logger.child('recycle');
+    let ok = 0; const errors = [];
+    for (const rid of ids) {
+      const r = this.store.getRecycle(rid);
+      if (!r) continue;
+      try {
+        let target = r.orig_path;
+        if (r.moved) {
+          if (!fs.existsSync(r.bin_path)) throw new Error('回收站中的文件已不存在');
+          if (fs.existsSync(target)) target = target.replace(/(\.[^.\\/]+)$/, '(还原)$1');
+          fs.mkdirSync(path.dirname(target), { recursive: true });
+          moveFileSafe(r.bin_path, target);
+          fs.rmSync(path.dirname(r.bin_path), { recursive: true, force: true });
+        }
+        const f = this.store.getFile(r.file_id);
+        if (f) {
+          const hasSlides = this.store.db.prepare('SELECT COUNT(*) n FROM slides WHERE file_id = ?').get(f.id).n;
+          const heir = !hasSlides && f.fingerprint ? this.store.fileByFingerprint(f.fingerprint) : null;
+          if (r.prev_status === 'parsed' && !hasSlides && heir) this.store.updateFile(f.id, { status: 'duplicate', dup_of: heir.id, path: target });
+          else this.store.updateFile(f.id, { status: r.prev_status === 'parsed' && !hasSlides ? 'failed' : r.prev_status, path: target, error: r.prev_status === 'parsed' && !hasSlides ? '解析结果已丢失，请重新解析' : f.error });
+        }
+        this.store.removeRecycle(rid);
+        ok++;
+        log.info(`从回收站还原：${target}`);
+      } catch (e) { errors.push(`${r.name}：${e.message}`); log.error(`还原失败 ${r.name}`, e); }
+    }
+    if (ok) await this.afterLibraryChange(log);
+    return { ok, errors };
+  }
+
+  /** 彻底删除：删除回收站中的文件（仅限移入回收站的那份）及其解析数据 */
+  purgeRecycled(ids) {
+    const log = logger.child('recycle');
+    let ok = 0; const errors = [];
+    for (const rid of ids) {
+      const r = this.store.getRecycle(rid);
+      if (!r) continue;
+      try {
+        if (r.moved && r.bin_path) fs.rmSync(path.dirname(r.bin_path), { recursive: true, force: true });
+        const f = this.store.getFile(r.file_id);
+        if (f && f.status === 'recycled') {
+          const mk = crypto.createHash('sha1').update(r.orig_path).digest('hex').slice(0, 16);
+          this.store.deleteFile(f.id);
+          for (const d of [path.join(this.thumbDir, mk), path.join(this.mediaDir, mk)]) fs.rmSync(d, { recursive: true, force: true });
+          if (f.md_path && !this.store.db.prepare('SELECT 1 FROM files WHERE md_path = ?').get(f.md_path)) fs.rmSync(f.md_path, { force: true });
+        }
+        this.store.removeRecycle(rid);
+        ok++;
+        log.info(`彻底删除：${r.orig_path}${r.moved ? '（已删除回收站中的文件）' : '（仅删除解析数据，原文件未动）'}`);
+      } catch (e) { errors.push(`${r.name}：${e.message}`); log.error(`彻底删除失败 ${r.name}`, e); }
+    }
+    this.search.invalidate();
+    return { ok, errors };
+  }
+
+  // ================= 讲解词 / Markdown 编辑与 Agent 生成 =================
+  /** 保存用户编辑：f = { notes?, md? }；传 null 表示恢复原文。同步更新全文索引与 Markdown 文件 */
+  updateSlideText(id, f) {
+    const s = this.store.getSlide(id, false);
+    if (!s) throw new Error('页面不存在');
+    const patch = {};
+    if ('notes' in f) patch.notes_user = f.notes === null || f.notes === s.notes_orig ? null : String(f.notes);
+    if ('md' in f) patch.md_user = f.md === null || f.md === s.md_orig ? null : String(f.md);
+    this.store.setSlideUser(id, patch);
+    const now = this.store.getSlide(id, false);
+    const file = this.store.getFile(now.file_id);
+    this.store.updateFts(id, { title: tokenize(now.title).join(' '), body: tokenize(now.text).join(' '), notes: tokenize(now.notes).join(' '), meta: tokenize(`${file.name} ${path.basename(file.dir || '')}`).join(' ') });
+    this.rewriteMarkdownFile(file);
+    this.search.invalidate();
+    logger.child('edit').info(`编辑保存：${file.name} 第 ${now.idx} ${file.kind === 'word' ? '节' : '页'}（${Object.keys(f).map((k) => (k === 'notes' ? '讲解词' : 'Markdown')).join('、')}${Object.values(f).some((v) => v === null) ? '，恢复原文' : ''}）`);
+    return this.slideDetail(id);
+  }
+
+  rewriteMarkdownFile(file) {
+    if (!file || !file.md_path) return;
+    try {
+      const slides = this.store.slidesOf(file.id).map((x) => ({ ...x, index: x.idx }));
+      fs.writeFileSync(file.md_path, docToMd({ ...file }, slides));
+    } catch (e) { this.log.warn('更新 Markdown 文件失败', e); }
+  }
+
+  /** Agent 生成讲解词：配置了大模型则调用大模型，否则使用内置模板离线生成 */
+  async generateNotes(id) {
+    const s = this.store.getSlide(id, false);
+    if (!s) throw new Error('页面不存在');
+    const file = this.store.getFile(s.file_id);
+    const client = llm.client(this.config.llm);
+    let text = '', source = '';
+    if (client) {
+      try { text = (await client.speakerNotes({ fileName: file.name, title: s.title, text: s.text, md: s.md, notes: s.notes })).trim(); source = `大模型 ${this.config.llm.model}`; } catch (e) { this.log.warn('大模型生成讲解词失败，改用内置模板', e); }
+    }
+    if (!text) { text = templateNotes(s, file); source = '内置模板（未配置大模型）'; }
+    this.store.setSlideUser(id, { notes_ai: text });
+    logger.child('agent').info(`生成讲解词：${file.name} 第 ${s.idx} 页（${source}，${text.length} 字）`);
+    return { text, source };
+  }
+
+  // ================= 黑白底互转规则脚本 =================
+  rulesFile() { return path.join(this.dataDir, 'convert-rules.json'); }
+  getConvertRules() {
+    try { return normalizeRules(JSON.parse(fs.readFileSync(this.rulesFile(), 'utf8'))); } catch { return normalizeRules(null); }
+  }
+  setConvertRules(r) {
+    const n = normalizeRules({ ...r, updatedAt: Date.now() });
+    fs.writeFileSync(this.rulesFile(), JSON.stringify(n, null, 2));
+    logger.child('convert').info('转换规则脚本已更新，下次转换生效');
+    return n;
+  }
+  resetConvertRules() { fs.rmSync(this.rulesFile(), { force: true }); this.log.info('转换规则已恢复默认'); return this.getConvertRules(); }
+  async convertRulesFromText(request) {
+    const client = llm.client(this.config.llm);
+    if (!client) throw new Error('用自然语言修改规则需要在“设置”中配置大模型；也可以直接在表单中修改');
+    const r = await client.convertRules(this.getConvertRules(), request);
+    if (!r) throw new Error('大模型没有返回有效的规则 JSON');
+    return normalizeRules({ ...r, description: request });
+  }
+
+  recordView(fileId, kind = 'view') { try { this.store.addView(fileId, kind); } catch { /* ignore */ } }
+  recordOpenPath(p) { const f = this.store.fileByPath(p); if (f) this.recordView(f.id, 'open'); }
+
+  /**
+   * 总览分析：实时读取文件的修改 / 访问时间（stat 不会改变访问时间），
+   * 扣除本工具解析时产生的读取（解析时刻前后 1 小时内的访问时间视为解析造成，回退到解析前记录的访问时间），
+   * 再与“在本工具中查看 / 打开”的记录合并，得到“最近一次被打开”。
+   */
+  analytics() {
+    const now = Date.now();
+    const views = new Map(this.store.viewStats().map((v) => [v.file_id, v]));
+    const files = this.store.listFiles().filter((f) => f.status === 'parsed' || f.status === 'duplicate').map((f) => {
+      let st = null;
+      try { st = fs.statSync(f.path); } catch { /* 文件已移动或删除 */ }
+      const v = views.get(f.id) || { views: 0, opens: 0, last: null };
+      let atime = st ? Math.round(st.atimeMs) : null;
+      let atimeSrc = 'system';
+      if (atime && f.parsed_at && atime >= f.parsed_at - 5000 && atime <= f.parsed_at + 3600 * 1000) {
+        atime = f.atime_pre && f.atime_pre < f.parsed_at - 5000 ? f.atime_pre : null;
+        atimeSrc = atime ? 'pre-parse' : 'unknown';
+      }
+      const mtimeNow = st ? Math.round(st.mtimeMs) : f.mtime;
+      const candidates = [atime, mtimeNow, v.last].filter(Boolean);
+      const lastOpen = candidates.length ? Math.max(...candidates) : null;
+      return {
+        id: f.id, name: f.name, path: f.path, dir: f.dir, kind: f.kind || 'ppt', size: f.size, slide_count: f.slide_count, author: f.author, category: f.category, tags: f.tags, theme: f.theme, status: f.status,
+        mtime: mtimeNow, modifiedSinceParse: st ? Math.abs(st.mtimeMs - f.mtime) > 2000 : false, ctime: f.ctime || (st ? Math.round(st.birthtimeMs || st.ctimeMs) : null),
+        atime, atimeSrc, views: v.views || 0, opens: v.opens || 0, lastView: v.last, lastOpen, exists: !!st, parsed_at: f.parsed_at,
+      };
+    });
+    const since = now - 30 * 86400000;
+    return { now, files, viewTimes: this.store.viewDaily(since), history: this.store.historyDaily(since) };
+  }
+
   /** 资料库总览：每个任务及全部任务识别到的文档 */
   overview() {
     const files = this.store.listFiles();
     const tasks = this.store.listTasks().map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: [...new Set(this.store.taskFiles(t.id).map((f) => f.id).filter(Boolean))] }));
-    return { tasks, files };
+    return { tasks, files: files.filter((f) => f.status !== 'recycled') };
   }
 
   stats() { return { ...this.store.stats(), dataDir: this.dataDir, running: this.running, queued: this.queue.length }; }
@@ -707,6 +966,37 @@ class AgentService extends EventEmitter {
   }
 
   close() { this.store.close(); }
+}
+
+/** 移动文件（跨磁盘时复制后删除） */
+function moveFileSafe(from, to) {
+  try { fs.renameSync(from, to); } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    fs.copyFileSync(from, to);
+    fs.unlinkSync(from);
+  }
+}
+
+/** 内置讲解词模板：根据标题、要点、表格与图表组织成口语化讲解 */
+function templateNotes(s, file) {
+  const title = String(s.title || '').trim() || `第 ${s.idx} 页`;
+  const lines = String(s.md || '').split('\n');
+  const bullets = lines.filter((l) => /^\s*-\s+/.test(l)).map((l) => l.replace(/^\s*-\s+/, '').replace(/\*\*/g, '').trim()).filter(Boolean);
+  const paras = String(s.text || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.includes('|'));
+  const points = (bullets.length ? bullets : paras).filter((p) => p !== title).slice(0, 6);
+  const table = lines.filter((l) => /^\|/.test(l) && !/^\|\s*-/.test(l));
+  const chart = lines.find((l) => l.startsWith('📊'));
+  const num = ['第一', '第二', '第三', '第四', '第五', '第六'];
+  const out = [`接下来我们看「${title}」。`];
+  if (points.length === 1) out.push(`这一页的核心是：${points[0]}。`);
+  else if (points.length > 1) out.push(`这一页主要讲 ${points.length} 点：${points.map((p, i) => `${num[i]}，${p.replace(/[。；;]$/, '')}`).join('；')}。`);
+  if (table.length > 1) {
+    const head = table[0].split('|').map((c) => c.trim()).filter(Boolean);
+    out.push(`表格从${head.slice(0, 4).join('、')}等维度做了对比，共 ${table.length - 1} 行数据，大家可以重点关注差异最大的几项。`);
+  }
+  if (chart) out.push(`图表${chart.replace(/^📊\s*\*\*图表[^*]*\*\*[:：]?/, '').trim() ? '「' + chart.replace(/^📊\s*\*\*图表[^*]*\*\*[:：]?/, '').trim() + '」' : ''}直观展示了变化趋势。`);
+  out.push(`以上就是${title}的主要内容${file && file.kind === 'word' ? '' : '，下面我们继续'}。`);
+  return out.join('\n');
 }
 
 async function borderLuminance(pngPath) {

@@ -47,6 +47,13 @@ export default function SettingsView() {
           </div>
         </section>
         <section>
+          <h3>关闭窗口时</h3>
+          <div className="seg">
+            {[['ask', '每次询问'], ['minimize', '最小化到任务栏'], ['quit', '完全退出']].map(([k, v]) => <button key={k} className={(cfg.closeAction || 'ask') === k ? 'on' : ''} onClick={() => set({ closeAction: k })}>{v}</button>)}
+          </div>
+          <p className="muted small">在关闭提示框中勾选“记住我的选择”会自动设置这里；改完点击右上角“保存设置”生效。</p>
+        </section>
+        <section>
           <h3>数据保存目录（解析结果 · 数据库 · 本地 RAG 索引）</h3>
           <p className="muted">解析出的页面、Markdown、标签、全文索引与向量都保存在本地 SQLite 数据库中，检索完全在本机进行（本地 RAG）。可把数据目录放到空间更大的磁盘。切换后程序会自动重启。</p>
           {dd && <p>当前目录：<code>{dd.current}</code>{dd.env ? '（由环境变量 PPTA_DATA_DIR 指定）' : dd.bootstrap ? '（自定义）' : dd.portable ? '（便携版默认：exe 同级目录）' : '（默认）'}</p>}

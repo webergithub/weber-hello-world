@@ -38,7 +38,7 @@ export default function GenerateView({ state, setState }) {
   const move = (i, d) => { const n = [...list]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; set({ rows: n }); };
   const make = async () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[-T:]/g, '');
-    const out = await api.saveFile(`智能生成_${(desc || 'PPT').slice(0, 20).replace(/[\\/:*?"<>|\s]+/g, '_')}_${stamp}.pptx`, 'pptx');
+    const out = await api.saveFile(`智能生成_${(desc || 'PPT').slice(0, 20).replace(/[\\/:*?"<>|\s]+/g, '_')}_${stamp}.pptx`, 'pptx', 'generate');
     if (!out) return;
     setMaking(true);
     try {

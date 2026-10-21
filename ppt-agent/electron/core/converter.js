@@ -13,9 +13,13 @@ const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
 
+// 默认转换规则（可在界面“转换规则设置”中编辑，保存为规则脚本 convert-rules.json，下次转换生效）
+// null 表示“无 / 透明”。logoMaxArea：小于该页面面积比例的图片视为 logo；fullBgMinArea：大于该比例的图片视为整页背景
 const RULES = {
+  version: 1,
   toLight: { bg: 'FFFFFF', text: '000000', accentText: 'C00000', shapeFill: 'D9D9D9', shapeLine: 'BFBFBF', tableLine: 'BFBFBF', headerFill: 'F2F2F2', logo: 'C00000' },
   toDark: { bg: '000000', text: 'FFFFFF', accentText: 'FFFFFF', shapeFill: null, shapeLine: 'FFFFFF', tableLine: 'FFFFFF', headerFill: null, logo: null },
+  options: { logoMaxArea: 0.06, fullBgMinArea: 0.85, removeFullBg: true, keepAccentText: true },
 };
 const FILL_TAGS = new Set(['a:noFill', 'a:solidFill', 'a:gradFill', 'a:blipFill', 'a:pattFill', 'a:grpFill']);
 const SPPR_AFTER_FILL = ['a:ln', 'a:effectLst', 'a:effectDag', 'a:scene3d', 'a:sp3d', 'a:extLst'];
@@ -74,7 +78,7 @@ function isColoredFill(fillParent, theme) {
 
 function setTextColor(rPr, rule, theme) {
   const doc = rPr.ownerDocument;
-  const color = isColoredFill(rPr, theme) ? rule.accentText : rule.text;
+  const color = rule.keepAccent && isColoredFill(rPr, theme) ? rule.accentText : rule.text;
   removeFills(rPr);
   insertBefore(rPr, solid(doc, color), RPR_AFTER_FILL);
 }
@@ -98,7 +102,7 @@ function styleRefIdx(sp, ref) {
   return r ? Number(r.getAttribute('idx') || 0) : 0;
 }
 
-function transformTree(doc, rule, theme, slideArea, stats) {
+function transformTree(doc, rule, theme, slideArea, stats, options = RULES.options) {
   // 1) 背景
   for (const cSld of all(doc, 'p:cSld')) {
     const old = childEl(cSld, 'p:bg');
@@ -159,8 +163,8 @@ function transformTree(doc, rule, theme, slideArea, stats) {
     const isMedia = all(pic, 'a:videoFile').length || all(pic, 'a:audioFile').length || all(pic, 'p14:media').length;
     const ext = all(pic, 'a:ext').find((e) => e.parentNode && e.parentNode.nodeName === 'a:xfrm');
     const area = ext ? Number(ext.getAttribute('cx')) * Number(ext.getAttribute('cy')) : 0;
-    if (!isMedia && area >= 0.85 * slideArea) { pic.parentNode.removeChild(pic); stats.bgPictures++; continue; }
-    if (!isMedia && rule.logo && area > 0 && area <= 0.06 * slideArea) {
+    if (!isMedia && options.removeFullBg && area >= options.fullBgMinArea * slideArea) { pic.parentNode.removeChild(pic); stats.bgPictures++; continue; }
+    if (!isMedia && rule.logo && area > 0 && area <= options.logoMaxArea * slideArea) {
       const blip = all(pic, 'a:blip')[0];
       if (!blip) continue;
       for (const c of elems(blip)) if (['a:duotone', 'a:clrChange', 'a:grayscl', 'a:biLevel'].includes(c.nodeName)) blip.removeChild(c);
@@ -249,11 +253,12 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
     // 先读主题原色（用于判断“彩色文字”），再改主题
     for (const [part, p] of plan) if (p.kind === 'theme') themeOf.set(part, themeColors(await parse(part)));
     const anyTheme = themeOf.values().next().value || themeColors(null);
+    const rules = normalizeRules(opts.rules);
     for (const [part, p] of plan) {
       const doc = await parse(part);
       if (p.kind === 'theme') transformTheme(doc);
       else {
-        transformTree(doc, RULES[p.dir], anyTheme, slideArea, stats);
+        transformTree(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, slideArea, stats, rules.options);
         if (p.kind === 'master') transformMaster(doc, p.dir);
       }
       out.set(part, new XMLSerializer().serializeToString(doc));
@@ -280,4 +285,21 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
   } finally { zip.close(); }
 }
 
-module.exports = { convertTheme, RULES };
+/** 校验并补全规则脚本 */
+function normalizeRules(r) {
+  const out = JSON.parse(JSON.stringify(RULES));
+  if (!r || typeof r !== 'object') return out;
+  const hex = (v, d) => (v === null ? null : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? v.replace('#', '').toUpperCase() : d);
+  for (const dir of ['toLight', 'toDark']) for (const k of Object.keys(out[dir])) if (r[dir] && k in r[dir]) out[dir][k] = hex(r[dir][k], out[dir][k]);
+  const o = r.options || {};
+  const num = (v, d, lo, hi) => (typeof v === 'number' && v >= lo && v <= hi ? v : d);
+  out.options.logoMaxArea = num(o.logoMaxArea, out.options.logoMaxArea, 0, 0.5);
+  out.options.fullBgMinArea = num(o.fullBgMinArea, out.options.fullBgMinArea, 0.3, 1);
+  if (typeof o.removeFullBg === 'boolean') out.options.removeFullBg = o.removeFullBg;
+  if (typeof o.keepAccentText === 'boolean') out.options.keepAccentText = o.keepAccentText;
+  if (r.description) out.description = String(r.description).slice(0, 2000);
+  out.updatedAt = r.updatedAt || null;
+  return out;
+}
+
+module.exports = { convertTheme, RULES, normalizeRules };

@@ -2,8 +2,11 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmtSize, fmtTime, THEME_LABEL, KIND_LABEL, STATUS_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
+import SlideViewer from './SlideViewer';
+import DataTable from './DataTable';
+import { RecycleButton } from './Recycle';
 
-const MODES = { overview: '总览', folder: '按文件夹', name: '按文件名称', tags: '按名称与内容归类（标签）' };
+const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
 export default function LibraryView({ mode, setMode }) {
   const app = useApp();
@@ -13,12 +16,12 @@ export default function LibraryView({ mode, setMode }) {
   return (
     <div className="view">
       <div className="view-head">
-        <div className="vh-title">📚 PPT 资料库 <span className="muted small">{files.filter((f) => f.status === 'parsed').length} 个已解析文件</span></div>
-        <div className="spacer" />
-        <div className="seg">{Object.entries(MODES).map(([k, v]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{v}</button>)}</div>
+        <div className="vh-title">📚 资料库 <span className="muted small">{files.filter((f) => f.status === 'parsed').length} 个已解析文件</span></div>
       </div>
-      <div className="tab-body">
+      <div className="lib-tabs">{Object.entries(MODES).map(([k, v]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{v}</button>)}</div>
+      <div className="tab-body lib-body">
         {mode === 'overview' && <OverviewMode />}
+        {mode === 'gallery' && <GalleryMode files={files} />}
         {mode === 'folder' && <FolderMode files={files} />}
         {mode === 'name' && <NameMode files={files} />}
         {mode === 'tags' && <TagMode files={files} cats={cats} />}
@@ -156,6 +159,27 @@ function TagMode({ files, cats }) {
   );
 }
 
+// PPT 总览库：以逐页浏览窗口的形式浏览资料库中的全部文档（↑↓ 切换文件，←→ 翻页）
+function GalleryMode({ files }) {
+  const [kind, setKind] = useState('');
+  const list = useMemo(() => files.filter((f) => f.status === 'parsed' && f.slide_count > 0 && (!kind || (f.kind || 'ppt') === kind)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files, kind]);
+  const [cur, setCur] = useState(null);
+  const [shown, setShown] = useState(null);
+  const ids = list.map((f) => f.id);
+  const start = cur && ids.includes(cur) ? cur : ids[0];
+  useEffect(() => { const el = document.querySelector(`.gallery-side [data-gid="${shown}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }, [shown]);
+  return (
+    <div className="gallery">
+      <div className="gallery-side">
+        <div className="col-head"><span>文档（{list.length}）</span>
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option></select></div>
+        {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{f.kind === 'word' ? '📄' : '🖼'} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
+      </div>
+      <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
+    </div>
+  );
+}
+
 // 总览：每个任务 / 全部任务识别到的所有文档的汇总信息
 function OverviewMode() {
   const app = useApp();
@@ -163,55 +187,56 @@ function OverviewMode() {
   const [taskId, setTaskId] = useState('all');
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
-  const [sort, setSort] = useState({ k: 'name', d: 1 });
+  const [sel, setSel] = useState(() => new Set());
   useEffect(() => { api.overview().then(setData); }, [app.taskTick]);
   const byId = useMemo(() => new Map(data.files.map((f) => [f.id, f])), [data]);
   const scope = taskId === 'all' ? data.files : ((data.tasks.find((t) => String(t.id) === String(taskId)) || { fileIds: [] }).fileIds.map((id) => byId.get(id)).filter(Boolean));
   const rows = useMemo(() => {
     const f = q.trim().toLowerCase();
-    const list = scope.filter((x) => (!kind || (x.kind || 'ppt') === kind) && (!f || x.path.toLowerCase().includes(f) || (x.tags || []).join(' ').toLowerCase().includes(f) || (x.author || '').toLowerCase().includes(f) || (x.category || '').includes(f)));
-    const get = (r) => ({ name: r.name, pages: r.slide_count || 0, size: r.size || 0, mtime: r.mtime || 0, dark: r.dark_slides || 0, author: r.author || '', category: r.category || '' }[sort.k]);
-    return [...list].sort((a, b) => { const x = get(a), y = get(b); return (typeof x === 'string' ? x.localeCompare(y, 'zh') : x - y) * sort.d; });
-  }, [scope, q, kind, sort]);
+    return scope.filter((x) => (!kind || (x.kind || 'ppt') === kind) && (!f || x.path.toLowerCase().includes(f) || (x.tags || []).join(' ').toLowerCase().includes(f) || (x.author || '').toLowerCase().includes(f) || (x.category || '').includes(f)));
+  }, [scope, q, kind]);
   const ok = rows.filter((r) => r.status === 'parsed');
   const sum = (k) => ok.reduce((a, r) => a + (r[k] || 0), 0);
   const ppt = ok.filter((r) => (r.kind || 'ppt') === 'ppt'), word = ok.filter((r) => r.kind === 'word');
   const cats = {}; for (const r of ok) cats[r.category || '其他'] = (cats[r.category || '其他'] || 0) + 1;
   const authors = new Set(ok.map((r) => r.author).filter(Boolean));
-  const th = (k, label) => <th className="sortable" onClick={() => setSort({ k, d: sort.k === k ? -sort.d : 1 })}>{label}{sort.k === k ? (sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>;
   const cards = [['文档总数', rows.length], ['已解析', ok.length], ['PPT 文件', ppt.length], ['PPT 页数', ppt.reduce((a, r) => a + (r.slide_count || 0), 0)], ['黑底页', sum('dark_slides')], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0)],
     ['Word 文档', word.length], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0)], ['视频', sum('video_count')], ['作者数', authors.size], ['总大小', fmtSize(rows.reduce((a, r) => a + (r.size || 0), 0))]];
+  const columns = [
+    { key: 'name', label: '文件名', render: (r) => <span className="link" onClick={() => r.status !== 'failed' && app.openFile(r.id)} title={r.path}>{r.name}</span> },
+    { key: 'kind', label: '类型', sort: (r) => r.kind || 'ppt', render: (r) => KIND_LABEL[r.kind || 'ppt'] },
+    { key: 'dir', label: '目录', className: 'muted small ellipsis', render: (r) => <span title={r.dir}>{r.dir}</span> },
+    { key: 'slide_count', label: '页数/节数', sort: (r) => r.slide_count || 0, render: (r) => `${r.slide_count || 0} ${unitOf(r)}` },
+    { key: 'dark_slides', label: '黑底页', sort: (r) => r.dark_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.dark_slides || 0 : '-') },
+    { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.light_slides || 0 : '-') },
+    { key: 'theme', label: '底色', render: (r) => ((r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
+    { key: 'category', label: '主题分类' },
+    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), className: 'tags-cell', render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
+    { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
+    { key: 'author', label: '作者' },
+    { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },
+    { key: 'video_count', label: '视频', sort: (r) => r.video_count || 0, hidden: true },
+    { key: 'notes_count', label: '含备注页', sort: (r) => r.notes_count || 0, hidden: true },
+    { key: 'lang', label: '语言', hidden: true },
+    { key: 'parsed_at', label: '解析时间', sort: (r) => r.parsed_at || 0, className: 'small nowrap', render: (r) => fmtTime(r.parsed_at), hidden: true },
+    { key: 'status', label: '状态', render: (r) => <span className={`tag act-${r.status === 'parsed' ? 'parsed' : r.status}`}>{{ parsed: '已解析', duplicate: '重复', failed: '失败' }[r.status] || r.status}</span> },
+  ];
   return (
     <div className="files-stats">
-      <div className="ws-toolbar">
-        <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-          <option value="all">全部任务（{data.files.length} 个文档）</option>
-          {data.tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}，{STATUS_LABEL[t.status] || t.status}）</option>)}
-        </select>
-        <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option></select>
-        <input className="input" placeholder="按路径 / 标签 / 作者 / 分类过滤" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260 }} />
-      </div>
       <div className="cards">{cards.map(([k, v]) => <div key={k} className="card"><div className="card-v">{v}</div><div className="card-k">{k}</div></div>)}</div>
       <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip">主题分类·{k} {v}</span>)}</div>
-      <div className="table-wrap">
-        <table className="grid">
-          <thead><tr>{th('name', '文件名')}<th>类型</th><th>目录</th>{th('pages', '页数/节数')}{th('dark', '黑底/白底页')}<th>底色</th>{th('category', '主题分类')}<th>标签</th>{th('size', '大小')}{th('author', '作者')}{th('mtime', '修改时间')}<th>状态</th></tr></thead>
-          <tbody>{rows.map((r) => (
-            <tr key={r.id}>
-              <td className="link" onClick={() => r.status !== 'failed' && app.openFile(r.id)} title={r.path}>{r.name}</td>
-              <td>{KIND_LABEL[r.kind || 'ppt']}</td>
-              <td className="muted small ellipsis" title={r.dir}>{r.dir}</td>
-              <td>{r.slide_count || 0} {unitOf(r)}</td>
-              <td>{(r.kind || 'ppt') === 'ppt' ? `${r.dark_slides || 0} / ${r.light_slides || 0}` : '-'}</td>
-              <td>{(r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : ''}</td>
-              <td>{r.category}</td>
-              <td className="tags-cell">{(r.tags || []).map((t) => <span key={t} className="tag">{t}</span>)}</td>
-              <td>{fmtSize(r.size)}</td><td>{r.author}</td><td className="small">{fmtTime(r.mtime)}</td>
-              <td><span className={`tag act-${r.status === 'parsed' ? 'parsed' : r.status}`}>{{ parsed: '已解析', duplicate: '重复', failed: '失败' }[r.status] || r.status}</span></td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
+      <DataTable id="libOverview" columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文档"
+        actions={<RecycleButton ids={[...sel]} done={() => setSel(new Set())} />}
+        toolbar={(
+          <>
+            <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+              <option value="all">全部任务（{data.files.length} 个文档）</option>
+              {data.tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}，{STATUS_LABEL[t.status] || t.status}）</option>)}
+            </select>
+            <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option></select>
+            <input className="input" placeholder="按路径 / 标签 / 作者 / 分类过滤" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
+          </>
+        )} />
     </div>
   );
 }
