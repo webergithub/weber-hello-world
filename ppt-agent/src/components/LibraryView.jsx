@@ -5,6 +5,7 @@ import SlideWorkspace from './SlideWorkspace';
 import SlideViewer from './SlideViewer';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
+import { CompareButton } from './CompareView';
 
 const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
@@ -161,6 +162,7 @@ function TagMode({ files, cats }) {
 
 // PPT 总览库：以逐页浏览窗口的形式浏览资料库中的全部文档（↑↓ 切换文件，←→ 翻页）
 function GalleryMode({ files }) {
+  const app = useApp();
   const [kind, setKind] = useState('');
   const list = useMemo(() => files.filter((f) => f.status === 'parsed' && f.slide_count > 0 && (!kind || (f.kind || 'ppt') === kind)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files, kind]);
   const [cur, setCur] = useState(null);
@@ -175,7 +177,7 @@ function GalleryMode({ files }) {
           <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option></select></div>
         {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{f.kind === 'word' ? '📄' : '🖼'} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
       </div>
-      <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
+      <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active={!app.modalOpen} compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
     </div>
   );
 }
@@ -226,7 +228,7 @@ function OverviewMode() {
       <div className="cards">{cards.map(([k, v]) => <div key={k} className="card"><div className="card-v">{v}</div><div className="card-k">{k}</div></div>)}</div>
       <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip">主题分类·{k} {v}</span>)}</div>
       <DataTable id="libOverview" columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文档"
-        actions={<RecycleButton ids={[...sel]} done={() => setSel(new Set())} />}
+        actions={<><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
             <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>

@@ -54,6 +54,7 @@ const DEFAULT_CONFIG = {
   docTypes: ['ppt', 'word'],
   uiTheme: 'system', // dark | light | system
   closeAction: 'ask', // ask | quit | minimize：关闭窗口时的行为
+  keymap: {}, // 浏览窗口快捷键：只保存与默认不同的动作 { 动作: [按键组合] }
 };
 
 class AgentService extends EventEmitter {

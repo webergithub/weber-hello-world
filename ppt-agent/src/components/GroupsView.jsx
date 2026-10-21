@@ -3,6 +3,7 @@ import { api, fmtSize, fmtTime, THEME_LABEL } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
+import { CompareButton, COMPARE_MAX } from './CompareView';
 
 // 内容相近的 PPT 分组：先比较（归一化后的）标题，再比较内容向量；支持按名称或大小排序
 export default function GroupsView() {
@@ -32,6 +33,7 @@ export default function GroupsView() {
         <div className="vh-title">🧩 相似 PPT 分组 <span className="muted small">{list.length} 组 · 判定顺序：标题相同 → 内容相似</span></div>
         <div className="spacer" />
         {sel.size > 0 && <span className="badge">已选 {sel.size}</span>}
+        <CompareButton ids={[...sel]} />
         <RecycleButton ids={[...sel]} done={() => setSel(new Set())} />
         <label className="chk"><input type="checkbox" checked={onlyTheme} onChange={(e) => setOnlyTheme(e.target.checked)} /> 仅看含黑白底版本的分组</label>
         <span className="muted">排序</span>
@@ -53,6 +55,8 @@ export default function GroupsView() {
               <span className="muted small">{g.members.length} 个文件 · 共 {fmtSize(g.totalSize)}</span>
               {g.reasons.map((r) => <span key={r} className="tag accent">{r}</span>)}
               {g.hasThemeVariants && <span className="tag theme-dark">含黑底/白底版本</span>}
+              <div className="spacer" />
+              <button className="btn tiny" title={`并排对比本组${g.members.length > COMPARE_MAX ? `前 ${COMPARE_MAX} 个` : '全部'}文件`} onClick={() => app.openCompare(g.members.slice(0, COMPARE_MAX).map((m) => m.file.id))}>⧉ 对比本组</button>
             </div>
             <DataTable id="groupMembers" columns={memberCols} rows={g.members} rowKey={(m) => m.file.id} selectable
               selected={new Set(g.members.map((m) => m.file.id).filter((id) => sel.has(id)))}

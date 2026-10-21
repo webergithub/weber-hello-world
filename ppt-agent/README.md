@@ -2,8 +2,13 @@
 
 把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-1.2.0-win-x64-portable.exe`](download/PPT-Agent-1.2.0-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-1.3.0-win-x64-portable.exe`](download/PPT-Agent-1.3.0-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
+
+## v1.3 新增
+
+- **对比窗口**：在资料库总览、相似分组（每组“⧉ 对比本组”）、总览分析、任务文件列表中勾选 2–4 个文档点击“⧉ 对比查看”，或在智能搜索中勾选相关文件对比。每个窗格有独立的翻页按钮；“一起翻页”时所有窗格同步翻页，单独翻某个窗格即可跳过一页，之后继续一起翻页；支持对齐页码、按标题对齐、文字相似度提示、并排 / 田字格、讲解词、缩略条。
+- **快捷键自定义**：设置 →“快捷键”，每个动作可绑定多个组合键（点击“＋ 添加按键”后直接按下），提供预设“↑ ↓ 翻页 · ← → 切换文件”，可单项或全部恢复默认；浏览窗口中的按键提示随设置变化。
 
 ## v1.2 新增
 
@@ -84,7 +89,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-1.2.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-1.3.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。

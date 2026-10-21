@@ -21,10 +21,12 @@
 - 文档删除一律先进回收站（可还原），彻底删除需二次确认，且只删除移入回收站的那份文件。
 - 任务状态颜色：解析中浅蓝底黑字、已完成绿色、待解析浅橙底。
 - 保存对话框按用途记住上次目录（`saveFile(name, kind, key)`）。
+- 浏览类窗口的键盘操作一律走 `src/keymap.js`（动作 → 按键，用户可在设置中自定义），不要在组件里写死按键；新增动作要加到 `ACTIONS` 与 `DEFAULT_KEYMAP`。
+- 对比窗口最多 4 个文档（`COMPARE_MAX`），文档多选的列表旁同时提供“⧉ 对比查看”。
 - 测试数据在 `test-ppts/`，由 `scripts/make_test_ppts.py` 生成；不要无谓地整体重生成已提交的大文件（会重复提交 25MB 视频）。
 
 ## 结构
 
 - `electron/core/`：解析（pptx.js、docx.js）、检索（search.js）、导出（exporter.js）、黑白底互转（converter.js）、服务编排（service.js）、数据库（db.js）。
-- `src/`：React 界面；`SlideViewer.jsx` 是逐页浏览（弹窗与搜索页签共用）。
+- `src/`：React 界面；`SlideViewer.jsx` 是逐页浏览（弹窗与搜索页签共用）；`CompareView.jsx` 是多文档对比窗口；`keymap.js` 是快捷键定义。
 - 单元测试 `tests/core.test.js` 用 Electron 内置 Node 运行（需要 node:sqlite）。

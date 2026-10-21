@@ -7,21 +7,23 @@ import { PanelLayout, useStoredLayout, DEFAULT_LAYOUT, NotesBody, MdBody, onSlid
 const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 import SlidePreview from './SlidePreview';
 import { loadSlide } from './SlideWorkspace';
+import { useKeymap, comboOf, isTyping, viewerHint, keysLabel } from '../keymap';
 
 const fileCache = new Map();
-function loadFile(id) {
+export function loadFile(id) {
   if (!fileCache.has(id)) fileCache.set(id, api.fileDetail(id));
   return fileCache.get(id);
 }
 export function clearFileCache() { fileCache.clear(); }
 
 /**
- * 逐页浏览：每页单独完整展示。
- * ← →：当前文件的上一页 / 下一页；↑ ↓：上一个 / 下一个文件；Home / End：首页 / 末页；空格：加入 / 移出导出篮。
+ * 逐页浏览：每页单独完整展示。快捷键见 keymap.js（可在设置中自定义），
+ * 默认 ← →：上一页 / 下一页；↑ ↓：上一个 / 下一个文件；空格：加入 / 移出导出篮。
  * fileIds：可切换的文件顺序（如搜索结果的文件顺序）；matched：命中的页面 id（在缩略条上标记）
  */
 export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], onClose, active = true, compact = false, onFileChange }) {
   const app = useApp();
+  const keys = useKeymap();
   const ids = useMemo(() => (fileIds && fileIds.length ? fileIds : initialFileId ? [initialFileId] : []), [fileIds, initialFileId]);
   const [fileId, setFileId] = useState(initialFileId || ids[0]);
   const [detail, setDetail] = useState(null);
@@ -93,27 +95,35 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   useEffect(() => {
     if (!active) return undefined;
     const k = (e) => {
-      const t = e.target;
-      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) return;
-      const ctrl = e.ctrlKey || e.metaKey;
+      if (isTyping(e.target)) return;
+      const c = comboOf(e);
+      const action = c && keys.lut.get(c);
+      if (!action) return;
       let handled = true;
-      switch (e.key) {
-        case 'ArrowRight': if (ctrl) { if (slides.length) setSlideId(slides[slides.length - 1].id); } else go(e.shiftKey ? 5 : 1, !e.shiftKey); break;
-        case 'ArrowLeft': if (ctrl) { if (slides.length) setSlideId(slides[0].id); } else go(e.shiftKey ? -5 : -1, !e.shiftKey); break;
-        case 'ArrowDown': goFile(e.shiftKey ? 5 : 1); break;
-        case 'ArrowUp': goFile(e.shiftKey ? -5 : -1); break;
-        case 'PageDown': go(1, true); break;
-        case 'PageUp': go(-1, true); break;
-        case 'Home': if (ctrl) { if (ids.length) setFileId(ids[0]); } else if (slides.length) setSlideId(slides[0].id); break;
-        case 'End': if (ctrl) { if (ids.length) setFileId(ids[ids.length - 1]); } else if (slides.length) setSlideId(slides[slides.length - 1].id); break;
-        case ' ': toggleBasket(); break;
-        case 'Enter': case 'f': case 'F': if (e.shiftKey) toggleFull(); else toggleMax(); break;
-        case 'n': case 'N': setPanes((v) => !v); break;
-        case 'l': case 'L': setLayout((l) => ({ ...l, mode: l.mode === 'tb' ? 'lr' : 'tb' })); break;
-        case 'Escape':
+      const toSlide = (i) => { if (slides.length) setSlideId(slides[i < 0 ? slides.length - 1 : i].id); };
+      switch (action) {
+        case 'next': go(1, true); break;
+        case 'prev': go(-1, true); break;
+        case 'next5': go(5); break;
+        case 'prev5': go(-5); break;
+        case 'first': toSlide(0); break;
+        case 'last': toSlide(-1); break;
+        case 'nextFile': goFile(1); break;
+        case 'prevFile': goFile(-1); break;
+        case 'nextFile5': goFile(5); break;
+        case 'prevFile5': goFile(-5); break;
+        case 'firstFile': if (ids.length) setFileId(ids[0]); break;
+        case 'lastFile': if (ids.length) setFileId(ids[ids.length - 1]); break;
+        case 'basket': toggleBasket(); break;
+        case 'max': toggleMax(); break;
+        case 'full': toggleFull(); break;
+        case 'panes': setPanes((v) => !v); break;
+        case 'layout': setLayout((l) => ({ ...l, mode: l.mode === 'tb' ? 'lr' : 'tb' })); break;
+        case 'close':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
           else if (maxed) toggleMax();
           else if (onClose) onClose();
+          else handled = false;
           break;
         default: handled = false;
       }
@@ -121,7 +131,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     };
     window.addEventListener('keydown', k, true);
     return () => window.removeEventListener('keydown', k, true);
-  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout]);
+  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout, keys]);
 
   // 翻页 / 切换文件时的屏幕提示
   useEffect(() => {
@@ -138,30 +148,30 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     <div ref={root} className={`viewer ${compact ? 'compact' : ''} ${maxed ? 'maxed' : ''}`}>
       {osd && <div className="viewer-osd">{osd}</div>}
       <div className="viewer-bar">
-        <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title="上一个文件（↑）">▲ 上个文件</button>
-        <button className="btn small" disabled={fpos < 0 || fpos >= ids.length - 1} onClick={() => goFile(1)} title="下一个文件（↓）">▼ 下个文件</button>
+        <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title={`上一个文件（${keysLabel(keys.map, 'prevFile')}）`}>▲ 上个文件</button>
+        <button className="btn small" disabled={fpos < 0 || fpos >= ids.length - 1} onClick={() => goFile(1)} title={`下一个文件（${keysLabel(keys.map, 'nextFile')}）`}>▼ 下个文件</button>
         <div className="vb-file">
           <b>{detail ? detail.file.name : ''}</b>
           <span className="muted small"> 文件 {fpos + 1}/{ids.length}</span>
         </div>
         <div className="spacer" />
-        <button className="btn small" disabled={pos <= 0} onClick={() => go(-1)} title="上一页（←）">◀</button>
+        <button className="btn small" disabled={pos <= 0} onClick={() => go(-1)} title={`上一页（${keysLabel(keys.map, 'prev')}）`}>◀</button>
         <span className="vb-page">{unit === '节' ? '第' : '第'} {pos + 1} / {slides.length} {unit}</span>
-        <button className="btn small" disabled={pos < 0 || pos >= slides.length - 1} onClick={() => go(1)} title="下一页（→）">▶</button>
+        <button className="btn small" disabled={pos < 0 || pos >= slides.length - 1} onClick={() => go(1)} title={`下一页（${keysLabel(keys.map, 'next')}）`}>▶</button>
         {slide && slide.counterpart && <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>⇄ 切换到{THEME_LABEL[slide.counterpart.theme]}版本</button>}
-        <button className={`btn small ${inBasket ? 'primary' : ''}`} disabled={!slide} onClick={toggleBasket} title="空格">{inBasket ? '✓ 已在导出篮' : '＋ 加入导出篮'}</button>
+        <button className={`btn small ${inBasket ? 'primary' : ''}`} disabled={!slide} onClick={toggleBasket} title={keysLabel(keys.map, 'basket')}>{inBasket ? '✓ 已在导出篮' : '＋ 加入导出篮'}</button>
         {detail && <button className="btn small ghost" onClick={() => api.openPath(detail.file.path)}>打开原文件</button>}
-        <div className="seg small" title="三个模块的排列方式（L 键切换）">
+        <div className="seg small" title={`三个模块的排列方式（${keysLabel(keys.map, 'layout')} 切换）`}>
           <button className={layout.mode === 'tb' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'tb' }))}>上1下2</button>
           <button className={layout.mode === 'lr' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'lr' }))}>左1右2</button>
         </div>
         <button className="btn small ghost" title="恢复默认布局" onClick={() => setLayout(DEFAULT_LAYOUT)}>↺ 布局</button>
-        <button className="btn small" onClick={() => setPanes(!panes)} title="N">{panes ? '隐藏讲解词/MD' : '显示讲解词/MD'}</button>
-        <button className="btn small" onClick={toggleMax} title="Enter / F">{maxed ? '🗗 还原窗口' : '⛶ 最大化'}</button>
-        <button className="btn small" onClick={toggleFull} title="Shift+F">🖵 全屏</button>
+        <button className="btn small" onClick={() => setPanes(!panes)} title={keysLabel(keys.map, 'panes')}>{panes ? '隐藏讲解词/MD' : '显示讲解词/MD'}</button>
+        <button className="btn small" onClick={toggleMax} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原窗口' : '⛶ 最大化'}</button>
+        <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
         {onClose && <button className="icon-btn" onClick={onClose}>✕</button>}
       </div>
-      <div className="viewer-keys muted small">← → 翻页（到末页自动进入下一个文件）· Shift+← → 跳 5 页 · Ctrl+← → 首/末页 · ↑ ↓ 上/下一个文件（Shift 跳 5 个）· Ctrl+Home/End 第一个/最后一个文件 · Enter/F 最大化 · Shift+F 全屏 · N 显示/隐藏讲解词与 MD · L 切换上1下2/左1右2 · 拖动模块标题栏可交换位置，拖动分隔条调整大小 · 空格 加入/移出导出篮 · Esc {maxed ? '还原' : onClose ? '关闭' : ''}</div>
+      <div className="viewer-keys muted small" title="可在“设置 → 快捷键”中自定义">{viewerHint(keys.map)}　<span className="link" onClick={() => { if (onClose) onClose(); app.go({ type: 'settings', focus: 'keys' }); }}>⌨ 自定义快捷键</span></div>
       {slide ? (() => {
         const panels = {
           slide: {

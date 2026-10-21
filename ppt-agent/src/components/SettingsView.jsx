@@ -1,9 +1,11 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../ctx';
+import KeymapEditor from './KeymapEditor';
 
-export default function SettingsView() {
+export default function SettingsView({ focus }) {
   const app = useApp();
+  const keysRef = useRef(null);
   const [cfg, setCfg] = useState(null);
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
@@ -12,6 +14,7 @@ export default function SettingsView() {
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
   useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
+  useEffect(() => { if (cfg && focus === 'keys' && keysRef.current) keysRef.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
   if (!cfg) return null;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
@@ -45,6 +48,11 @@ export default function SettingsView() {
           <div className="seg">
             {[['dark', '🌙 黑色'], ['light', '☀️ 白色'], ['system', '🖥 跟随系统']].map(([k, v]) => <button key={k} className={(cfg.uiTheme || 'system') === k ? 'on' : ''} onClick={() => { set({ uiTheme: k }); app.setTheme(k); }}>{v}</button>)}
           </div>
+        </section>
+        <section ref={keysRef} className={focus === 'keys' ? 'flash-sec' : ''}>
+          <h3>快捷键（逐页浏览 / 对比窗口）</h3>
+          <p className="muted">每个动作可设置多个按键组合；例如选择预设“↑ ↓ 翻页 · ← → 切换文件”即可用上下键翻 PPT 页、左右键切换文件。修改立即生效。</p>
+          <KeymapEditor />
         </section>
         <section>
           <h3>关闭窗口时</h3>

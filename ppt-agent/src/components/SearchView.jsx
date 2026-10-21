@@ -26,6 +26,7 @@ export default function SearchView({ state, setState }) {
   const [flash, setFlash] = useState(null);
   const [answer, setAnswer] = useState(null);
   const [fileFilter, setFileFilter] = useState(null);
+  const [cmpSel, setCmpSel] = useState(() => new Set());
   const inputRef = useRef(null);
   const llmOn = app.config && app.config.llm && app.config.llm.enabled;
 
@@ -36,7 +37,7 @@ export default function SearchView({ state, setState }) {
     try {
       const r = await api.search(text.trim(), { useLlm: llmOn && useLlm });
       setState({ q: text.trim(), result: r, tab: state.tab === 'viewer' ? 'viewer' : r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : 'light' });
-      setSel(new Set());
+      setSel(new Set()); setCmpSel(new Set());
     } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
   };
   const terms = result ? [...result.analysis.zh, ...result.analysis.en] : [];
@@ -66,6 +67,11 @@ export default function SearchView({ state, setState }) {
     } catch (e) { setAnswer({ error: e.message }); }
   };
   const tierCls = { 1: 'tier1', 2: 'tier2', 3: 'tier3' };
+  // 对比：每个文件从得分最高的命中页开始
+  const bestHit = (fid) => { let b = null; for (const h of allHits) if (h.file_id === fid && (!b || h.score > b.score)) b = h; return b ? b.id : undefined; };
+  const compareFiles = (fids) => app.openCompare(fids, Object.fromEntries(fids.map((f) => [f, bestHit(f)]).filter((x) => x[1])));
+  const selFiles = [...new Set(allHits.filter((h) => sel.has(h.id)).map((h) => h.file_id))];
+  const toggleCmp = (id) => { const n = new Set(cmpSel); if (n.has(id)) n.delete(id); else n.add(id); setCmpSel(n); };
 
   return (
     <div className="view">
@@ -97,10 +103,11 @@ export default function SearchView({ state, setState }) {
           </div>
           <div className="sr-body">
             <div className="sr-files">
-              <div className="side-title">相关 PPT（{result.files.length}）{fileFilter && <button className="btn tiny" onClick={() => setFileFilter(null)}>显示全部页面</button>}</div>
+              <div className="side-title">相关 PPT（{result.files.length}）{fileFilter && <button className="btn tiny" onClick={() => setFileFilter(null)}>显示全部页面</button>}
+                {cmpSel.size > 0 && <button className="btn tiny primary" disabled={cmpSel.size < 2 || cmpSel.size > 4} title="勾选 2–4 个文件后并排对比（从各自命中度最高的页开始）" onClick={() => compareFiles([...cmpSel])}>⧉ 对比（{cmpSel.size}）</button>}</div>
               {result.files.map((f) => (
                 <div key={f.file.id} className={`sr-file ${fileFilter === f.file.id ? 'active' : ''}`} onClick={() => setFileFilter(fileFilter === f.file.id ? null : f.file.id)}>
-                  <div className="fi-name" dangerouslySetInnerHTML={{ __html: highlight(esc(f.file.name), terms) }} />
+                  <div className="fi-name"><label className="fi-cmp" title="勾选 2–4 个文件进行对比" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={cmpSel.has(f.file.id)} onChange={() => toggleCmp(f.file.id)} /></label><span dangerouslySetInnerHTML={{ __html: highlight(esc(f.file.name), terms) }} /></div>
                   <div className="fi-meta">
                     <span className={`tag ${tierCls[f.tier]}`}>{f.tierLabel}</span>
                     <span className={`tag theme-${f.file.theme}`}>{THEME_LABEL[f.file.theme]}</span>
@@ -122,6 +129,7 @@ export default function SearchView({ state, setState }) {
                 <button className="btn small" onClick={() => setSel(new Set([...sel, ...slides.map((s) => s.id)]))}>全选本页签</button>
                 <button className="btn small" disabled={!sel.size} onClick={() => { app.basket.add([...sel]); setSel(new Set()); }}>加入导出篮</button>
                 <button className="btn small primary" disabled={!sel.size} onClick={() => app.exportSlides([...sel], 'pptx')}>导出新 PPT</button>
+                {selFiles.length >= 2 && <button className="btn small" disabled={selFiles.length > 4} title="所选页面来自 2–4 个文件时，可并排对比这些文件（从所选页开始）" onClick={() => app.openCompare(selFiles, Object.fromEntries(selFiles.map((f) => [f, allHits.find((h) => h.file_id === f && sel.has(h.id)).id])))}>⧉ 对比所选页所在文件（{selFiles.length}）</button>}
                 {llmOn && <button className="btn small" onClick={ask}>🤖 RAG 回答</button>}
               </div>
               {answer && tab !== 'viewer' && (

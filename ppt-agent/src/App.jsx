@@ -15,6 +15,7 @@ import SettingsView from './components/SettingsView';
 import LogView from './components/LogView';
 import SlideWorkspace, { clearSlideCache, loadSlide } from './components/SlideWorkspace';
 import SlideViewer, { clearFileCache } from './components/SlideViewer';
+import CompareView, { COMPARE_MAX } from './components/CompareView';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
@@ -56,6 +57,7 @@ export default function App() {
   const [basket, setBasket] = useState(readBasket);
   const [toasts, setToasts] = useState([]);
   const [modal, setModal] = useState(null);
+  const [compare, setCompare] = useState(null);
   const [config, setConfig] = useState(null);
   const [libMode, setLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
@@ -141,9 +143,17 @@ export default function App() {
     const s = await loadSlide(id);
     if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [] });
   };
+  // 对比窗口：2–4 个文档；starts 为 { fileId: 起始页 id }
+  const openCompare = (fileIds, starts = {}) => {
+    const ids = [...new Set(fileIds)];
+    if (ids.length < 2) { toast('请至少选择 2 个文档进行对比', 'error'); return; }
+    if (ids.length > COMPARE_MAX) toast(`最多同时对比 ${COMPARE_MAX} 个文档，已打开前 ${COMPARE_MAX} 个`, 'error');
+    setModal(null);
+    setCompare({ fileIds: ids.slice(0, COMPARE_MAX), starts });
+  };
   const ctx = {
     tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
-    exportSlides, openSlide, modalOpen: !!modal, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
+    exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
   };
 
   // 左侧菜单分区：解析任务 → 智能模块 → 功能
@@ -250,7 +260,7 @@ export default function App() {
           {view.type === 'analytics' && <AnalyticsView />}
           {view.type === 'recycle' && <RecycleView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
-          {view.type === 'settings' && <SettingsView />}
+          {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
           {view.type === 'file' && <FileView id={view.id} onBack={() => setView(view.back || { type: 'search' })} />}
         </main>
@@ -258,6 +268,13 @@ export default function App() {
           <div className="overlay" onClick={() => setModal(null)}>
             <div className="modal viewer-modal" onClick={(e) => e.stopPropagation()}>
               <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} onClose={() => setModal(null)} />
+            </div>
+          </div>
+        )}
+        {compare && (
+          <div className="overlay" onClick={() => setCompare(null)}>
+            <div className="modal compare-modal" onClick={(e) => e.stopPropagation()}>
+              <CompareView fileIds={compare.fileIds} starts={compare.starts} onClose={() => setCompare(null)} />
             </div>
           </div>
         )}

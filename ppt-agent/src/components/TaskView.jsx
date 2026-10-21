@@ -6,6 +6,7 @@ import LogView from './LogView';
 import { ReparseDialog } from './TaskMonitor';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
+import { CompareButton } from './CompareView';
 
 export default function TaskView({ taskId }) {
   const app = useApp();
@@ -112,7 +113,7 @@ export function FilesStats({ files, stats, onOpen }) {
       </div>
       <DataTable id="taskFiles" columns={columns} rows={rows} rowKey={(r, i) => r.link_path || i} rowClass={(r) => `row-${r.action}`} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文件"
         selectable selected={sel} onSelect={setSel} selectableRow={(r) => r.id && r.status !== 'recycled'}
-        actions={<RecycleButton ids={rows.filter((r) => sel.has(r.link_path) && r.id).map((r) => r.id)} done={() => setSel(new Set())} />}
+        actions={<><CompareButton ids={rows.filter((r) => sel.has(r.link_path) && r.id && r.status !== 'failed').map((r) => r.id)} /><RecycleButton ids={rows.filter((r) => sel.has(r.link_path) && r.id).map((r) => r.id)} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
             <input className="input" placeholder="按路径 / 标签过滤" value={q} onChange={(e) => setQ(e.target.value)} />

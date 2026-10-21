@@ -1,7 +1,7 @@
 {
   "name": "ppt-agent",
   "productName": "PPT智能体",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "PPT 智能解析、归档、搜索与编排工具（Electron）",
   "author": "weber",
   "license": "MIT",

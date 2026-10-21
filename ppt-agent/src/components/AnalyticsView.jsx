@@ -3,6 +3,7 @@ import { api, fmtSize, fmtTime, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
+import { CompareButton } from './CompareView';
 
 const DAY = 86400000;
 const RECENT = [['1d', '一天内', 1], ['7d', '一周内', 7], ['30d', '一个月内', 30]];
@@ -88,7 +89,7 @@ export default function AnalyticsView() {
               ) : (
                 <div className="seg small">{STALE.map(([k, v]) => <button key={k} className={stale === k ? 'on' : ''} onClick={() => setStale(k)}>{v}未打开</button>)}</div>
               )}
-              actions={<RecycleButton ids={[...sel]} done={() => { setSel(new Set()); load(); }} />} />
+              actions={<><CompareButton ids={[...sel]} /><RecycleButton ids={[...sel]} done={() => { setSel(new Set()); load(); }} /></>} />
           )}
           {tab === 'stats' && <Stats data={data} />}
         </div>
