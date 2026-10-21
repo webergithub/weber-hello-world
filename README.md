@@ -1,5 +1,7 @@
 # TrailMate 出游助手 🏕️
 
+> 📊 本仓库另含独立项目 **[PPT智能体](ppt-agent/)**：PPT 按页解析、归档、中英文 RAG 检索与选页导出的 Windows 桌面工具（Electron），exe 见 [`ppt-agent/download/`](ppt-agent/download/)。
+
 一款面向「朋友结伴出游」场景的 PWA（渐进式 Web 应用），用 React + Vite + TypeScript 构建，一次打开即可离线安装到手机主屏。包含五大功能：
 
 | 模块 | 说明 |

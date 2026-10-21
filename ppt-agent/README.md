@@ -1,0 +1,88 @@
+# PPT智能体（PPT Agent）
+
+把电脑上的 PPT **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
+
+> 下载：[`download/PPT-Agent-1.0.0-win-x64-portable.exe`](download/PPT-Agent-1.0.0-win-x64-portable.exe)（免安装，双击运行）。
+> 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
+
+## 功能与需求对照
+
+| # | 需求 | 实现 |
+|---|------|------|
+| 1 | 按页解析 PPT，内容转 Markdown，解析备注讲解词，数据库归类存储；UI 按文件夹 / PPT 名称 / 名称与内容归类展示，每个 PPT 自动打 20 个标签 | 自研 OOXML 解析器逐页提取标题、正文（含层级）、表格、图表（标题/系列/类别）、SmartArt、组合形状、图片、隐藏页、分节、备注；每页生成 Markdown，并按源目录结构镜像保存 `.md`；SQLite（FTS5 全文索引）存储；「资料库浏览」提供 **按文件夹 / 按 PPT 名称 / 按内容归类（分类 + 标签云）** 三种模式；每个文件 20 个标签 = 中英领域概念 + TF-IDF 关键词 + 文件属性（可选大模型打标签） |
+| 2 | 输入关键词或句子，做中英文解析，优先文件名、再标签、再内容，使用 RAG | 查询解析：jieba 分词 + 内置中英双语领域词表互译（如“机航”≈航空/aviation，“turnaround”≈过站/航班过站），可选大模型扩展；**三层排序：文件名命中 > 标签命中 > 内容命中**；内容层为 **BM25（FTS5）+ 向量召回（内置跨语言概念哈希向量，可选 bge-m3 等语义向量）+ RRF 融合**；配置大模型后可基于召回结果生成带出处的 RAG 回答 |
+| 3 | 推荐 PPT 页面（含备注讲解词），黑底 / 白底两个页签展示，相近内容提示切换底色 | 搜索结果分 **⬜白底 / ⬛黑底** 两个页签，卡片含页面预览、命中高亮、讲解词；系统自动配对内容相近的异底色页面，卡片 / 详情 / 弹窗中提示“有黑底(白底)版本，点击切换查看” |
+| 4 | 多选页面，生成导出新 PPT | 页面视图、搜索结果均可多选（Shift 连选、全选），可直接导出或加入「导出篮」调整顺序后导出；跨文件合并时 **保留各自母版/版式/主题/图片/视频/备注**，也可导出 Markdown |
+| 5 | 内容相近的 PPT 分组（先标题、再内容），可按名称或大小排序 | 「相似分组」：文件名归一化（去掉 副本/v2/黑底/白底/日期 等）判定标题相同，再用内容向量 + 页标题重合度判定内容相似；完全相同的重复文件也归组；支持按名称 / 大小、升 / 降序 |
+| 6 | 测试目录，包含不同类型 PPT（如含视频的大文件） | [`test-ppts/`](test-ppts)（生成脚本 [`scripts/make_test_ppts.py`](scripts/make_test_ppts.py)）：中英混排、表格、图表、组合、隐藏页、黑/白底版本、v2 副本、完全重复文件、**25MB 内嵌视频（内封字幕轨 + vtt 隐藏式字幕）**、外链视频 + srt、母版级深色背景、整页图片背景、旧版 `.ppt`、空白演示、损坏文件、Office 锁文件 `~$` |
+| 7 | 视频只解析字幕，不解析视频本身 | 视频按区间读取 MP4 盒结构，只读 `tx3g/wvtt` 文本轨；同时读取 PPT 内的隐藏式字幕部件（vtt/srt/ttml）、外链视频旁的同名字幕文件；其他封装格式可用 ffmpeg 仅提取字幕流（`-map 0:s:0`）；视频本身不解码 |
+| 8 | Electron UI；左侧可折叠菜单（解析任务、添加目录…）；右侧三个页签；只保留 1 份运行日志 | 左侧菜单可展开/折叠，含「添加目录解析」和任务列表；点任务后右侧三个页签：**① 页面视图（PPT 原始页 + 备注框 + 解析 Markdown 框，默认关联所选任务）② 本任务 PPT 文件清单与统计 ③ 运行日志**；全程只写一份 `ppt-agent.log`（超过 20MB 自动裁剪旧记录） |
+| 9 | 页面与备注窗口化展示，可多选导出；解析历史记录，名称/修改时间/大小/作者完全一致则不重复解析并提示 | 解析历史持久化；文件指纹 = 名称 + 修改时间(秒) + 大小 + 作者：同路径未变化 →“已解析过·跳过”，不同路径但信息一致 →“重复文件，未重复解析”，并在清单、日志与通知中提示 |
+| 10 | 打包 exe，同步到 GitHub | electron-builder 生成 Windows x64 便携版 exe，存放在 `download/`；另有 GitHub Actions 工作流在 Windows 上测试并构建 |
+
+## 界面
+
+- **智能搜索**：查询解析结果以“同义词组”展示（来源：词表 / 分词 / 大模型），左侧为相关 PPT（标注“文件名命中 / 标签命中 / 内容命中”），右侧为白底 / 黑底页面推荐。
+- **解析任务**：任务进度实时显示；文件清单可按状态 / 路径 / 标签过滤、按名称 / 大小 / 页数 / 修改时间排序，并可打开 PPT、定位文件、打开 Markdown。
+- **页面视图**：页面预览优先使用 PowerPoint / LibreOffice 生成的真实截图，无外部引擎时使用内置版式渲染；↑↓ 切换页面、空格选择。
+- **设置**：截图引擎、大模型（OpenAI 兼容：DeepSeek / 通义千问 / Kimi / 智谱 / OpenAI / Ollama 等）、语义向量（Ollama bge-m3 或 OpenAI 兼容 embeddings）、相似度阈值、重算标签与分组。
+
+## 架构
+
+```
+Electron 主进程 (electron/main.js)
+ ├─ ppta:// 协议：安全加载截图与图片缓存
+ ├─ IPC ↔ 渲染进程（React，src/）
+ └─ core/
+     ├─ service.js      任务队列：扫描 → 指纹去重 → 解析 → 截图 → 入库 → 标签 / 分组 / 黑白底配对
+     ├─ pptx.js         OOXML 解析（主题色 / 母版继承 / 背景亮度 / 版式渲染数据）
+     ├─ subtitles.js    SRT / VTT / TTML 与 MP4 文本轨解析
+     ├─ zip.js          随机访问读取 zip（大视频不整体载入内存）
+     ├─ markdown.js     每页 Markdown
+     ├─ textproc.js     jieba 分词 + 概念 token（中英跨语言）
+     ├─ glossary.js     中英双语领域词表（航空/机场/安全/AI/云/财务/管理/市场）
+     ├─ tagger.js       20 个标签 + 内容分类
+     ├─ vectors.js      哈希向量 / 语义向量提供方
+     ├─ search.js       查询解析 + 三层排序 + BM25/向量 RRF 融合 + RAG 回答
+     ├─ similarity.js   相似分组、黑白底页面配对
+     ├─ exporter.js     跨文件选页合并导出（自研 zipwriter.js，STORE 视频流式拷贝）
+     ├─ office.js       PowerPoint COM / LibreOffice 截图与 .ppt 转换，ffmpeg 字幕流
+     ├─ db.js           node:sqlite（内置 FTS5）
+     └─ logger.js       唯一运行日志
+```
+
+技术选型说明：
+
+- **数据库**：Electron 44 内置 Node 24 的 `node:sqlite`（含 FTS5），无需编译原生模块，便于跨平台打包。
+- **中文分词**：jieba-rs 的 WASM 版本，并把领域词表注入词典。
+- **检索**：业界常用的混合检索（稀疏 BM25 + 稠密向量）+ Reciprocal Rank Fusion；离线默认使用“中英概念哈希向量”，接入 bge-m3 等多语言模型后自动启用语义召回。
+- **预览**：PowerPoint COM 导出 PNG（最高保真）→ LibreOffice 转 PDF/PNG → 内置 HTML 版式渲染。截图同时用于校正黑底/白底判断。
+
+## 使用
+
+1. 运行 `PPT-Agent-1.0.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
+3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
+4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。
+
+数据目录：便携版默认在 exe 同级的 `PPT智能体数据/`（数据库、Markdown、截图缓存、`ppt-agent.log`），不可写时退回 `%APPDATA%/PPT智能体/data`。可用环境变量 `PPTA_DATA_DIR` 指定。
+
+可选外部引擎：Microsoft PowerPoint（截图、旧版 .ppt 转换）、LibreOffice（同上的替代方案）、ffmpeg（非 MP4 视频的字幕流）。都没有也能完整使用解析、检索、导出功能。
+
+## 开发与构建
+
+```bash
+cd ppt-agent
+npm install
+npm test                 # 单元测试（用 Electron 内置 Node 运行）
+npm start                # 构建 UI 并启动桌面程序
+npm run dist:win         # 生成 release/PPT-Agent-<版本>-win-x64-portable.exe
+npm run make:testdata    # 重新生成 test-ppts/（需 python-pptx、Pillow，可选 ffmpeg / soffice）
+```
+
+## 已知限制
+
+- exe 在 Linux 上交叉打包；解析、检索、导出的核心逻辑与打包后的程序已在 Linux 上做过端到端测试，PowerPoint COM 截图这条路径只能在装有 PowerPoint 的 Windows 上运行，本仓库的测试没有覆盖到。
+- 内置版式渲染是近似预览（不渲染艺术字、渐变形状等），需要原样预览请安装 PowerPoint 或 LibreOffice。
+- 旧版 `.ppt` 需要 PowerPoint 或 LibreOffice 转换后才能解析。
+- 不配置大模型时，标签和查询扩展基于内置词表与 TF-IDF，领域外的专有词需要配置大模型或扩充 `electron/core/glossary.js`。

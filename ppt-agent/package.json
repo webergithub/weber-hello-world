@@ -1,0 +1,84 @@
+{
+  "name": "ppt-agent",
+  "productName": "PPT智能体",
+  "version": "1.0.0",
+  "description": "PPT 智能解析、归档、搜索与编排工具（Electron）",
+  "author": "weber",
+  "license": "MIT",
+  "main": "electron/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build:ui": "vite build",
+    "start": "vite build && electron .",
+    "test": "node scripts/run-tests.js",
+    "make:testdata": "python3 scripts/make_test_ppts.py test-ppts",
+    "dist:win": "vite build && electron-builder --win portable --x64",
+    "dist:linux": "vite build && electron-builder --linux dir"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.11.2",
+    "jieba-wasm": "2.4.0",
+    "jpeg-js": "0.4.4",
+    "pngjs": "7.0.0",
+    "yauzl": "3.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "6.1.1",
+    "electron": "44.5.1",
+    "electron-builder": "26.15.3",
+    "pdfjs-dist": "6.4.299",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "vite": "8.3.2"
+  },
+  "build": {
+    "appId": "com.weber.pptagent",
+    "productName": "PPT智能体",
+    "copyright": "MIT",
+    "artifactName": "PPT-Agent-${version}-win-${arch}-portable.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "package.json",
+      "!**/*.map"
+    ],
+    "asarUnpack": [
+      "node_modules/jieba-wasm/pkg/nodejs/**"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "signExecutable": false
+    },
+    "portable": {
+      "artifactName": "PPT-Agent-${version}-win-${arch}-portable.${ext}",
+      "unpackDirName": "PPT-Agent"
+    },
+    "linux": {
+      "target": [
+        "dir"
+      ],
+      "icon": "build/icon.png"
+    },
+    "compression": "maximum",
+    "electronLanguages": [
+      "zh-CN",
+      "en-US"
+    ]
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/webergithub/weber-hello-world.git"
+  }
+}

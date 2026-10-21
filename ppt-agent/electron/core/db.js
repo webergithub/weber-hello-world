@@ -1,0 +1,229 @@
+'use strict';
+// SQLite（node:sqlite，内置 FTS5）存储：任务、文件（含解析历史与去重指纹）、页面、全文索引、黑白底对应关系。
+const { DatabaseSync } = require('node:sqlite');
+
+const SCHEMA = `
+PRAGMA journal_mode = WAL;
+PRAGMA synchronous = NORMAL;
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  dir TEXT NOT NULL,
+  name TEXT,
+  status TEXT DEFAULT 'pending',
+  created_at INTEGER, started_at INTEGER, finished_at INTEGER,
+  total INTEGER DEFAULT 0, parsed INTEGER DEFAULT 0, skipped INTEGER DEFAULT 0, duplicate INTEGER DEFAULT 0, failed INTEGER DEFAULT 0,
+  message TEXT
+);
+CREATE TABLE IF NOT EXISTS files (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  path TEXT NOT NULL UNIQUE,
+  dir TEXT, name TEXT, ext TEXT,
+  size INTEGER, mtime INTEGER, author TEXT, title TEXT,
+  fingerprint TEXT,
+  status TEXT,
+  error TEXT,
+  dup_of INTEGER,
+  slide_count INTEGER DEFAULT 0,
+  theme TEXT, dark_slides INTEGER DEFAULT 0, light_slides INTEGER DEFAULT 0,
+  video_count INTEGER DEFAULT 0, notes_count INTEGER DEFAULT 0,
+  lang TEXT,
+  tags TEXT, category TEXT, terms TEXT,
+  md_path TEXT, preview TEXT, meta TEXT,
+  vec BLOB, emb BLOB,
+  task_id INTEGER, parsed_at INTEGER, parse_ms INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_files_fp ON files(fingerprint);
+CREATE TABLE IF NOT EXISTS task_files (
+  task_id INTEGER, file_id INTEGER, path TEXT, action TEXT, message TEXT, at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_tf_task ON task_files(task_id);
+CREATE TABLE IF NOT EXISTS slides (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  file_id INTEGER NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+  idx INTEGER, title TEXT, text TEXT, notes TEXT, md TEXT,
+  theme TEXT, bg TEXT, hidden INTEGER, section TEXT,
+  has_video INTEGER, media TEXT, layout TEXT, thumb TEXT,
+  vec BLOB, emb BLOB
+);
+CREATE INDEX IF NOT EXISTS idx_slides_file ON slides(file_id);
+CREATE VIRTUAL TABLE IF NOT EXISTS slides_fts USING fts5(title, body, notes, meta, tokenize = 'unicode61 remove_diacritics 2');
+CREATE TABLE IF NOT EXISTS pairs (slide_id INTEGER, other_id INTEGER, score REAL, PRIMARY KEY (slide_id, other_id));
+`;
+
+const toBlob = (v) => (v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : null);
+const fromBlob = (b) => (b ? new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)) : null);
+const J = (s, d = null) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
+
+class Store {
+  constructor(file) {
+    this.db = new DatabaseSync(file);
+    this.db.exec(SCHEMA);
+    this.stmts = new Map();
+  }
+
+  q(sql) {
+    let s = this.stmts.get(sql);
+    if (!s) { s = this.db.prepare(sql); this.stmts.set(sql, s); }
+    return s;
+  }
+
+  tx(fn) {
+    this.db.exec('BEGIN');
+    try { const r = fn(); this.db.exec('COMMIT'); return r; } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+  }
+
+  // ---------- 任务 ----------
+  createTask(dir, name) {
+    const r = this.q('INSERT INTO tasks(dir, name, status, created_at) VALUES (?, ?, ?, ?)').run(dir, name, 'pending', Date.now());
+    return Number(r.lastInsertRowid);
+  }
+  updateTask(id, f) { this.update('tasks', id, f); }
+  getTask(id) { return this.q('SELECT * FROM tasks WHERE id = ?').get(id) || null; }
+  listTasks() { return this.q('SELECT * FROM tasks ORDER BY id DESC').all(); }
+  deleteTask(id) {
+    this.q('DELETE FROM task_files WHERE task_id = ?').run(id);
+    this.q('DELETE FROM tasks WHERE id = ?').run(id);
+  }
+
+  update(table, id, f) {
+    const keys = Object.keys(f);
+    if (!keys.length) return;
+    const vals = keys.map((k) => {
+      const v = f[k];
+      if (v instanceof Float32Array) return toBlob(v);
+      if (v && typeof v === 'object' && !Buffer.isBuffer(v)) return JSON.stringify(v);
+      if (typeof v === 'boolean') return v ? 1 : 0;
+      return v === undefined ? null : v;
+    });
+    this.q(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+
+  linkTaskFile(taskId, fileId, filePath, action, message = '') {
+    this.q('INSERT INTO task_files(task_id, file_id, path, action, message, at) VALUES (?, ?, ?, ?, ?, ?)').run(taskId, fileId, filePath, action, message, Date.now());
+  }
+  taskFiles(taskId) {
+    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id = ? ORDER BY tf.rowid`).all(taskId).map(this.fileRow);
+  }
+
+  // ---------- 文件 ----------
+  fileRow = (r) => (r ? { ...r, tags: J(r.tags, []), terms: undefined, meta: J(r.meta, {}), preview: J(r.preview, null), vec: undefined, emb: undefined } : null);
+  fileByPath(p) { return this.fileRow(this.q('SELECT * FROM files WHERE path = ?').get(p)); }
+  fileByFingerprint(fp) { return this.fileRow(this.q("SELECT * FROM files WHERE fingerprint = ? AND status = 'parsed' ORDER BY id LIMIT 1").get(fp)); }
+  getFile(id) { return this.fileRow(this.q('SELECT * FROM files WHERE id = ?').get(id)); }
+  upsertFile(f) {
+    const ex = this.q('SELECT id FROM files WHERE path = ?').get(f.path);
+    if (ex) { this.update('files', ex.id, f); return ex.id; }
+    const keys = Object.keys(f);
+    const r = this.q(`INSERT INTO files(${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => {
+      const v = f[k];
+      if (v instanceof Float32Array) return toBlob(v);
+      if (v && typeof v === 'object') return JSON.stringify(v);
+      return v === undefined ? null : v;
+    }));
+    return Number(r.lastInsertRowid);
+  }
+  updateFile(id, f) { this.update('files', id, f); }
+  listFiles({ status } = {}) {
+    const rows = status ? this.q('SELECT * FROM files WHERE status = ? ORDER BY path').all(status) : this.q('SELECT * FROM files ORDER BY path').all();
+    return rows.map(this.fileRow);
+  }
+  fileTerms() {
+    return this.q("SELECT id, terms FROM files WHERE status = 'parsed'").all().map((r) => ({ id: r.id, terms: J(r.terms, {}) }));
+  }
+  fileVectors() {
+    return this.q("SELECT id, vec, emb FROM files WHERE status = 'parsed'").all().map((r) => ({ id: r.id, vec: fromBlob(r.vec), emb: fromBlob(r.emb) }));
+  }
+  deleteFile(id) {
+    const ids = this.q('SELECT id FROM slides WHERE file_id = ?').all(id).map((r) => r.id);
+    this.deleteSlidesOf(id, ids);
+    this.q('UPDATE files SET dup_of = NULL WHERE dup_of = ?').run(id);
+    this.q('DELETE FROM files WHERE id = ?').run(id);
+  }
+  deleteSlidesOf(fileId, ids) {
+    ids = ids || this.q('SELECT id FROM slides WHERE file_id = ?').all(fileId).map((r) => r.id);
+    for (const sid of ids) {
+      this.q('DELETE FROM slides_fts WHERE rowid = ?').run(sid);
+      this.q('DELETE FROM pairs WHERE slide_id = ? OR other_id = ?').run(sid, sid);
+    }
+    this.q('DELETE FROM slides WHERE file_id = ?').run(fileId);
+  }
+
+  // ---------- 页面 ----------
+  insertSlide(fileId, s, fts) {
+    const r = this.q(`INSERT INTO slides(file_id, idx, title, text, notes, md, theme, bg, hidden, section, has_video, media, layout, thumb, vec)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      fileId, s.index, s.title || '', s.text || '', s.notes || '', s.md || '', s.theme, JSON.stringify(s.bg || {}), s.hidden ? 1 : 0, s.section || '',
+      s.media && s.media.some((m) => m.type === 'video') ? 1 : 0, JSON.stringify(s.media || []), s.layout ? JSON.stringify(s.layout) : null, s.thumb || null, toBlob(s.vec));
+    const id = Number(r.lastInsertRowid);
+    this.q('INSERT INTO slides_fts(rowid, title, body, notes, meta) VALUES (?, ?, ?, ?, ?)').run(id, fts.title, fts.body, fts.notes, fts.meta);
+    return id;
+  }
+  slideRow = (r, full = false) => {
+    if (!r) return null;
+    const o = { ...r, bg: J(r.bg, {}), media: J(r.media, []), hidden: !!r.hidden, has_video: !!r.has_video, vec: undefined, emb: undefined };
+    o.layout = full ? J(r.layout, null) : undefined;
+    return o;
+  };
+  slidesOf(fileId, full = false) {
+    return this.q('SELECT * FROM slides WHERE file_id = ? ORDER BY idx').all(fileId).map((r) => this.slideRow(r, full));
+  }
+  getSlide(id, full = true) { return this.slideRow(this.q('SELECT * FROM slides WHERE id = ?').get(id), full); }
+  getSlides(ids, full = false) {
+    if (!ids.length) return [];
+    const out = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      out.push(...this.db.prepare(`SELECT * FROM slides WHERE id IN (${chunk.map(() => '?').join(',')})`).all(...chunk).map((r) => this.slideRow(r, full)));
+    }
+    const m = new Map(out.map((s) => [s.id, s]));
+    return ids.map((id) => m.get(id)).filter(Boolean);
+  }
+  slideVectors() {
+    return this.q(`SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
+      .map((r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, vec: fromBlob(r.vec), emb: fromBlob(r.emb) }));
+  }
+  setSlideEmb(id, emb) { this.q('UPDATE slides SET emb = ? WHERE id = ?').run(toBlob(emb), id); }
+  setSlideThumb(id, thumb) { this.q('UPDATE slides SET thumb = ? WHERE id = ?').run(thumb, id); }
+  setSlideTheme(id, theme, bg) { this.q('UPDATE slides SET theme = ?, bg = ? WHERE id = ?').run(theme, JSON.stringify(bg), id); }
+  ftsSearch(match, limit = 400) {
+    try {
+      return this.q(`SELECT rowid AS id, bm25(slides_fts, 4.0, 1.0, 0.8, 2.0) AS score FROM slides_fts WHERE slides_fts MATCH ? ORDER BY score LIMIT ?`).all(match, limit);
+    } catch { return []; }
+  }
+
+  // ---------- 黑白底对应 ----------
+  replacePairs(pairs) {
+    this.tx(() => {
+      this.q('DELETE FROM pairs').run();
+      for (const p of pairs) {
+        this.q('INSERT OR REPLACE INTO pairs(slide_id, other_id, score) VALUES (?, ?, ?)').run(p.a, p.b, p.score);
+        this.q('INSERT OR REPLACE INTO pairs(slide_id, other_id, score) VALUES (?, ?, ?)').run(p.b, p.a, p.score);
+      }
+    });
+  }
+  counterparts(slideIds) {
+    const m = new Map();
+    for (let i = 0; i < slideIds.length; i += 500) {
+      const chunk = slideIds.slice(i, i + 500);
+      const rows = this.db.prepare(`SELECT slide_id, other_id, score FROM pairs WHERE slide_id IN (${chunk.map(() => '?').join(',')}) ORDER BY score DESC`).all(...chunk);
+      for (const r of rows) if (!m.has(r.slide_id)) m.set(r.slide_id, { id: r.other_id, score: r.score });
+    }
+    return m;
+  }
+
+  stats() {
+    const g = (sql) => this.q(sql).get();
+    return {
+      files: g("SELECT COUNT(*) n FROM files WHERE status = 'parsed'").n,
+      duplicates: g("SELECT COUNT(*) n FROM files WHERE status = 'duplicate'").n,
+      failed: g("SELECT COUNT(*) n FROM files WHERE status = 'failed'").n,
+      slides: g('SELECT COUNT(*) n FROM slides').n,
+      tasks: g('SELECT COUNT(*) n FROM tasks').n,
+    };
+  }
+
+  close() { try { this.db.close(); } catch { /* ignore */ } }
+}
+
+module.exports = { Store, toBlob, fromBlob };
