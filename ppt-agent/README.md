@@ -2,8 +2,13 @@
 
 把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-1.4.0-win-x64-portable.exe`](download/PPT-Agent-1.4.0-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-1.5.0-win-x64-portable.exe`](download/PPT-Agent-1.5.0-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
+
+## v1.5 新增
+
+- **页面标签与相关推荐**：解析入库后为每页（PPT 页 / Word 章节）打 8 个页面标签，并把内容相近的页面相互关联。逐页浏览窗口与资料库详情右侧新增“🔗 相关推荐”栏：本页标签、相似 PPT 页面（附相似度与推荐理由），点击即在当前位置替换查看，可“↩ 返回”（退格键）；可与当前页并排对比或加入导出篮；R 键收起 / 展开。
+- 设置中同时选择 PPT 与 Word 时，Word 章节与 PPT 页面相互关联：PPT 页推荐“相关 Word 内容”，Word 章节推荐“相关 PPT 页面”。
 
 ## v1.4 新增
 
@@ -94,7 +99,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-1.4.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-1.5.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。

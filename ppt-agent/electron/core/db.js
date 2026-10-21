@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS slides (
 CREATE INDEX IF NOT EXISTS idx_slides_file ON slides(file_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS slides_fts USING fts5(title, body, notes, meta, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS pairs (slide_id INTEGER, other_id INTEGER, score REAL, PRIMARY KEY (slide_id, other_id));
+CREATE TABLE IF NOT EXISTS slide_links (slide_id INTEGER, other_id INTEGER, score REAL, kind TEXT, reasons TEXT, PRIMARY KEY (slide_id, other_id));
 CREATE TABLE IF NOT EXISTS file_views (file_id INTEGER, kind TEXT, at INTEGER);
 CREATE INDEX IF NOT EXISTS idx_views_file ON file_views(file_id);
 CREATE TABLE IF NOT EXISTS recycle (
@@ -87,6 +88,8 @@ class Store {
     if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
     if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');
     if (!sl.has('notes_ai')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_ai TEXT');
+    if (!sl.has('kw')) this.db.exec('ALTER TABLE slides ADD COLUMN kw TEXT');
+    if (!sl.has('tags')) this.db.exec('ALTER TABLE slides ADD COLUMN tags TEXT');
   }
 
   q(sql) {
@@ -205,23 +208,24 @@ class Store {
     for (const sid of ids) {
       this.q('DELETE FROM slides_fts WHERE rowid = ?').run(sid);
       this.q('DELETE FROM pairs WHERE slide_id = ? OR other_id = ?').run(sid, sid);
+      this.q('DELETE FROM slide_links WHERE slide_id = ? OR other_id = ?').run(sid, sid);
     }
     this.q('DELETE FROM slides WHERE file_id = ?').run(fileId);
   }
 
   // ---------- 页面 ----------
   insertSlide(fileId, s, fts) {
-    const r = this.q(`INSERT INTO slides(file_id, idx, title, text, notes, md, theme, bg, hidden, section, has_video, media, layout, thumb, vec)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+    const r = this.q(`INSERT INTO slides(file_id, idx, title, text, notes, md, theme, bg, hidden, section, has_video, media, layout, thumb, vec, kw)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       fileId, s.index, s.title || '', s.text || '', s.notes || '', s.md || '', s.theme, JSON.stringify(s.bg || {}), s.hidden ? 1 : 0, s.section || '',
-      s.media && s.media.some((m) => m.type === 'video') ? 1 : 0, JSON.stringify(s.media || []), s.layout ? JSON.stringify(s.layout) : null, s.thumb || null, toBlob(s.vec));
+      s.media && s.media.some((m) => m.type === 'video') ? 1 : 0, JSON.stringify(s.media || []), s.layout ? JSON.stringify(s.layout) : null, s.thumb || null, toBlob(s.vec), s.kw ? JSON.stringify(s.kw) : null);
     const id = Number(r.lastInsertRowid);
     this.q('INSERT INTO slides_fts(rowid, title, body, notes, meta) VALUES (?, ?, ?, ?, ?)').run(id, fts.title, fts.body, fts.notes, fts.meta);
     return id;
   }
   slideRow = (r, full = false) => {
     if (!r) return null;
-    const o = { ...r, bg: J(r.bg, {}), media: J(r.media, []), hidden: !!r.hidden, has_video: !!r.has_video, vec: undefined, emb: undefined };
+    const o = { ...r, bg: J(r.bg, {}), media: J(r.media, []), hidden: !!r.hidden, has_video: !!r.has_video, vec: undefined, emb: undefined, kw: undefined, tags: J(r.tags, []) };
     o.layout = full ? J(r.layout, null) : undefined;
     // 用户编辑过的讲解词 / Markdown 优先生效，原文保留在 *_orig
     o.notes_orig = r.notes; o.md_orig = r.md;
@@ -267,6 +271,27 @@ class Store {
   }
 
   // ---------- 黑白底对应 ----------
+  // ---------- 页面标签与页面关联 ----------
+  /** 参与关联计算的页面（已解析文件）：向量、词项、标签 */
+  relationRows() {
+    return this.q(`SELECT s.id, s.file_id, s.title, s.text, s.notes, s.theme, s.vec, s.emb, s.kw, s.tags, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
+      .map((r) => ({ id: r.id, file_id: r.file_id, title: r.title, text: r.text, notes: r.notes, theme: r.theme, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb), kw: r.kw ? JSON.parse(r.kw) : null, tags: r.tags ? JSON.parse(r.tags) : null }));
+  }
+  setSlideKwTags(rows) {
+    this.tx(() => { for (const r of rows) this.q('UPDATE slides SET kw = COALESCE(?, kw), tags = ? WHERE id = ?').run(r.kw ? JSON.stringify(r.kw) : null, JSON.stringify(r.tags || []), r.id); });
+  }
+  replaceLinks(links) {
+    this.tx(() => {
+      this.q('DELETE FROM slide_links').run();
+      const ins = this.q('INSERT OR REPLACE INTO slide_links(slide_id, other_id, score, kind, reasons) VALUES (?, ?, ?, ?, ?)');
+      for (const l of links) ins.run(l.a, l.b, l.score, l.kind, JSON.stringify(l.reasons || []));
+    });
+  }
+  linksOf(slideId) {
+    return this.q('SELECT other_id, score, kind, reasons FROM slide_links WHERE slide_id = ? ORDER BY score DESC').all(slideId).map((r) => ({ ...r, reasons: J(r.reasons, []) }));
+  }
+  linkStats() { return this.q('SELECT kind, COUNT(*) n, COUNT(DISTINCT slide_id) pages FROM slide_links GROUP BY kind').all(); }
+
   replacePairs(pairs) {
     this.tx(() => {
       this.q('DELETE FROM pairs').run();

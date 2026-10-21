@@ -288,3 +288,47 @@ test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料�
   assert.ok(svc.watchInfo().tasks.some((x) => x.id === id && x.last_watch_at));
   svc.close();
 });
+
+test('页面标签与页面关联：相似 PPT 页推荐；同时选择 Word 时关联 Word 内容', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const lib = path.join(tmp, 'lib4');
+  fs.cpSync(P('机场运营'), path.join(lib, '机场运营'), { recursive: true });
+  fs.cpSync(P('Word文档'), path.join(lib, 'Word文档'), { recursive: true });
+  const svc = new AgentService(path.join(tmp, 'data4'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const done = (id) => new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done' && t.finished_at) { svc.off('task', h); res(t); } }; svc.on('task', h); });
+  const relate = [];
+  const id = svc.addTask(lib);
+  svc.on('progress', (p) => { if (p.stage === 'relate') relate.push(p); });
+  svc.startTask(id);
+  await done(id);
+  assert.ok(relate.length && relate[0].ppt > 0 && relate[0].withWord === false);
+  const lib0 = svc.library();
+  assert.ok(!lib0.some((f) => f.kind === 'word'), '只选 PPT 时不解析 Word');
+  // 页面标签
+  const f = lib0.find((x) => x.name.includes('白底') && x.slide_count > 3);
+  const sl = svc.store.slidesOf(f.id);
+  assert.ok(sl.every((s) => Array.isArray(s.tags)) && sl.some((s) => s.tags.length >= 3));
+  // 白底版本的页面应推荐其黑底 / 副本版本
+  const r = svc.related(sl[1].id);
+  assert.ok(r.ppt.length > 0);
+  assert.ok(r.ppt.every((x) => x.file_id !== f.id && x.fileName));
+  assert.ok(r.ppt.some((x) => x.reasons.length));
+  assert.strictEqual(r.word.length, 0);
+  // 同时选择 PPT 与 Word：解析 Word 后关联 Word 章节与 PPT 页
+  svc.setConfig({ docTypes: ['ppt', 'word'] });
+  svc.startTask(id);
+  await done(id);
+  assert.ok(svc.library().some((x) => x.kind === 'word'));
+  const last = relate[relate.length - 1];
+  assert.strictEqual(last.withWord, true);
+  assert.ok(last.word > 0, 'Word 与 PPT 之间应有关联');
+  const w = svc.store.db.prepare("SELECT slide_id FROM slide_links WHERE kind = 'word' LIMIT 1").get();
+  const r2 = svc.related(w.slide_id);
+  assert.ok(r2.word.length > 0 && r2.word.every((x) => x.kind === 'word'));
+  const wordSec = svc.store.db.prepare("SELECT s.id FROM slides s JOIN files f ON f.id = s.file_id JOIN slide_links l ON l.slide_id = s.id WHERE f.kind = 'word' LIMIT 1").get();
+  const r3 = svc.related(wordSec.id);
+  assert.strictEqual(r3.kind, 'word');
+  assert.ok(r3.ppt.length > 0 && r3.ppt.every((x) => x.kind === 'ppt'), 'Word 章节推荐相关 PPT 页');
+  svc.close();
+});

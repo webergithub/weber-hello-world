@@ -13,6 +13,7 @@ const { tokenize, detectLang } = require('./textproc');
 const { hashVector, mean, embedder } = require('./vectors');
 const { fileTerms, computeTags } = require('./tagger');
 const { computeGroups, computePairs, normSlideTitle } = require('./similarity');
+const { slideKeywords, pageTags, computeLinks } = require('./relations');
 const { SearchEngine } = require('./search');
 const { exportPptx, exportMarkdown } = require('./exporter');
 const { convertTheme, RULES: DEFAULT_RULES, normalizeRules } = require('./converter');
@@ -103,6 +104,8 @@ class AgentService extends EventEmitter {
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
     this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch };
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
+    // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
+    if (patch.docTypes && this.store) setImmediate(() => this.computeRelations().catch((e) => this.log.warn('重算页面关联失败', e)));
     this.log.info('配置已更新', { thumbnails: this.config.thumbnails, llm: this.config.llm.enabled ? this.config.llm.model : '未启用', embedding: this.config.embedding.provider });
     return this.config;
   }
@@ -155,6 +158,14 @@ class AgentService extends EventEmitter {
   /** 每 30 秒检查一次是否到了定时扫描时间（由主进程启动；测试中可直接调用 checkSchedule） */
   startScheduler() {
     this.schedStart = Date.now();
+    // 旧版本升级：已有解析结果但还没有页面标签 / 关联时，后台补算一次
+    setTimeout(() => {
+      try {
+        const has = this.store.db.prepare('SELECT COUNT(*) n FROM slide_links').get().n;
+        const pages = this.store.db.prepare(`SELECT COUNT(*) n FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).get().n;
+        if (!has && pages > 1 && !this.running) this.computeRelations().catch((e) => this.log.warn('补算页面关联失败', e));
+      } catch (e) { this.log.warn('检查页面关联失败', e); }
+    }, 4000);
     clearInterval(this.schedTimer);
     this.schedTimer = setInterval(() => this.checkSchedule().catch((e) => this.log.warn('定时扫描检查失败', e)), 30000);
     setTimeout(() => this.checkSchedule().catch(() => {}), 15000);
@@ -523,6 +534,7 @@ class AgentService extends EventEmitter {
     }
     for (const s of slides) {
       s.md = slideToMd(s, kind);
+      s.kw = slideKeywords(s);
       s.vec = hashVector(`${s.title}\n${s.title}\n${s.text}\n${s.notes}`);
       if (preview && preview.images && preview.images[s.index - 1]) {
         s.thumb = preview.images[s.index - 1];
@@ -611,7 +623,56 @@ class AgentService extends EventEmitter {
     const pairs = computePairs(slideVecs, groups);
     this.store.replacePairs(pairs);
     log.info(`${tag} 相似分组 ${groups.length} 组，黑白底对应页 ${pairs.length} 对（${Date.now() - t1}ms）`);
+    await this.computeRelations(log, tag, taskId);
     this.search.invalidate();
+  }
+
+  /** 页面级标签（每页 8 个）+ 页面相互关联（相似 PPT 页；同时选择 Word 时关联 Word 章节与 PPT 页） */
+  async computeRelations(log = this.log, tag = '', taskId = null) {
+    const t0 = Date.now();
+    const rows = this.store.relationRows();
+    let fresh = 0;
+    for (let i = 0; i < rows.length; i++) {
+      if (!rows[i].kw) { rows[i].kw = slideKeywords(rows[i]); rows[i].newKw = true; fresh++; if (fresh % 200 === 0) await new Promise((r) => setImmediate(r)); }
+    }
+    const df = new Map();
+    for (const r of rows) for (const t of Object.keys(r.kw.t || {})) df.set(t, (df.get(t) || 0) + 1);
+    const changed = [];
+    for (const r of rows) {
+      const tags = pageTags(r.kw, df, rows.length);
+      if (r.newKw || JSON.stringify(tags) !== JSON.stringify(r.tags)) changed.push({ id: r.id, kw: r.newKw ? r.kw : null, tags });
+      r.tags = tags;
+    }
+    if (changed.length) this.store.setSlideKwTags(changed);
+    const types = this.config.docTypes || ['ppt'];
+    const withWord = types.includes('ppt') && types.includes('word');
+    const links = computeLinks(rows, { withWord });
+    this.store.replaceLinks(links);
+    const nPpt = links.filter((l) => l.kind === 'ppt').length, nWord = links.length - nPpt;
+    const pages = new Set(links.map((l) => l.a)).size;
+    log.info(`${tag} 页面标签 ${rows.length} 页（更新 ${changed.length}）；页面关联：${pages} 页有推荐，相似 PPT 页 ${nPpt} 条${withWord ? `，Word ↔ PPT ${nWord} 条` : '（未同时选择 Word，不关联 Word 内容）'}（${Date.now() - t0}ms）`);
+    if (taskId) this.emitProgress(taskId, { stage: 'relate', pages: rows.length, linked: pages, ppt: nPpt, word: nWord, withWord });
+    return { pages: rows.length, linked: pages, ppt: nPpt, word: nWord, withWord };
+  }
+
+  /** 某页的相关推荐：相似 PPT 页 + 相关 Word 内容（或 Word 章节的相关 PPT 页） */
+  related(slideId) {
+    const s = this.store.getSlide(slideId, false);
+    if (!s) return null;
+    const links = this.store.linksOf(slideId);
+    const others = new Map(this.store.getSlides(links.map((l) => l.other_id)).map((x) => [x.id, x]));
+    const files = new Map();
+    const fileOf = (id) => { if (!files.has(id)) files.set(id, this.store.getFile(id)); return files.get(id); };
+    const items = [];
+    for (const l of links) {
+      const o = others.get(l.other_id);
+      const f = o && fileOf(o.file_id);
+      if (!f || f.status !== 'parsed') continue;
+      items.push({ ...o, kind: f.kind || 'ppt', fileName: f.name, filePath: f.path, fileTheme: f.theme, score: l.score, reasons: l.reasons, linkKind: l.kind });
+    }
+    const types = this.config.docTypes || ['ppt'];
+    const own = fileOf(s.file_id);
+    return { tags: s.tags || [], kind: (own && own.kind) || 'ppt', withWord: types.includes('ppt') && types.includes('word'), ppt: items.filter((x) => x.linkKind === 'ppt'), word: items.filter((x) => x.linkKind === 'word') };
   }
 
   computeGroupsNow() {

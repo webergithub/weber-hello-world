@@ -4,6 +4,7 @@ import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
 import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
+import RelatedRail from './RelatedRail';
 
 const slideCache = new Map();
 export async function loadSlide(id) {
@@ -93,6 +94,14 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
     if (e.key === ' ' && slide) { toggle(slide); e.preventDefault(); }
   };
   const goCounterpart = (cp) => { setFileId(cp.fileId); setSlideId(cp.id); };
+  // 推荐栏：点击推荐页在当前位置替换查看（可返回）
+  const [back, setBack] = useState([]);
+  const pickRelated = (it) => {
+    setBack((b) => [...b.slice(-29), { fileId, slideId, label: `${detail ? detail.file.name : ''} 第 ${slide ? slide.idx : ''} ${unit}` }]);
+    setFileId(it.file_id); setSlideId(it.id);
+  };
+  const goBack = () => { const last = back[back.length - 1]; if (!last) return; setBack(back.slice(0, -1)); setFileId(last.fileId); setSlideId(last.slideId); };
+  const outside = detail && !files.some((f) => f.id === detail.file.id);
   const selIds = [...selected];
   const unit = unitOf(detail && detail.source);
   const isWord = unit === '节';
@@ -171,13 +180,16 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 <button className="btn small" onClick={() => app.openSlide(slide.id, files.map((f) => f.id))}>⛶ 逐页浏览</button>
                 {slide.file && <button className="btn small ghost" onClick={() => api.openPath(slide.file.path)}>打开原文件</button>}
               </div>
+              {(back.length > 0 || outside) && (
+                <div className="hint-bar">🔗 正在查看推荐的页面{outside ? '（该文档不在当前列表中）' : ''}{back.length > 0 && <> · <button className="btn small" onClick={goBack}>↩ 返回 {back[back.length - 1].label}</button></>}</div>
+              )}
               {slide.counterpart && (
                 <div className="hint-bar">
                   ⇄ 该页有内容相近的 <b>{THEME_LABEL[slide.counterpart.theme]}</b> 版本：{slide.counterpart.fileName} 第 {slide.counterpart.idx} 页（相似度 {Math.round(slide.counterpart.score * 100)}%）
                   <button className="btn small" onClick={() => goCounterpart(slide.counterpart)}>切换到{THEME_LABEL[slide.counterpart.theme]}查看</button>
                 </div>
               )}
-              <PanelLayout layout={layout} setLayout={setLayout} panels={{
+              <div className="with-rail"><div className="wr-main"><PanelLayout layout={layout} setLayout={setLayout} panels={{
                 slide: {
                   title: isWord ? '📄 文档内容' : '🖼 PPT 原始页',
                   extra: (
@@ -205,7 +217,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 },
                 notes: { title: isWord ? '💬 批注' : '🗣 讲解词（备注）', body: <NotesBody slide={slide} terms={highlight} unit={unit} tab={notesTab} setTab={setNotesTab} /> },
                 md: { title: '📝 解析 Markdown', body: <MdBody slide={slide} terms={highlight} onGenerated={() => setNotesTab('ai')} /> },
-              }} />
+              }} /></div><RelatedRail slide={slide} onPick={pickRelated} /></div>
             </>
           )}
         </div>

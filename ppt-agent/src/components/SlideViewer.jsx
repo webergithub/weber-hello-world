@@ -8,6 +8,7 @@ const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').
 import SlidePreview from './SlidePreview';
 import { loadSlide } from './SlideWorkspace';
 import { useKeymap, comboOf, isTyping, viewerHint, keysLabel } from '../keymap';
+import RelatedRail from './RelatedRail';
 
 const fileCache = new Map();
 export function loadFile(id) {
@@ -24,7 +25,18 @@ export function clearFileCache() { fileCache.clear(); }
 export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], onClose, active = true, compact = false, onFileChange }) {
   const app = useApp();
   const keys = useKeymap();
-  const ids = useMemo(() => (fileIds && fileIds.length ? fileIds : initialFileId ? [initialFileId] : []), [fileIds, initialFileId]);
+  // 点击推荐跳转到列表外的文件时，临时加入可切换的文件顺序（排在当前文件之后）
+  const [extra, setExtra] = useState([]);
+  const baseIds = useMemo(() => (fileIds && fileIds.length ? fileIds : initialFileId ? [initialFileId] : []), [fileIds, initialFileId]);
+  const ids = useMemo(() => {
+    if (!extra.length) return baseIds;
+    const out = [...baseIds];
+    for (const x of extra) if (!out.includes(x.id)) out.splice(Math.max(0, out.indexOf(x.after)) + 1, 0, x.id);
+    return out;
+  }, [baseIds, extra]);
+  const [back, setBack] = useState([]);
+  const [rail, setRail] = useState(() => { try { return localStorage.getItem('ppta.relRail') !== '0'; } catch { return true; } });
+  const setRailP = useCallback((v) => setRail((cur) => { const n = typeof v === 'function' ? v(cur) : v; try { localStorage.setItem('ppta.relRail', n ? '1' : '0'); } catch { /* ignore */ } return n; }), []);
   const [fileId, setFileId] = useState(initialFileId || ids[0]);
   const [detail, setDetail] = useState(null);
   const [slideId, setSlideId] = useState(initialSlideId || null);
@@ -90,6 +102,14 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     else if (slides.length) setSlideId(slides[Math.max(0, Math.min(slides.length - 1, j))].id);
   }, [pos, slides, goFile]);
   const inBasket = slide && app.basket.items.includes(slide.id);
+  const goBack = useCallback(() => {
+    setBack((b) => {
+      if (!b.length) return b;
+      const last = b[b.length - 1];
+      setFileId(last.fileId); setSlideId(last.slideId);
+      return b.slice(0, -1);
+    });
+  }, []);
   const toggleBasket = useCallback(() => { if (!slide) return; if (app.basket.items.includes(slide.id)) app.basket.remove(slide.id); else app.basket.add([slide.id]); }, [slide, app.basket]);
 
   useEffect(() => {
@@ -115,6 +135,8 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         case 'firstFile': if (ids.length) setFileId(ids[0]); break;
         case 'lastFile': if (ids.length) setFileId(ids[ids.length - 1]); break;
         case 'basket': toggleBasket(); break;
+        case 'rail': setRailP((v) => !v); break;
+        case 'back': if (back.length) goBack(); else handled = false; break;
         case 'max': toggleMax(); break;
         case 'full': toggleFull(); break;
         case 'panes': setPanes((v) => !v); break;
@@ -131,7 +153,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     };
     window.addEventListener('keydown', k, true);
     return () => window.removeEventListener('keydown', k, true);
-  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout, keys]);
+  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout, keys, back]);
 
   // 翻页 / 切换文件时的屏幕提示
   useEffect(() => {
@@ -143,6 +165,13 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
 
   const unit = unitOf(detail && detail.source);
   const switchCounterpart = (cp) => { setFileId(cp.fileId); setSlideId(cp.id); };
+  // 推荐栏：点击推荐页在当前位置替换查看，可返回
+  const pickRelated = (it) => {
+    if (!slide) return;
+    setBack((b) => [...b.slice(-29), { fileId, slideId, label: `${detail ? detail.file.name : ''} 第 ${slide.idx} ${unitOf(detail && detail.source)}` }]);
+    if (!ids.includes(it.file_id)) setExtra((x) => [...x, { id: it.file_id, after: fileId }]);
+    setFileId(it.file_id); setSlideId(it.id);
+  };
 
   return (
     <div ref={root} className={`viewer ${compact ? 'compact' : ''} ${maxed ? 'maxed' : ''}`}>
@@ -154,6 +183,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
           <b>{detail ? detail.file.name : ''}</b>
           <span className="muted small"> 文件 {fpos + 1}/{ids.length}</span>
         </div>
+        {back.length > 0 && <button className="btn small" onClick={goBack} title={`返回 ${back[back.length - 1].label}（${keysLabel(keys.map, 'back')}）`}>↩ 返回</button>}
         <div className="spacer" />
         <button className="btn small" disabled={pos <= 0} onClick={() => go(-1)} title={`上一页（${keysLabel(keys.map, 'prev')}）`}>◀</button>
         <span className="vb-page">{unit === '节' ? '第' : '第'} {pos + 1} / {slides.length} {unit}</span>
@@ -211,7 +241,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
             body: <MdBody slide={slide} terms={terms} onGenerated={() => setNotesTab('ai')} />,
           },
         };
-        return <PanelLayout panels={panels} layout={layout} setLayout={setLayout} hideSub={!panes} />;
+        return <div className="with-rail"><div className="wr-main"><PanelLayout panels={panels} layout={layout} setLayout={setLayout} hideSub={!panes} /></div><RelatedRail slide={slide} onPick={pickRelated} open={rail} setOpen={setRailP} /></div>;
       })() : <div className="empty-tip">{ids.length ? '加载中…' : '没有可浏览的文件'}</div>}
     </div>
   );

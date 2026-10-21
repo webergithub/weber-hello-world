@@ -96,4 +96,4 @@ function computeTags(file, slides, info, df, N, llmTags = []) {
   return { tags: chosen.slice(0, TAG_COUNT), category: cat ? cat[0] : '其他' };
 }
 
-module.exports = { fileTerms, computeTags, TAG_COUNT };
+module.exports = { fileTerms, computeTags, TAG_COUNT, GENERIC };

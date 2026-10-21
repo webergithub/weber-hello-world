@@ -175,6 +175,7 @@ app.whenReady().then(async () => {
     library: () => service.library(),
     fileDetail: (id) => service.fileDetail(id),
     slideDetail: (id) => service.slideDetail(id),
+    related: (id) => service.related(id),
     categories: () => service.categories(),
     groups: (opts) => service.groups(opts),
     search: (q, opts) => service.searchQuery(q, opts),

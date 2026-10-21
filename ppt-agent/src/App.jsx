@@ -17,6 +17,7 @@ import SlideWorkspace, { clearSlideCache, loadSlide } from './components/SlideWo
 import SlideViewer, { clearFileCache } from './components/SlideViewer';
 import CompareView, { COMPARE_MAX } from './components/CompareView';
 import { WatchAskDialog } from './components/WatchSettings';
+import { clearRelatedCache } from './components/RelatedRail';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
@@ -41,6 +42,7 @@ function reduceProgress(prev, e) {
     case 'result': cur.files = [...cur.files, { file: e.file, action: e.action }]; feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
     case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f));
       cur.tagFeed = [...(cur.tagFeed || []).slice(-60), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, tags: e.tags, category: e.category }]; feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
+    case 'relate': cur.relate = e; feed(`${t} 🔗 页面关联：${e.pages} 页已打页面标签，${e.linked} 页有相似推荐（相似 PPT 页 ${e.ppt} 条${e.withWord ? `，Word ↔ PPT ${e.word} 条` : ''}）`); break;
     case 'done': cur.stage = 'done'; cur.message = e.message; feed(`${t} 🏁 任务结束：${e.message}`); break;
     default: break;
   }
@@ -80,7 +82,7 @@ export default function App() {
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
-  const bump = () => { clearSlideCache(); clearFileCache(); setTaskTick((x) => x + 1); };
+  const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
 
   useEffect(() => {
     refreshTasks(); reloadLogs();

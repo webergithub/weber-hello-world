@@ -23,6 +23,7 @@
 - 保存对话框按用途记住上次目录（`saveFile(name, kind, key)`）。
 - 浏览类窗口的键盘操作一律走 `src/keymap.js`（动作 → 按键，用户可在设置中自定义），不要在组件里写死按键；新增动作要加到 `ACTIONS` 与 `DEFAULT_KEYMAP`。
 - 定时监测更新只对 `tasks.watch = 1` 且已手动完成过首次解析的任务做增量扫描；增量扫描中原文件已删除的文档以“仅移出资料库”方式进回收站；在回收站中的文档重新扫描时不自动加回。
+- 页面标签与页面关联在 `electron/core/relations.js`，由 `afterLibraryChange → computeRelations` 全量重算（表 `slide_links`）；是否关联 Word 取决于设置中是否同时选择 PPT 与 Word。浏览类视图右侧都带 `RelatedRail` 推荐栏，点击推荐在当前位置替换查看并可返回。
 - 对比窗口最多 4 个文档（`COMPARE_MAX`），文档多选的列表旁同时提供“⧉ 对比查看”。
 - 测试数据在 `test-ppts/`，由 `scripts/make_test_ppts.py` 生成；不要无谓地整体重生成已提交的大文件（会重复提交 25MB 视频）。
 
