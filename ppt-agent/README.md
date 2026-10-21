@@ -2,8 +2,13 @@
 
 把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-1.3.0-win-x64-portable.exe`](download/PPT-Agent-1.3.0-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-1.4.0-win-x64-portable.exe`](download/PPT-Agent-1.4.0-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
+
+## v1.4 新增
+
+- **定时监测更新（增量解析）**：添加“所有本地文档”时可选择监测更新和新增的 PPT / Word 文件，并设置每天扫描的时间点；设置 →“定时监测更新”可修改开关、时间点、错过时下次启动补扫，查看各任务上次扫描结果，或立即增量扫描。任务详情中可为任意任务开关“📡 监测更新”。
+- 增量扫描只解析新增和修改过的文档，原文件已删除的移入回收站（仅移出资料库，可还原），未变化的直接跳过；移出资料库的文档不会被自动加回。
 
 ## v1.3 新增
 
@@ -89,7 +94,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-1.3.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-1.4.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。

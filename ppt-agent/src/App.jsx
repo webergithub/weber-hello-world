@@ -16,6 +16,7 @@ import LogView from './components/LogView';
 import SlideWorkspace, { clearSlideCache, loadSlide } from './components/SlideWorkspace';
 import SlideViewer, { clearFileCache } from './components/SlideViewer';
 import CompareView, { COMPARE_MAX } from './components/CompareView';
+import { WatchAskDialog } from './components/WatchSettings';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
@@ -58,6 +59,7 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [modal, setModal] = useState(null);
   const [compare, setCompare] = useState(null);
+  const [askWatch, setAskWatch] = useState(null);
   const [config, setConfig] = useState(null);
   const [libMode, setLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
@@ -91,9 +93,9 @@ export default function App() {
     const off1 = on('task', (t) => {
       setLiveTasks((m) => ({ ...m, [t.id]: t }));
       if (t.status !== 'running' || t.done === undefined || t.done % 5 === 0) refreshTasks();
-      if (['done', 'failed', 'cancelled'].includes(t.status) && t.finished_at) {
+      if (['done', 'failed', 'cancelled'].includes(t.status) && t.finished_at && !t.quiet) {
         bump();
-        const repeat = (t.skipped || 0) + (t.duplicate || 0);
+        const repeat = /增量扫描|补扫/.test(t.message || '') ? 0 : (t.skipped || 0) + (t.duplicate || 0);
         toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}${repeat ? `（${repeat} 个文件已解析过，可在“解析任务”中选择是否重新解析）` : ''}`, t.status === 'failed' ? 'error' : 'info');
       }
     });
@@ -114,9 +116,19 @@ export default function App() {
   };
   const addAllLocal = async () => {
     setAddMenu(false);
-    const roots = await api.localRoots();
-    if (!confirm(`将按顺序扫描本机所有磁盘（${roots.join('  ')}）中的 PPT / Word 文件（类型以设置为准），系统目录会被跳过。\n文件较多时耗时较长，可随时取消。\n\n确定添加该任务？`)) return;
-    try { await api.addAllLocalTask(); await refreshTasks(); setView({ type: 'monitor' }); toast('已添加“本机全部文档”任务，点击“开始解析”后执行'); } catch (e) { toast(e.message, 'error'); }
+    setAskWatch({ roots: await api.localRoots() });
+  };
+  // 全盘扫描：询问是否监测更新和新增的文档（每天定时增量扫描）
+  const onAskWatch = async (r) => {
+    setAskWatch(null);
+    if (!r) return;
+    try {
+      if (r.watch) setConfig(await api.setConfig({ watch: { time: r.time, catchUp: r.catchUp } }));
+      await api.addAllLocalTask({ watch: r.watch, time: r.time });
+      setConfig(await api.getConfig());
+      await refreshTasks(); setView({ type: 'monitor' });
+      toast(`已添加“本机全部文档”任务，点击“开始解析”后执行${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`);
+    } catch (e) { toast(e.message, 'error'); }
   };
 
   const exportSlides = async (ids, kind) => {
@@ -204,7 +216,7 @@ export default function App() {
                   <span className={`dot s-${t.status}`} />
                   {!collapsed && (
                     <div className="sbt-main">
-                      <div className="sbt-name">#{t.id} {t.name}</div>
+                      <div className="sbt-name">#{t.id} {t.name}{t.watch ? <span className="watch-dot" title={`已开启定时监测更新（每天 ${(config && config.watch && config.watch.time) || ''}）`}> 📡</span> : null}</div>
                       <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
                     </div>
                   )}
@@ -278,6 +290,7 @@ export default function App() {
             </div>
           </div>
         )}
+        {askWatch && <WatchAskDialog roots={askWatch.roots} onClose={onAskWatch} />}
         {exporting && <div className="overlay"><div className="spinner-box">正在导出 {exporting.n} 页，请稍候…</div></div>}
         <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}{t.action && <button className="btn tiny" onClick={t.action.run}>{t.action.label}</button>}</div>)}</div>
       </div>

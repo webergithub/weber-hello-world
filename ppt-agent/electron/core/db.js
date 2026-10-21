@@ -80,6 +80,9 @@ class Store {
     if (!t.has('deleted')) this.db.exec('ALTER TABLE tasks ADD COLUMN deleted INTEGER DEFAULT 0');
     if (!t.has('run_started')) this.db.exec('ALTER TABLE tasks ADD COLUMN run_started INTEGER');
     if (!t.has('scan_list')) this.db.exec('ALTER TABLE tasks ADD COLUMN scan_list TEXT');
+    if (!t.has('watch')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch INTEGER DEFAULT 0');
+    if (!t.has('last_watch_at')) this.db.exec('ALTER TABLE tasks ADD COLUMN last_watch_at INTEGER');
+    if (!t.has('watch_summary')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch_summary TEXT');
     const sl = cols('slides');
     if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
     if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');

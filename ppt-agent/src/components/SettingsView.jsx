@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../ctx';
 import KeymapEditor from './KeymapEditor';
+import WatchSettings from './WatchSettings';
 
 export default function SettingsView({ focus }) {
   const app = useApp();
   const keysRef = useRef(null);
+  const watchRef = useRef(null);
   const [cfg, setCfg] = useState(null);
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
@@ -14,7 +16,7 @@ export default function SettingsView({ focus }) {
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
   useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
-  useEffect(() => { if (cfg && focus === 'keys' && keysRef.current) keysRef.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
   if (!cfg) return null;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
@@ -42,6 +44,11 @@ export default function SettingsView({ focus }) {
               );
             })}
           </div>
+        </section>
+        <section ref={watchRef} className={focus === 'watch' ? 'flash-sec' : ''}>
+          <h3>定时监测更新（增量解析）</h3>
+          <p className="muted">对开启监测的任务（如“本机全部文档”），每天在设定的时间自动重新扫描：新增的文档自动解析入库，修改过的文档重新解析并替换旧结果，原文件已删除的移入回收站（仅移出资料库，可还原），未变化的直接跳过。需要程序在运行（可最小化到任务栏）。修改立即生效。</p>
+          <WatchSettings />
         </section>
         <section>
           <h3>界面主题</h3>

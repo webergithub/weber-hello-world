@@ -116,6 +116,7 @@ select.input { padding: 5px 6px; }
 .tag.act-parsed { background: rgba(47, 182, 124, .2); color: var(--ok-fg); }
 .tag.act-skipped { background: rgba(79, 140, 255, .15); color: var(--accent-fg); }
 .tag.act-duplicate { background: rgba(224, 162, 58, .2); color: var(--warn-fg); }
+.tag.act-removed { background: rgba(140, 140, 140, .2); color: var(--muted-fg, inherit); }
 .tag.act-failed { background: rgba(229, 83, 75, .2); color: var(--danger-fg); }
 .badge { background: var(--bg4); padding: 3px 9px; border-radius: 10px; color: var(--fg2); font-size: 12px; }
 .status { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--bg4); font-weight: 400; }
@@ -282,6 +283,7 @@ table.grid tr:hover td { background: var(--hover2); }
 .settings p { line-height: 1.7; margin: 4px 0 10px; }
 .settings .row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
 .settings .row > label { width: 120px; color: var(--fg2); }
+.settings .row > label.type-chip, .settings .row > label.chk { width: auto; color: inherit; }
 .engines { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
 
 /* 日志 */
@@ -393,6 +395,7 @@ table.grid tr:hover td { background: var(--hover2); }
 .viewer-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .settings .row.wrap { flex-wrap: wrap; }
 .type-chip { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; cursor: pointer; background: var(--bg); }
+.type-chip b { white-space: nowrap; flex: none; }
 .type-chip.on { border-color: var(--accent); background: rgba(79, 140, 255, .1); }
 .add-wrap { position: relative; display: flex; margin: 4px 10px 6px; gap: 2px; }
 .add-wrap .add-btn { margin: 0; flex: 1; }
@@ -657,3 +660,8 @@ table.grid tr.row-sel td { background: rgba(79, 140, 255, .12); }
 .kbd b:hover { color: var(--danger-fg); }
 .flash-sec { animation: flashsec 1.6s ease-out 1; border-radius: 8px; }
 @keyframes flashsec { 0% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* ===== 定时监测更新 ===== */
+.watch-settings .row { gap: 8px; align-items: center; }
+.watch-row { padding-left: 26px; gap: 10px; flex-wrap: wrap; }
+.watch-dot { font-size: 11px; opacity: .8; }

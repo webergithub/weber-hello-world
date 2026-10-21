@@ -105,6 +105,8 @@ app.whenReady().then(async () => {
   service.on('task', (t) => send('task', t));
   service.on('embedding', (e) => send('embedding', e));
   service.on('progress', (p) => send('progress', p));
+  service.on('watch', (w) => send('watch', w));
+  service.startScheduler();
   const applyTheme = (t) => { nativeTheme.themeSource = t === 'dark' || t === 'light' ? t : 'system'; };
   applyTheme(service.getConfig().uiTheme);
   nativeTheme.on('updated', () => send('systemTheme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
@@ -113,7 +115,10 @@ app.whenReady().then(async () => {
     stats: () => service.stats(),
     tasks: () => service.tasks(),
     addTask: (dir, opts) => service.addTask(dir, opts),
-    addAllLocalTask: () => service.addAllLocalTask(),
+    addAllLocalTask: (opts) => service.addAllLocalTask(opts),
+    setTaskWatch: (id, on) => service.setTaskWatch(id, on),
+    watchInfo: () => service.watchInfo(),
+    runWatch: (ids) => service.runWatch('手动增量扫描', ids || null),
     startTask: (id, opts) => service.startTask(id, opts),
     resumeTask: (id) => service.resumeTask(id),
     pauseTask: (id) => service.pauseTask(id),

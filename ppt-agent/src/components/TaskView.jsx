@@ -38,6 +38,9 @@ export default function TaskView({ taskId }) {
         {task.status === 'running' || task.status === 'pending'
           ? <button className="btn" onClick={() => api.cancelTask(taskId)}>取消任务</button>
           : <button className={`btn ${task.status === 'draft' ? 'primary' : ''}`} onClick={() => api.startTask(taskId).then(app.refreshTasks)}>{task.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button>}
+        {task.watch && task.run_started && !['running', 'pending'].includes(task.status) ? <button className="btn" title="只解析新增和修改过的文档，原文件已删除的移入回收站" onClick={() => api.runWatch([taskId]).then(() => { app.refreshTasks(); app.go({ type: 'monitor', tab: 'live', taskId }); })}>↻ 增量扫描</button> : null}
+        <button className={`btn ${task.watch ? 'primary' : ''}`} title={`每天 ${(app.config && app.config.watch && app.config.watch.time) || ''} 定时增量扫描该任务（时间在“设置 → 定时监测更新”中修改）`}
+          onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>
         <button className="btn ghost" onClick={() => app.go({ type: 'monitor' })}>实时进度</button>
       </div>
       {task.status === 'draft' && <div className="notice">任务尚未开始：点击右上角“开始解析”加入解析队列。</div>}

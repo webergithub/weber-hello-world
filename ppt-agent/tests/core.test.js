@@ -237,3 +237,54 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   assert.ok(a.files.length >= 8 && a.files.every((x) => 'lastOpen' in x));
   svc.close();
 });
+
+test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料库的文档不自动加回', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const lib = path.join(tmp, 'lib3');
+  fs.cpSync(P('机场运营'), lib, { recursive: true });
+  const svc = new AgentService(path.join(tmp, 'data3'));
+  svc.setConfig({ thumbnails: 'off' });
+  const done = (id) => new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done' && t.finished_at) { svc.off('task', h); res(t); } }; svc.on('task', h); });
+  const id = svc.addTask(lib);
+  const draft = svc.addTask(lib);
+  svc.setTaskWatch(draft, true);
+  svc.startTask(id);
+  await done(id);
+  svc.setTaskWatch(id, true);
+  assert.strictEqual(svc.getConfig().watch.enabled, true);
+  // 时间点计算
+  const base = new Date(2026, 9, 21, 10, 0).getTime();
+  assert.strictEqual(AgentService.lastSlot('03:00', base), new Date(2026, 9, 21, 3, 0).getTime());
+  assert.strictEqual(AgentService.lastSlot('12:30', base), new Date(2026, 9, 20, 12, 30).getTime());
+  assert.strictEqual(AgentService.nextSlot('12:30', base), new Date(2026, 9, 21, 12, 30).getTime());
+  // 刚开启 / 修改时间点时不立即补扫
+  svc.setConfig({ watch: { time: '00:00' } });
+  assert.strictEqual(await svc.checkSchedule(), false);
+  // 文档变化：新增 1、修改 1、删除 1
+  const pptx = fs.readdirSync(lib).filter((n) => n.endsWith('.pptx')).sort();
+  fs.copyFileSync(path.join(lib, pptx[0]), path.join(lib, '新增文档_增量测试.pptx'));
+  const later = new Date(Date.now() + 120000);
+  fs.utimesSync(path.join(lib, pptx[1]), later, later);
+  fs.rmSync(path.join(lib, pptx[2]));
+  svc.setConfig({ watch: { since: 0, lastRun: 0 } });
+  const p = done(id);
+  assert.strictEqual(await svc.checkSchedule(), true);
+  const t = await p;
+  assert.match(t.message, /新增 1，更新 1，移除 1/);
+  assert.strictEqual(JSON.parse(t.watch_summary).added, 1);
+  assert.strictEqual(svc.store.getTask(draft).status, 'draft', '从未开始过的任务不自动开始');
+  assert.ok(svc.library().some((f) => f.name === '新增文档_增量测试.pptx'));
+  assert.ok(!svc.library().some((f) => f.name === pptx[2]));
+  assert.ok(svc.recycleList().some((r) => r.name === pptx[2] && !r.moved));
+  assert.strictEqual(await svc.checkSchedule(), false, '同一时间点只扫描一次');
+  // 用户移出资料库的文档，再次扫描不自动加回
+  const keep = svc.library().find((f) => f.name === pptx[3]);
+  await svc.recycleFiles([keep.id], { moveFile: false });
+  const p2 = done(id);
+  svc.runWatch('手动增量扫描');
+  const t2 = await p2;
+  assert.match(t2.message, /新增 0，更新 0，移除 0/);
+  assert.ok(!svc.library().some((f) => f.id === keep.id));
+  assert.ok(svc.watchInfo().tasks.some((x) => x.id === id && x.last_watch_at));
+  svc.close();
+});

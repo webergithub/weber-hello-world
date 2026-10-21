@@ -55,6 +55,8 @@ const DEFAULT_CONFIG = {
   uiTheme: 'system', // dark | light | system
   closeAction: 'ask', // ask | quit | minimize：关闭窗口时的行为
   keymap: {}, // 浏览窗口快捷键：只保存与默认不同的动作 { 动作: [按键组合] }
+  // 定时监测更新：每天 time 对开启监测的任务做增量扫描；catchUp：错过的（程序未运行）在下次启动时补扫
+  watch: { enabled: false, time: '12:30', catchUp: true, since: 0, lastRun: 0 },
 };
 
 class AgentService extends EventEmitter {
@@ -82,6 +84,7 @@ class AgentService extends EventEmitter {
       if (t.status === 'running' || t.status === 'pending') this.store.updateTask(t.id, { status: 'interrupted', message: t.status === 'running' ? '程序关闭（或异常退出）时任务未完成，可点击“继续”从断点继续' : '程序关闭时仍在排队，可点击“继续”' });
     }
     this.resumeFlags = new Map();
+    this.incrementalRuns = new Map();
     this.pausing = new Set();
     this.log.info(`服务启动，数据目录 ${dataDir}`);
   }
@@ -89,12 +92,16 @@ class AgentService extends EventEmitter {
   loadConfig() {
     try {
       const c = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
-      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) } };
+      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
   getConfig() { return this.config; }
   setConfig(patch) {
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) } };
+    const w0 = this.config.watch || DEFAULT_CONFIG.watch;
+    const watch = { ...w0, ...(patch.watch || {}) };
+    // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
+    if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch };
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     this.log.info('配置已更新', { thumbnails: this.config.thumbnails, llm: this.config.llm.enabled ? this.config.llm.model : '未启用', embedding: this.config.embedding.provider });
     return this.config;
@@ -109,14 +116,74 @@ class AgentService extends EventEmitter {
 
   // ================= 解析任务 =================
   /** 扫描本机所有磁盘中的 PPT / Word 文件（按盘符、目录名顺序） */
-  addAllLocalTask() {
+  /** watch：开启每日定时增量扫描（监测修改与新增的文档），time：每天扫描的时间点 HH:MM */
+  addAllLocalTask({ watch = false, time } = {}) {
     const roots = localRoots();
     const id = this.store.createTask(roots.join(' ; '), '本机全部文档');
-    this.store.updateTask(id, { roots: JSON.stringify(roots) });
-    this.store.updateTask(id, { status: 'draft' });
-    this.log.info(`[任务#${id}] 已添加全盘扫描任务（待手动开始）：${roots.join(' ')}（类型：${[...this.enabledExts()].join(' ')}）`);
+    this.store.updateTask(id, { roots: JSON.stringify(roots), status: 'draft', watch: watch ? 1 : 0 });
+    this.log.info(`[任务#${id}] 已添加全盘扫描任务（待手动开始）：${roots.join(' ')}（类型：${[...this.enabledExts()].join(' ')}）${watch ? `；开启每日 ${time || this.config.watch.time} 定时增量扫描` : ''}`);
+    if (watch) this.setConfig({ watch: { enabled: true, ...(time ? { time } : {}) } });
     this.emitTask(id);
     return id;
+  }
+
+  // ================= 定时监测更新（增量扫描） =================
+  setTaskWatch(id, on) {
+    if (!this.store.getTask(id)) throw new Error('任务不存在');
+    this.store.updateTask(id, { watch: on ? 1 : 0 });
+    if (on && !this.config.watch.enabled) this.setConfig({ watch: { enabled: true } });
+    this.log.info(`[任务#${id}] ${on ? '开启' : '关闭'}定时监测更新`);
+    this.emitTask(id, { quiet: true });
+    return this.store.getTask(id);
+  }
+
+  /** 最近一次应执行的定时时间点（不晚于 now） */
+  static lastSlot(time, now = Date.now()) {
+    const [h, m] = String(time || '12:30').split(':').map((x) => Number(x) || 0);
+    const d = new Date(now); d.setHours(h, m, 0, 0);
+    if (d.getTime() > now) d.setDate(d.getDate() - 1);
+    return d.getTime();
+  }
+  static nextSlot(time, now = Date.now()) { const s = AgentService.lastSlot(time, now); const d = new Date(s); d.setDate(d.getDate() + 1); return d.getTime(); }
+
+  watchInfo() {
+    const w = this.config.watch;
+    const tasks = this.store.listTasks().filter((t) => t.watch);
+    return { ...w, next: w.enabled ? AgentService.nextSlot(w.time) : null, tasks: tasks.map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, last_watch_at: t.last_watch_at, watch_summary: t.watch_summary, finished_at: t.finished_at, neverRun: !t.run_started })) };
+  }
+
+  /** 每 30 秒检查一次是否到了定时扫描时间（由主进程启动；测试中可直接调用 checkSchedule） */
+  startScheduler() {
+    this.schedStart = Date.now();
+    clearInterval(this.schedTimer);
+    this.schedTimer = setInterval(() => this.checkSchedule().catch((e) => this.log.warn('定时扫描检查失败', e)), 30000);
+    setTimeout(() => this.checkSchedule().catch(() => {}), 15000);
+  }
+
+  async checkSchedule(now = Date.now()) {
+    const w = this.config.watch;
+    if (!w || !w.enabled) return false;
+    const slot = AgentService.lastSlot(w.time, now);
+    if (slot <= Math.max(w.lastRun || 0, w.since || 0)) return false;
+    if (!w.catchUp && slot < (this.schedStart || 0)) return false;
+    this.setConfig({ watch: { lastRun: now } });
+    const missed = this.schedStart && slot < this.schedStart;
+    this.runWatch(missed ? '补扫（错过的定时扫描）' : '定时增量扫描');
+    return true;
+  }
+
+  /** 对所有开启监测的任务做增量扫描（排队执行）；从未手动开始过的任务不自动开始 */
+  runWatch(reason = '手动增量扫描', ids = null) {
+    const list = this.store.listTasks().filter((t) => t.watch && (!ids || ids.includes(t.id)));
+    const started = [];
+    for (const t of list) {
+      if (!t.run_started) { this.log.info(`[任务#${t.id}] ${reason}：该任务还没有手动开始过首次解析，跳过`); continue; }
+      if (this.running === t.id || this.queue.includes(t.id)) continue;
+      this.startTask(t.id, { incremental: true, reason });
+      started.push(t.id);
+    }
+    this.log.info(`${reason}：${started.length ? `已加入队列 ${started.map((x) => '#' + x).join(' ')}` : '没有需要扫描的任务'}`);
+    return started;
   }
 
   addTask(dir, { autoStart = false } = {}) {
@@ -148,13 +215,14 @@ class AgentService extends EventEmitter {
 
   /** 手动开始（或重新扫描）：加入队列，按顺序依次解析 */
   /** resume = true：从断点继续（复用上次扫描清单，跳过本轮已处理的文件）；否则重新扫描 */
-  startTask(id, { resume = false } = {}) {
+  startTask(id, { resume = false, incremental = false, reason = '' } = {}) {
     const t = this.store.getTask(id);
     if (!t) throw new Error('任务不存在');
     if (this.running === id || this.queue.includes(id)) return id;
     this.cancelled.delete(id);
     this.pausing.delete(id);
     this.resumeFlags.set(id, !!(resume && t.run_started && t.scan_list));
+    if (incremental) this.incrementalRuns.set(id, reason || '增量扫描'); else this.incrementalRuns.delete(id);
     this.store.updateTask(id, { status: 'pending', message: '' });
     this.queue.push(id);
     this.log.info(`[任务#${id}] 加入解析队列（第 ${this.queue.length} 位）`);
@@ -270,6 +338,10 @@ class AgentService extends EventEmitter {
     const t0 = Date.now();
     const resume = this.resumeFlags.get(id) && task.run_started && task.scan_list;
     this.resumeFlags.delete(id);
+    // 增量扫描：只解析新增与修改过的文档，原文件已删除的移入回收站（仅从资料库移除）
+    const incremental = !resume ? this.incrementalRuns.get(id) : null;
+    this.incrementalRuns.delete(id);
+    const prevList = incremental && task.scan_list ? JSON.parse(task.scan_list) : null;
     if (resume) this.store.updateTask(id, { status: 'running', started_at: t0 });
     else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: null, parsed: 0, skipped: 0, duplicate: 0, failed: 0 });
     let roots = null;
@@ -283,7 +355,7 @@ class AgentService extends EventEmitter {
       files = JSON.parse(task.scan_list);
       log.info(`${tag} 从断点继续：沿用上次扫描清单 ${files.length} 个文档`);
     } else {
-      log.info(`${tag} 开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
+      log.info(`${tag} ${incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
       files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, {
         fullDisk, isCancelled: () => this.cancelled.has(id),
         onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
@@ -302,6 +374,23 @@ class AgentService extends EventEmitter {
     if (resume) log.info(`${tag} 本轮已处理 ${handled.size} 个，剩余 ${files.filter((f) => !handled.has(f)).length} 个`);
     let changed = false;
     let stoppedAt = -1;
+    const inc = { added: 0, updated: 0, removed: 0 };
+    if (incremental && !this.cancelled.has(id)) {
+      // 上次扫描到、这次没有且原文件已不存在的文档：移入回收站（仅从资料库移除，可还原）
+      const now = new Set(files);
+      const gone = [];
+      for (const p of prevList || this.store.taskFiles(id).map((f) => f.link_path)) {
+        if (now.has(p) || fs.existsSync(p)) continue;
+        const f = this.store.fileByPath(p);
+        if (f && ['parsed', 'duplicate'].includes(f.status) && !gone.includes(f.id)) gone.push(f.id);
+      }
+      if (gone.length) {
+        const r = await this.recycleFiles(gone, { moveFile: false, reason: `${incremental}：原文件已删除或移走` });
+        inc.removed = r.ok;
+        for (const fid of gone) { const f = this.store.getFile(fid); if (f) this.store.linkTaskFile(id, fid, f.path, 'removed', '原文件已删除或移走，已移入回收站（仅从资料库移除）'); }
+        log.info(`${tag} ${incremental}：${r.ok} 个文档的原文件已不存在，已移入回收站（仅从资料库移除，可还原）`);
+      }
+    }
     for (let i = 0; i < files.length; i++) {
       if (this.cancelled.has(id)) { stoppedAt = i; log.warn(`${tag} 已${this.pausing.has(id) ? '中断' : '取消'}，处理到第 ${i}/${files.length} 个文件`); break; }
       const file = files[i];
@@ -310,8 +399,10 @@ class AgentService extends EventEmitter {
       this.emitTask(id, { current: file, done: i });
       this.emitProgress(id, { stage: 'file', index: i + 1, total: files.length, file, counts: { ...counts } });
       try {
+        const before = incremental ? this.store.fileByPath(file) : null;
         const r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force) });
         counts[r]++;
+        if (incremental && r === 'parsed') { if (before && before.status !== 'recycled') inc.updated++; else inc.added++; }
         if (r !== 'parsed') this.emitProgress(id, { stage: 'result', file, action: r, index: i + 1, total: files.length });
         if (r === 'parsed' || r === 'duplicate') changed = true;
       } catch (e) {
@@ -329,10 +420,13 @@ class AgentService extends EventEmitter {
     const paused = this.pausing.delete(id);
     const ms = Date.now() - t0;
     let msg = `解析 ${counts.parsed}，已解析过跳过 ${counts.skipped}，重复文件 ${counts.duplicate}，失败 ${counts.failed}，耗时 ${(ms / 1000).toFixed(1)}s`;
+    if (incremental) msg = `${incremental}：新增 ${inc.added}，更新 ${inc.updated}，移除 ${inc.removed}；` + msg;
     if (cancelled && stoppedAt >= 0) msg = `已中断（处理到 ${stoppedAt}/${files.length}），可点击“继续”从断点继续；` + msg;
-    this.store.updateTask(id, { status: cancelled ? (paused || stoppedAt >= 0 ? 'paused' : 'cancelled') : 'done', finished_at: Date.now(), message: msg });
+    this.store.updateTask(id, { status: cancelled ? (paused || stoppedAt >= 0 ? 'paused' : 'cancelled') : 'done', finished_at: Date.now(), message: msg,
+      ...(incremental && !cancelled ? { last_watch_at: Date.now(), watch_summary: JSON.stringify({ ...inc, total: files.length, at: Date.now(), reason: incremental }) } : {}) });
     log.info(`${tag} 任务结束：${msg}`);
-    this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length });
+    this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length, inc: incremental ? inc : null });
+    if (incremental && !cancelled) this.emit('watch', { taskId: id, name: task.name, ...inc, reason: incremental });
     if (changed && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
   }
 
@@ -346,6 +440,17 @@ class AgentService extends EventEmitter {
     const kind = KIND_OF.get(ext) || 'ppt';
     const unit = kind === 'word' ? '节' : '页';
     let author = '', title = '';
+    // 快速跳过：路径、大小、修改时间都没变的已解析文件不再打开读取（增量扫描大量文件时更快）
+    const known = !force ? this.store.fileByPath(file) : null;
+    // 用户移入回收站（移出资料库）的文档：重新扫描时不再自动加回，可在回收站还原
+    if (known && known.status === 'recycled') {
+      this.store.linkTaskFile(taskId, known.id, file, 'skipped', '该文档在回收站中（已移出资料库），不自动重新解析；可在回收站还原');
+      return 'skipped';
+    }
+    if (known && (known.status === 'parsed' || known.status === 'duplicate') && known.size === st.size && known.mtime === Math.round(st.mtimeMs) && known.fingerprint) {
+      this.store.linkTaskFile(taskId, known.id, file, 'skipped', `已解析过（${new Date(known.parsed_at).toLocaleString('zh-CN')}），文件未变化`);
+      return 'skipped';
+    }
     if (!LEGACY.has(ext)) {
       try { const p = await quickProps(file); author = p.author; title = p.title; } catch (e) {
         const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', kind, error: `文件损坏或不是有效的 ${kind === 'word' ? 'DOCX' : 'PPTX'}：` + e.message, task_id: taskId, parsed_at: Date.now() });
@@ -966,7 +1071,7 @@ class AgentService extends EventEmitter {
     await this.afterLibraryChange();
   }
 
-  close() { this.store.close(); }
+  close() { clearInterval(this.schedTimer); this.store.close(); }
 }
 
 /** 移动文件（跨磁盘时复制后删除） */
