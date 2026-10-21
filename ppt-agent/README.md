@@ -2,7 +2,7 @@
 
 把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-1.1.0-win-x64-portable.exe`](download/PPT-Agent-1.1.0-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-1.1.1-win-x64-portable.exe`](download/PPT-Agent-1.1.1-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
 
 ## v1.1 新增
@@ -14,7 +14,7 @@
 - **全部解析历史**；重复文件提示并可选择重新解析
 - **资料库总览**页签；目录 / 文件 / 页数三列可折叠
 - **逐页浏览**（搜索页签 + 弹窗）：←→ 翻页、↑↓ 切换文件等键盘操控；可最大化 / 全屏；PPT、讲解词、解析 MD 三个模块支持上1下2 / 左1右2、拖拽换位、拖动调整大小、最小化到底栏
-- **智能生成**：描述主题或版式（如“对比格式模板页”）→ 自动匹配页面 → 纵向不同内容、横向相似页挑选（相似阈值可调）→ 生成 PPT
+- **智能生成**（左侧菜单“智能模块”）：描述主题或版式（如“对比格式模板页”）→ 自动匹配页面 → 纵向不同内容、横向相似页挑选（相似阈值可调）→ 生成 PPT
 - **PPT 黑白底互转**
 - 界面主题：黑 / 白 / 跟随系统；数据保存目录可配置
 - 解析出的 Markdown 只保留文字
@@ -74,7 +74,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-1.1.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-1.1.1-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。

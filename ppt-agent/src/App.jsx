@@ -141,9 +141,12 @@ export default function App() {
     exportSlides, openSlide, modalOpen: !!modal, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
   };
 
+  // 左侧菜单分区：解析任务 → 智能模块 → 功能
+  const smartNav = [
+    { key: 'generate', icon: '✨', label: '智能生成' },
+  ];
   const nav = [
     { key: 'search', icon: '🔍', label: '智能搜索' },
-    { key: 'generate', icon: '✨', label: '智能生成' },
     { key: 'monitor', icon: '⚙️', label: `解析任务${tasks.some((t) => t.status === 'running') ? ' ●' : ''}` },
     { key: 'library', icon: '📚', label: '资料库浏览' },
     { key: 'groups', icon: '🧩', label: '相似分组' },
@@ -202,6 +205,12 @@ export default function App() {
               );
             })}
           </div>
+          <div className="sb-section">{!collapsed && '智能模块'}</div>
+          {smartNav.map((n) => (
+            <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
+              <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
+            </div>
+          ))}
           <div className="sb-section">{!collapsed && '功能'}</div>
           {nav.map((n) => (
             <React.Fragment key={n.key}>
