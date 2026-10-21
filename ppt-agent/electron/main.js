@@ -2,7 +2,7 @@
 // Electron 主进程：窗口、IPC、本地资源协议（ppta://）、日志推送。
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme } = require('electron');
 const { pathToFileURL } = require('url');
 
 process.env.NODE_NO_WARNINGS = '1';
@@ -12,8 +12,14 @@ let win = null;
 let service = null;
 let logger = null;
 
+const bootstrapFile = () => path.join(app.getPath('userData'), 'bootstrap.json');
+function readBootstrap() { try { return JSON.parse(fs.readFileSync(bootstrapFile(), 'utf8')); } catch { return {}; } }
+function writeBootstrap(b) { fs.mkdirSync(path.dirname(bootstrapFile()), { recursive: true }); fs.writeFileSync(bootstrapFile(), JSON.stringify(b, null, 2)); }
+
 function resolveDataDir() {
   if (process.env.PPTA_DATA_DIR) return process.env.PPTA_DATA_DIR;
+  const b = readBootstrap();
+  if (b.dataDir) { try { fs.mkdirSync(b.dataDir, { recursive: true }); fs.accessSync(b.dataDir, fs.constants.W_OK); return b.dataDir; } catch { /* 指定目录不可用时退回默认 */ } }
   const portable = process.env.PORTABLE_EXECUTABLE_DIR;
   if (portable) {
     const d = path.join(portable, 'PPT智能体数据');
@@ -58,11 +64,52 @@ app.whenReady().then(async () => {
   setInterval(() => { if (pending.length) { send('log', pending); pending = []; } }, 400);
   service.on('task', (t) => send('task', t));
   service.on('embedding', (e) => send('embedding', e));
+  service.on('progress', (p) => send('progress', p));
+  const applyTheme = (t) => { nativeTheme.themeSource = t === 'dark' || t === 'light' ? t : 'system'; };
+  applyTheme(service.getConfig().uiTheme);
+  nativeTheme.on('updated', () => send('systemTheme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));
 
   const api = {
     stats: () => service.stats(),
     tasks: () => service.tasks(),
-    addTask: (dir) => service.addTask(dir),
+    addTask: (dir, opts) => service.addTask(dir, opts),
+    addAllLocalTask: () => service.addAllLocalTask(),
+    startTask: (id) => service.startTask(id),
+    startAll: () => service.startAll(),
+    moveTask: (id, d) => service.moveTask(id, d),
+    queueState: () => service.queueState(),
+    reparseFiles: (paths, name) => service.reparseFiles(paths, name),
+    history: (opts) => service.history(opts),
+    overview: () => service.overview(),
+    docTypes: () => service.docTypes(),
+    convertSlides: (items, out) => service.convertSlides(items, out),
+    smartCandidates: (desc, opts) => service.smartCandidates(desc, opts),
+    generateDeck: (ids, out, opts) => service.generateDeck(ids, out, opts),
+    localRoots: () => require('./core/service').localRoots(),
+    systemTheme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
+    setUiTheme: (t) => { applyTheme(t); return service.setConfig({ uiTheme: t }); },
+    dataDirInfo: () => ({ current: service.dataDir, bootstrap: readBootstrap().dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null }),
+    setDataDir: async (dir, mode) => {
+      // mode: 'migrate' 迁移现有数据 | 'use' 直接使用目标目录（已有数据则沿用）
+      if (!dir) throw new Error('请选择目录');
+      dir = path.resolve(dir);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.accessSync(dir, fs.constants.W_OK);
+      const cur = path.resolve(service.dataDir);
+      if (dir === cur) return { changed: false };
+      if (dir.startsWith(cur + path.sep)) throw new Error('新目录不能位于当前数据目录内部');
+      if (service.running) throw new Error('有任务正在解析，请等待完成或取消后再切换目录');
+      logger.child('app').info(`数据目录切换：${cur} → ${dir}（${mode === 'migrate' ? '迁移数据' : '使用目标目录'}）`);
+      if (mode === 'migrate') {
+        if (fs.existsSync(path.join(dir, 'ppt-agent.db'))) throw new Error('目标目录已有数据库，请选择“直接使用该目录”或换一个空目录');
+        service.close();
+        for (const f of fs.readdirSync(cur)) fs.cpSync(path.join(cur, f), path.join(dir, f), { recursive: true });
+      }
+      writeBootstrap({ ...readBootstrap(), dataDir: dir });
+      setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
+      return { changed: true, restarting: true };
+    },
+    resetDataDir: () => { const b = readBootstrap(); delete b.dataDir; writeBootstrap(b); setTimeout(() => { app.relaunch(); app.exit(0); }, 300); return true; },
     rerunTask: (id) => service.rerunTask(id),
     cancelTask: (id) => service.cancelTask(id),
     deleteTask: (id, removeFiles) => service.deleteTask(id, removeFiles),
@@ -84,8 +131,8 @@ app.whenReady().then(async () => {
     logClear: () => logger.clear(),
     logPath: () => logger.file,
     clientLog: (level, msg) => logger.write(level === 'error' ? 'ERROR' : 'INFO', 'ui', msg),
-    selectDir: async () => {
-      const r = await dialog.showOpenDialog(win, { title: '选择要解析的 PPT 目录', properties: ['openDirectory', 'multiSelections'] });
+    selectDir: async (title, single) => {
+      const r = await dialog.showOpenDialog(win, { title: title || '选择要解析的 PPT / Word 目录', properties: single ? ['openDirectory', 'createDirectory'] : ['openDirectory', 'multiSelections'] });
       return r.canceled ? [] : r.filePaths;
     },
     saveFile: async (defaultName, kind = 'pptx') => {

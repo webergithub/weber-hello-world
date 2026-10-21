@@ -1,9 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api } from '../api';
+import { api, fmtSize, fmtTime, THEME_LABEL, KIND_LABEL, STATUS_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
 
-const MODES = { folder: '按文件夹', name: '按 PPT 名称', tags: '按名称与内容归类（标签）' };
+const MODES = { overview: '总览', folder: '按文件夹', name: '按文件名称', tags: '按名称与内容归类（标签）' };
 
 export default function LibraryView({ mode, setMode }) {
   const app = useApp();
@@ -18,6 +18,7 @@ export default function LibraryView({ mode, setMode }) {
         <div className="seg">{Object.entries(MODES).map(([k, v]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{v}</button>)}</div>
       </div>
       <div className="tab-body">
+        {mode === 'overview' && <OverviewMode />}
         {mode === 'folder' && <FolderMode files={files} />}
         {mode === 'name' && <NameMode files={files} />}
         {mode === 'tags' && <TagMode files={files} cats={cats} />}
@@ -71,13 +72,25 @@ function TreeNode({ node, sel, onSel, depth = 0 }) {
   );
 }
 
+function useSideCollapse() {
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem('ppta.libside') !== '0'; } catch { return true; } });
+  const set = (v) => { setOpen(v); try { localStorage.setItem('ppta.libside', v ? '1' : '0'); } catch { /* ignore */ } };
+  return [open, set];
+}
+
+function SideShell({ open, setOpen, label, children }) {
+  if (!open) return <div className="col-collapsed" onClick={() => setOpen(true)} title="展开"><span>▸ {label}</span></div>;
+  return <div className="lib-side"><div className="col-head"><span>{label}</span><button className="icon-btn tiny" title="折叠" onClick={() => setOpen(false)}>«</button></div>{children}</div>;
+}
+
 function FolderMode({ files }) {
   const tree = useMemo(() => buildTree(files), [files]);
   const [sel, setSel] = useState(null);
+  const [open, setOpen] = useSideCollapse();
   const node = sel || tree;
   return (
-    <div className="lib-split">
-      <div className="lib-side"><TreeNode node={tree} sel={node} onSel={setSel} /></div>
+    <div className={`lib-split ${open ? '' : 'side-collapsed'}`}>
+      <SideShell open={open} setOpen={setOpen} label="目录名"><TreeNode node={tree} sel={node} onSel={setSel} /></SideShell>
       <div className="lib-main"><SlideWorkspace key={node.path} files={allFiles(node)} /></div>
     </div>
   );
@@ -96,12 +109,13 @@ function NameMode({ files }) {
   const sorted = useMemo(() => [...files].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files]);
   const groups = useMemo(() => { const m = new Map(); for (const f of sorted) { const k = initialOf(f.name); m.set(k, (m.get(k) || 0) + 1); } return m; }, [sorted]);
   const list = letter ? sorted.filter((f) => initialOf(f.name) === letter) : sorted;
+  const [open, setOpen] = useSideCollapse();
   return (
-    <div className="lib-split">
-      <div className="lib-side">
+    <div className={`lib-split ${open ? '' : 'side-collapsed'}`}>
+      <SideShell open={open} setOpen={setOpen} label="首字母">
         <div className={`tree-row ${!letter ? 'active' : ''}`} onClick={() => setLetter('')}>全部 <span className="muted small">({sorted.length})</span></div>
         {[...groups].map(([k, n]) => <div key={k} className={`tree-row ${letter === k ? 'active' : ''}`} onClick={() => setLetter(k)}>🔤 {k} <span className="muted small">({n})</span></div>)}
-      </div>
+      </SideShell>
       <div className="lib-main"><SlideWorkspace key={letter} files={list} /></div>
     </div>
   );
@@ -116,9 +130,10 @@ function TagMode({ files, cats }) {
   if (tag) list = list.filter((f) => (f.tags || []).includes(tag));
   const content = cats.tags.filter((t) => !t.attr), attrs = cats.tags.filter((t) => t.attr);
   const max = Math.max(1, ...content.map((t) => t.n));
+  const [open, setOpen] = useSideCollapse();
   return (
-    <div className="lib-split">
-      <div className="lib-side">
+    <div className={`lib-split ${open ? '' : 'side-collapsed'}`}>
+      <SideShell open={open} setOpen={setOpen} label="分类与标签">
         <div className="side-title">内容分类</div>
         <div className={`tree-row ${!cat ? 'active' : ''}`} onClick={() => setCat('')}>全部分类</div>
         {cats.categories.map((c) => <div key={c.name} className={`tree-row ${cat === c.name ? 'active' : ''}`} onClick={() => setCat(c.name)}>🏷 {c.name} <span className="muted small">({c.files.length})</span></div>)}
@@ -132,10 +147,70 @@ function TagMode({ files, cats }) {
         <div className="tag-cloud">
           {attrs.map((t) => <span key={t.tag} className={`cloud-tag ${tag === t.tag ? 'on' : ''}`} style={{ fontSize: 11.5 }} onClick={() => setTag(tag === t.tag ? '' : t.tag)}>{t.tag}<sup>{t.n}</sup></span>)}
         </div>
-      </div>
+      </SideShell>
       <div className="lib-main">
         {(cat || tag) && <div className="notice">筛选：{cat && <b>分类「{cat}」</b>} {tag && <b>标签「{tag}」</b>} · {list.length} 个文件</div>}
         <SlideWorkspace key={cat + '|' + tag} files={list.map((f) => byId.get(f.id) || f)} />
+      </div>
+    </div>
+  );
+}
+
+// 总览：每个任务 / 全部任务识别到的所有文档的汇总信息
+function OverviewMode() {
+  const app = useApp();
+  const [data, setData] = useState({ tasks: [], files: [] });
+  const [taskId, setTaskId] = useState('all');
+  const [q, setQ] = useState('');
+  const [kind, setKind] = useState('');
+  const [sort, setSort] = useState({ k: 'name', d: 1 });
+  useEffect(() => { api.overview().then(setData); }, [app.taskTick]);
+  const byId = useMemo(() => new Map(data.files.map((f) => [f.id, f])), [data]);
+  const scope = taskId === 'all' ? data.files : ((data.tasks.find((t) => String(t.id) === String(taskId)) || { fileIds: [] }).fileIds.map((id) => byId.get(id)).filter(Boolean));
+  const rows = useMemo(() => {
+    const f = q.trim().toLowerCase();
+    const list = scope.filter((x) => (!kind || (x.kind || 'ppt') === kind) && (!f || x.path.toLowerCase().includes(f) || (x.tags || []).join(' ').toLowerCase().includes(f) || (x.author || '').toLowerCase().includes(f) || (x.category || '').includes(f)));
+    const get = (r) => ({ name: r.name, pages: r.slide_count || 0, size: r.size || 0, mtime: r.mtime || 0, dark: r.dark_slides || 0, author: r.author || '', category: r.category || '' }[sort.k]);
+    return [...list].sort((a, b) => { const x = get(a), y = get(b); return (typeof x === 'string' ? x.localeCompare(y, 'zh') : x - y) * sort.d; });
+  }, [scope, q, kind, sort]);
+  const ok = rows.filter((r) => r.status === 'parsed');
+  const sum = (k) => ok.reduce((a, r) => a + (r[k] || 0), 0);
+  const ppt = ok.filter((r) => (r.kind || 'ppt') === 'ppt'), word = ok.filter((r) => r.kind === 'word');
+  const cats = {}; for (const r of ok) cats[r.category || '其他'] = (cats[r.category || '其他'] || 0) + 1;
+  const authors = new Set(ok.map((r) => r.author).filter(Boolean));
+  const th = (k, label) => <th className="sortable" onClick={() => setSort({ k, d: sort.k === k ? -sort.d : 1 })}>{label}{sort.k === k ? (sort.d > 0 ? ' ▲' : ' ▼') : ''}</th>;
+  const cards = [['文档总数', rows.length], ['已解析', ok.length], ['PPT 文件', ppt.length], ['PPT 页数', ppt.reduce((a, r) => a + (r.slide_count || 0), 0)], ['黑底页', sum('dark_slides')], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0)],
+    ['Word 文档', word.length], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0)], ['视频', sum('video_count')], ['作者数', authors.size], ['总大小', fmtSize(rows.reduce((a, r) => a + (r.size || 0), 0))]];
+  return (
+    <div className="files-stats">
+      <div className="ws-toolbar">
+        <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+          <option value="all">全部任务（{data.files.length} 个文档）</option>
+          {data.tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}，{STATUS_LABEL[t.status] || t.status}）</option>)}
+        </select>
+        <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option></select>
+        <input className="input" placeholder="按路径 / 标签 / 作者 / 分类过滤" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 260 }} />
+      </div>
+      <div className="cards">{cards.map(([k, v]) => <div key={k} className="card"><div className="card-v">{v}</div><div className="card-k">{k}</div></div>)}</div>
+      <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip">主题分类·{k} {v}</span>)}</div>
+      <div className="table-wrap">
+        <table className="grid">
+          <thead><tr>{th('name', '文件名')}<th>类型</th><th>目录</th>{th('pages', '页数/节数')}{th('dark', '黑底/白底页')}<th>底色</th>{th('category', '主题分类')}<th>标签</th>{th('size', '大小')}{th('author', '作者')}{th('mtime', '修改时间')}<th>状态</th></tr></thead>
+          <tbody>{rows.map((r) => (
+            <tr key={r.id}>
+              <td className="link" onClick={() => r.status !== 'failed' && app.openFile(r.id)} title={r.path}>{r.name}</td>
+              <td>{KIND_LABEL[r.kind || 'ppt']}</td>
+              <td className="muted small ellipsis" title={r.dir}>{r.dir}</td>
+              <td>{r.slide_count || 0} {unitOf(r)}</td>
+              <td>{(r.kind || 'ppt') === 'ppt' ? `${r.dark_slides || 0} / ${r.light_slides || 0}` : '-'}</td>
+              <td>{(r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : ''}</td>
+              <td>{r.category}</td>
+              <td className="tags-cell">{(r.tags || []).map((t) => <span key={t} className="tag">{t}</span>)}</td>
+              <td>{fmtSize(r.size)}</td><td>{r.author}</td><td className="small">{fmtTime(r.mtime)}</td>
+              <td><span className={`tag act-${r.status === 'parsed' ? 'parsed' : r.status}`}>{{ parsed: '已解析', duplicate: '重复', failed: '失败' }[r.status] || r.status}</span></td>
+            </tr>
+          ))}</tbody>
+        </table>
       </div>
     </div>
   );

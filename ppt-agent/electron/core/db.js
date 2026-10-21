@@ -60,6 +60,16 @@ class Store {
     this.db = new DatabaseSync(file);
     this.db.exec(SCHEMA);
     this.stmts = new Map();
+    this.migrate();
+  }
+
+  migrate() {
+    const cols = (t) => new Set(this.db.prepare(`PRAGMA table_info(${t})`).all().map((c) => c.name));
+    const f = cols('files');
+    if (!f.has('kind')) this.db.exec("ALTER TABLE files ADD COLUMN kind TEXT DEFAULT 'ppt'");
+    const t = cols('tasks');
+    if (!t.has('roots')) this.db.exec('ALTER TABLE tasks ADD COLUMN roots TEXT');
+    if (!t.has('deleted')) this.db.exec('ALTER TABLE tasks ADD COLUMN deleted INTEGER DEFAULT 0');
   }
 
   q(sql) {
@@ -80,11 +90,9 @@ class Store {
   }
   updateTask(id, f) { this.update('tasks', id, f); }
   getTask(id) { return this.q('SELECT * FROM tasks WHERE id = ?').get(id) || null; }
-  listTasks() { return this.q('SELECT * FROM tasks ORDER BY id DESC').all(); }
-  deleteTask(id) {
-    this.q('DELETE FROM task_files WHERE task_id = ?').run(id);
-    this.q('DELETE FROM tasks WHERE id = ?').run(id);
-  }
+  listTasks() { return this.q('SELECT * FROM tasks WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC').all(); }
+  // 软删除：任务从列表移除，但解析历史保留
+  deleteTask(id) { this.q('UPDATE tasks SET deleted = 1 WHERE id = ?').run(id); }
 
   update(table, id, f) {
     const keys = Object.keys(f);
@@ -104,6 +112,16 @@ class Store {
   }
   taskFiles(taskId) {
     return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id = ? ORDER BY tf.rowid`).all(taskId).map(this.fileRow);
+  }
+
+  history({ limit = 5000, action, q } = {}) {
+    const where = [], args = [];
+    if (action) { where.push('tf.action = ?'); args.push(action); }
+    if (q) { where.push('tf.path LIKE ?'); args.push(`%${q}%`); }
+    return this.db.prepare(`SELECT tf.rowid AS hid, tf.task_id, tf.file_id, tf.path, tf.action, tf.message, tf.at, t.name AS task_name,
+      f.name, f.size, f.mtime, f.author, f.slide_count, f.kind, f.status, f.dup_of
+      FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id LEFT JOIN tasks t ON t.id = tf.task_id
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY tf.rowid DESC LIMIT ?`).all(...args, limit);
   }
 
   // ---------- 文件 ----------
@@ -180,8 +198,8 @@ class Store {
     return ids.map((id) => m.get(id)).filter(Boolean);
   }
   slideVectors() {
-    return this.q(`SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
-      .map((r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, vec: fromBlob(r.vec), emb: fromBlob(r.emb) }));
+    return this.q(`SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
+      .map((r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb) }));
   }
   setSlideEmb(id, emb) { this.q('UPDATE slides SET emb = ? WHERE id = ?').run(toBlob(emb), id); }
   setSlideThumb(id, thumb) { this.q('UPDATE slides SET thumb = ? WHERE id = ?').run(thumb, id); }
@@ -219,7 +237,8 @@ class Store {
       duplicates: g("SELECT COUNT(*) n FROM files WHERE status = 'duplicate'").n,
       failed: g("SELECT COUNT(*) n FROM files WHERE status = 'failed'").n,
       slides: g('SELECT COUNT(*) n FROM slides').n,
-      tasks: g('SELECT COUNT(*) n FROM tasks').n,
+      tasks: g('SELECT COUNT(*) n FROM tasks WHERE deleted IS NULL OR deleted = 0').n,
+      history: g('SELECT COUNT(*) n FROM task_files').n,
     };
   }
 

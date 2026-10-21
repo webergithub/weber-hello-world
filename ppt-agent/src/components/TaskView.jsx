@@ -1,14 +1,16 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL } from '../api';
+import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
 import LogView from './LogView';
+import { ReparseDialog } from './TaskMonitor';
 
 export default function TaskView({ taskId }) {
   const app = useApp();
   const [tab, setTab] = useState('slides');
   const [data, setData] = useState(null);
   const [focusFile, setFocusFile] = useState(null);
+  const [dupes, setDupes] = useState(null);
   const load = () => api.taskDetail(taskId).then(setData);
   useEffect(() => { setTab('slides'); setFocusFile(null); load(); }, [taskId]);
   useEffect(() => { load(); }, [app.taskTick]);
@@ -32,11 +34,18 @@ export default function TaskView({ taskId }) {
         <div className="spacer" />
         {task.status === 'running' || task.status === 'pending'
           ? <button className="btn" onClick={() => api.cancelTask(taskId)}>取消任务</button>
-          : <button className="btn" onClick={() => api.rerunTask(taskId).then(app.refreshTasks)}>重新扫描</button>}
+          : <button className={`btn ${task.status === 'draft' ? 'primary' : ''}`} onClick={() => api.startTask(taskId).then(app.refreshTasks)}>{task.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button>}
+        <button className="btn ghost" onClick={() => app.go({ type: 'monitor' })}>实时进度</button>
       </div>
+      {task.status === 'draft' && <div className="notice">任务尚未开始：点击右上角“开始解析”加入解析队列。</div>}
+      {(stats.skipped || 0) + (stats.duplicate || 0) > 0 && task.status !== 'running' && (
+        <div className="notice">有 <b>{(stats.skipped || 0) + (stats.duplicate || 0)}</b> 个文件与解析历史记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
+          <button className="btn small" onClick={() => setDupes(files.filter((f) => f.action === 'skipped' || f.action === 'duplicate'))}>选择是否重新解析…</button></div>
+      )}
+      {dupes && <ReparseDialog files={dupes} onClose={() => setDupes(null)} />}
       <div className="tabs">
         <button className={tab === 'slides' ? 'on' : ''} onClick={() => setTab('slides')}>页面视图（原始页 · 备注 · Markdown）</button>
-        <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>PPT 文件清单与统计（{files.length}）</button>
+        <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件清单与统计（{files.length}）</button>
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
       </div>
       <div className="tab-body">
@@ -86,14 +95,15 @@ export function FilesStats({ files, stats, onOpen }) {
       </div>
       <div className="table-wrap">
         <table className="grid">
-          <thead><tr>{th('action', '状态')}{th('name', '文件名')}<th>目录</th>{th('pages', '页数')}{th('size', '大小')}<th>作者</th>{th('mtime', '修改时间')}<th>底色</th><th>视频</th><th>分类</th><th>标签（20 个）</th><th>说明</th><th>操作</th></tr></thead>
+          <thead><tr>{th('action', '状态')}{th('name', '文件名')}<th>类型</th><th>目录</th>{th('pages', '页数/节数')}{th('size', '大小')}<th>作者</th>{th('mtime', '修改时间')}<th>底色</th><th>视频</th><th>分类</th><th>标签（20 个）</th><th>说明</th><th>操作</th></tr></thead>
           <tbody>
             {rows.map((r, i) => (
               <tr key={i} className={`row-${r.action}`}>
                 <td><span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span></td>
                 <td className="link" onClick={() => r.id && onOpen(r.id)} title={r.link_path}>{r.name || r.link_path}</td>
+                <td>{KIND_LABEL[r.kind || 'ppt']}</td>
                 <td className="muted small ellipsis" title={r.dir}>{r.dir}</td>
-                <td>{r.slide_count || ''}</td>
+                <td>{r.slide_count ? `${r.slide_count} ${unitOf(r)}` : ''}</td>
                 <td>{fmtSize(r.size)}</td>
                 <td>{r.author}</td>
                 <td className="small">{fmtTime(r.mtime)}</td>

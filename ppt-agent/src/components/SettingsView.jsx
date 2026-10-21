@@ -8,7 +8,10 @@ export default function SettingsView() {
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
   const [embProg, setEmbProg] = useState(null);
-  useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); }, []);
+  const [types, setTypes] = useState([]);
+  const [dd, setDd] = useState(null);
+  const [newDir, setNewDir] = useState('');
+  useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
   if (!cfg) return null;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
@@ -18,6 +21,49 @@ export default function SettingsView() {
     <div className="view">
       <div className="view-head"><div className="vh-title">⚙️ 设置</div><div className="spacer" /><button className="btn primary" onClick={save}>保存设置</button></div>
       <div className="tab-body scroll pad settings">
+        <section>
+          <h3>解析文档类型（多选）</h3>
+          <p className="muted">选择要扫描、解析和检索的文档类型。修改后对之后开始的解析任务生效；已解析的文档仍可检索。</p>
+          <div className="row wrap">
+            {types.map((t) => {
+              const on = (cfg.docTypes || []).includes(t.key);
+              return (
+                <label key={t.key} className={`type-chip ${on ? 'on' : ''}`}>
+                  <input type="checkbox" checked={on} onChange={() => {
+                    const next = on ? cfg.docTypes.filter((k) => k !== t.key) : [...(cfg.docTypes || []), t.key];
+                    if (!next.length) { app.toast('至少保留一种文档类型', 'error'); return; }
+                    set({ docTypes: next });
+                  }} />
+                  <b>{t.label}</b> <span className="muted small">{t.exts.join(' ')}</span>
+                </label>
+              );
+            })}
+          </div>
+        </section>
+        <section>
+          <h3>界面主题</h3>
+          <div className="seg">
+            {[['dark', '🌙 黑色'], ['light', '☀️ 白色'], ['system', '🖥 跟随系统']].map(([k, v]) => <button key={k} className={(cfg.uiTheme || 'system') === k ? 'on' : ''} onClick={() => { set({ uiTheme: k }); app.setTheme(k); }}>{v}</button>)}
+          </div>
+        </section>
+        <section>
+          <h3>数据保存目录（解析结果 · 数据库 · 本地 RAG 索引）</h3>
+          <p className="muted">解析出的页面、Markdown、标签、全文索引与向量都保存在本地 SQLite 数据库中，检索完全在本机进行（本地 RAG）。可把数据目录放到空间更大的磁盘。切换后程序会自动重启。</p>
+          {dd && <p>当前目录：<code>{dd.current}</code>{dd.env ? '（由环境变量 PPTA_DATA_DIR 指定）' : dd.bootstrap ? '（自定义）' : dd.portable ? '（便携版默认：exe 同级目录）' : '（默认）'}</p>}
+          <div className="row"><label>新目录</label><input className="input wide" value={newDir} placeholder="选择或输入目录路径" onChange={(e) => setNewDir(e.target.value)} />
+            <button className="btn" onClick={async () => { const r = await api.selectDir('选择数据保存目录', true); if (r && r[0]) setNewDir(r[0]); }}>浏览…</button></div>
+          <div className="row"><label />
+            <button className="btn primary" disabled={!newDir} onClick={async () => {
+              if (!confirm(`把现有数据（数据库、Markdown、截图、日志）迁移到：\n${newDir}\n\n完成后程序将自动重启。`)) return;
+              try { await api.setDataDir(newDir, 'migrate'); app.toast('正在迁移并重启…'); } catch (e) { app.toast(e.message, 'error'); }
+            }}>迁移数据到新目录</button>
+            <button className="btn" disabled={!newDir} onClick={async () => {
+              if (!confirm(`直接使用目录：\n${newDir}\n（若该目录已有本工具的数据则沿用，否则从空库开始；原目录数据保留不动）`)) return;
+              try { await api.setDataDir(newDir, 'use'); app.toast('正在切换并重启…'); } catch (e) { app.toast(e.message, 'error'); }
+            }}>直接使用该目录</button>
+            {dd && dd.bootstrap && <button className="btn ghost" onClick={() => confirm('恢复为默认数据目录并重启？') && api.resetDataDir()}>恢复默认</button>}
+          </div>
+        </section>
         <section>
           <h3>页面截图（PPT 原始页预览）</h3>
           <p className="muted">优先使用 PowerPoint 导出每页截图（保真度最高），其次 LibreOffice；均不可用时使用内置版式渲染。截图也会用于更准确地判断黑底/白底。</p>

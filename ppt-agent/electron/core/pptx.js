@@ -630,6 +630,7 @@ async function parsePptx(file, opts = {}) {
         const s = await parseSlide(pkg, info.slides[i], i + 1, ctxBase, { ...opts, mediaKey });
         s.section = info.sections.get(info.slides[i]) || '';
         slides.push(s);
+        if (opts.onSlide) opts.onSlide(i + 1, info.slides.length, s.title);
       } catch (e) {
         opts.log && opts.log.warn(`第 ${i + 1} 页解析失败: ${file}`, e);
         slides.push({ index: i + 1, part: info.slides[i], title: '', blocks: [], media: [], notes: '', text: '', errors: [e.message], theme: 'light', bg: { lum: 1 }, layout: null });

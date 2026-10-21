@@ -81,6 +81,29 @@ try { $p=$app.Presentations.Open($env:PPTA_SRC, -1, 0, 0); $p.SaveAs($env:PPTA_D
     throw new Error('旧版 .ppt 需要安装 PowerPoint 或 LibreOffice 才能解析');
   }
 
+  /** 旧版 .doc → .docx（Word COM 或 LibreOffice） */
+  async convertDoc(src, outDir) {
+    const d = await this.detect();
+    fs.mkdirSync(outDir, { recursive: true });
+    const dest = path.join(outDir, path.basename(src).replace(/\.(doc|dot)$/i, '') + '.docx');
+    if (fs.existsSync(dest) && fs.statSync(dest).mtimeMs >= fs.statSync(src).mtimeMs) return dest;
+    if (isWin) {
+      const r = await ps(`$was=Get-Process WINWORD -ErrorAction SilentlyContinue
+$app=New-Object -ComObject Word.Application
+$app.Visible=$false
+try { $doc=$app.Documents.Open($env:PPTA_SRC, $false, $true); $doc.SaveAs2($env:PPTA_DEST, 16); $doc.Close($false) } finally { if(-not $was){ $app.Quit() } }
+"OK"`, { PPTA_SRC: src, PPTA_DEST: dest });
+      if (r.ok && fs.existsSync(dest)) return dest;
+      this.log.warn(`Word 转换 .doc 失败: ${src}`, r.stderr.slice(0, 300));
+    }
+    if (d.soffice) {
+      const r = await run(d.soffice, ['--headless', '--norestore', '--convert-to', 'docx', '--outdir', outDir, src], { timeout: 300000 });
+      if (fs.existsSync(dest)) return dest;
+      this.log.warn(`LibreOffice 转换 .doc 失败: ${src}`, r.stderr.slice(0, 300));
+    }
+    throw new Error('旧版 .doc 需要安装 Word 或 LibreOffice 才能解析');
+  }
+
   /**
    * 生成每页截图，返回 {engine, images:[相对路径...]} 或 {engine:'pdf', pdf}。
    * mode: 'auto' | 'powerpoint' | 'libreoffice' | 'off'

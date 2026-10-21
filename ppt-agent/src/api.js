@@ -30,4 +30,6 @@ export const fmtDur = (s) => {
 
 export const THEME_LABEL = { dark: '黑底', light: '白底', mixed: '黑白混合' };
 export const ACTION_LABEL = { parsed: '已解析', skipped: '已解析过·跳过', duplicate: '重复文件', failed: '失败' };
-export const STATUS_LABEL = { pending: '排队中', running: '解析中', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
+export const STATUS_LABEL = { draft: '待开始', pending: '排队中', running: '解析中', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
+export const KIND_LABEL = { ppt: 'PPT', word: 'Word' };
+export const unitOf = (f) => (f && f.kind === 'word' ? '节' : '页');

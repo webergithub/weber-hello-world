@@ -333,6 +333,100 @@ def make_linked_video(pptx_path, video_name):
     os.replace(tmp, pptx_path)
 
 
+def make_convert_deck(path):
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.625)
+    prs.core_properties.author = "测试作者"
+    s = prs.slides.add_slide(prs.slide_layouts[5])
+    set_bg(s, DARK)
+    s.shapes.title.text = "机场运行指挥中心 AOC"
+    style_text(s.shapes.title, WHITE)
+    tb = s.shapes.add_textbox(Inches(0.6), Inches(1.3), Inches(5.5), Inches(1.2))
+    tb.text_frame.text = "白色正文：统一指挥、协同保障"
+    p = tb.text_frame.add_paragraph()
+    r = p.add_run(); r.text = "橙色强调：航班延误预警"
+    r.font.color.rgb = RGBColor(0xFF, 0x99, 0x00)
+    style_text(tb, WHITE)
+    r.font.color.rgb = RGBColor(0xFF, 0x99, 0x00)
+    for i, c in enumerate([RGBColor(0x2A, 0x4D, 0x8F), RGBColor(0xC0, 0x1E, 0x2E)]):
+        box = s.shapes.add_shape(1, Inches(0.6 + i * 3), Inches(2.8), Inches(2.6), Inches(1.0))
+        box.fill.solid(); box.fill.fore_color.rgb = c
+        box.text_frame.text = ["运行监控", "应急处置"][i]
+    logo = Image.new("RGBA", (200, 200), (0, 0, 0, 0))
+    ImageDraw.Draw(logo).ellipse([10, 10, 190, 190], fill=(255, 255, 255, 255))
+    buf = io.BytesIO(); logo.save(buf, "PNG"); buf.seek(0)
+    s.shapes.add_picture(buf, Inches(8.8), Inches(0.2), Inches(0.9), Inches(0.9))
+    add_table(s, [["指标", "数值"], ["放行正常率", "91%"]], WHITE)
+    s.notes_slide.notes_text_frame.text = "用于测试黑白底互转：橙色文字应变深红，logo 应变深红，图形应变浅灰。"
+    prs.save(path)
+
+
+def make_word_docs(wdir):
+    try:
+        import docx
+        from docx.shared import Inches as DInches
+    except ImportError:
+        print("未安装 python-docx，跳过 Word 测试文件", file=sys.stderr)
+        return
+    os.makedirs(wdir, exist_ok=True)
+    d = docx.Document()
+    d.core_properties.author = "测试作者"
+    d.core_properties.title = "航班过站保障作业指导书"
+    d.add_heading("航班过站保障作业指导书", 0)
+    p = d.add_paragraph("本指导书规定了窄体机过站（Turnaround）保障的标准作业流程，适用于所有地面服务人员。")
+    d.add_comment(p.runs, text="请补充宽体机的过站标准。", author="审核人", initials="SH")
+    d.add_heading("1 适用范围 Scope", 1)
+    d.add_paragraph("适用于本场所有窄体机过站航班，包括 A320 系列与 B737 系列。")
+    d.add_heading("2 关键里程碑", 1)
+    for t in ["AIBT 实际上轮挡时间", "TOBT 目标撤轮挡时间，由地服负责更新", "TSAT 目标启动许可时间", "AOBT 实际撤轮挡时间"]:
+        d.add_paragraph(t, style="List Bullet")
+    d.add_heading("2.1 TOBT 更新规则", 2)
+    d.add_paragraph("TOBT 误差超过 5 分钟必须重新申报；关舱门前 15 分钟锁定。")
+    d.add_heading("3 保障节点标准时间", 1)
+    tb = d.add_table(rows=1, cols=3)
+    tb.style = "Table Grid"
+    for c, t in zip(tb.rows[0].cells, ["保障节点", "标准时长(分钟)", "责任单位"]):
+        c.text = t
+    for row in [("下客", "8", "机务/地服"), ("清洁", "10", "清洁队"), ("配餐", "15", "航食"), ("加油", "14", "航油"), ("上客", "15", "地服")]:
+        cells = tb.add_row().cells
+        for c, t in zip(cells, row):
+            c.text = t
+    d.add_heading("4 安全要求", 1)
+    p = d.add_paragraph("加油作业期间旅客上下机须有消防车监护，严禁在危险区域内停留。")
+    d.add_comment(p.runs, text="引用民航局相关规章编号。", author="安全部", initials="AQ")
+    img = Image.new("RGB", (400, 120), (192, 0, 0))
+    ImageDraw.Draw(img).text((20, 50), "Turnaround Flow", fill=(255, 255, 255))
+    buf = io.BytesIO(); img.save(buf, "PNG"); buf.seek(0)
+    d.add_picture(buf, width=DInches(4))
+    d.save(os.path.join(wdir, "航班过站保障作业指导书.docx"))
+
+    e = docx.Document()
+    e.core_properties.author = "测试作者"
+    e.add_heading("Smart Airport AI Platform Design", 0)
+    e.add_heading("Overview", 1)
+    e.add_paragraph("The platform combines computer vision on the apron with a RAG knowledge assistant for operations staff.")
+    e.add_heading("Retrieval Design", 1)
+    e.add_paragraph("Hybrid retrieval uses BM25 and dense embeddings with reciprocal rank fusion; a cross-encoder reranks the top results.")
+    e.add_heading("Cost Optimization", 1)
+    e.add_paragraph("Edge inference reduces cloud cost; FinOps dashboards track GPU usage per stand.")
+    e.save(os.path.join(wdir, "Smart Airport AI Platform Design.docx"))
+
+    if shutil.which("soffice"):
+        tmpdir = os.path.join(wdir, "_tmp")
+        os.makedirs(tmpdir, exist_ok=True)
+        src = os.path.join(tmpdir, "旧版Word_除冰作业规范.docx")
+        f = docx.Document()
+        f.add_heading("除冰作业规范", 1)
+        f.add_paragraph("冬季除冰作业须在除冰坪进行，除冰排队纳入 A-CDM 排序。")
+        f.save(src)
+        subprocess.run(["soffice", "--headless", "--convert-to", "doc", "--outdir", tmpdir, src],
+                       check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=180)
+        legacy = os.path.join(tmpdir, "旧版Word_除冰作业规范.doc")
+        if os.path.exists(legacy):
+            shutil.move(legacy, os.path.join(wdir, "旧版Word_除冰作业规范.doc"))
+        shutil.rmtree(tmpdir)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("out", nargs="?", default="test-ppts")
@@ -441,6 +535,12 @@ def main():
         if os.path.exists(legacy):
             shutil.move(legacy, os.path.join(j("其他"), "旧版格式_A-CDM.ppt"))
         shutil.rmtree(tmpdir)
+
+    # 6b. 黑白底互转测试：彩色文字、小 logo、带填充的图形、表格
+    make_convert_deck(j("技术方案", "黑白互转测试_黑底.pptx"))
+
+    # 7. Word 文档（按标题分节解析、表格、列表、图片、批注、旧版 .doc）
+    make_word_docs(j("Word文档"))
 
     # 统一修改时间，保证"重复副本"与原文件元数据一致
     st = os.stat(light)

@@ -107,7 +107,7 @@ class SearchEngine {
     const { files, fileMap, vecs } = this.load();
     const analysis = await this.analyze(q, opts);
     const groups = analysis.groups;
-    const result = { analysis, files: [], slides: { light: [], dark: [] }, totalSlides: 0, timing: {} };
+    const result = { analysis, files: [], slides: { light: [], dark: [], word: [] }, totalSlides: 0, timing: {} };
     if (!groups.length) return result;
     const filterFile = (f) => (!opts.folder || f.dir.startsWith(opts.folder)) && (!opts.category || f.category === opts.category);
 
@@ -179,12 +179,12 @@ class SearchEngine {
 
     // 页面推荐：附带备注讲解词与 黑/白底 对应页
     const limit = opts.slideLimit || 80;
-    const light = [], dark = [];
+    const light = [], dark = [], word = [];
     for (const x of scored) {
-      const target = x.s.theme === 'dark' ? dark : light;
+      const target = x.f.kind === 'word' ? word : x.s.theme === 'dark' ? dark : light;
       if (target.length < limit) target.push(x);
     }
-    const all = [...light, ...dark];
+    const all = [...light, ...dark, ...word];
     const cp = this.store.counterparts(all.map((x) => x.s.id));
     const cpSlides = new Map(this.store.getSlides([...new Set([...cp.values()].map((c) => c.id))]).map((s) => [s.id, s]));
     const view = (x) => {
@@ -192,12 +192,13 @@ class SearchEngine {
       const other = c && cpSlides.get(c.id);
       const of = other && fileMap.get(other.file_id);
       return {
-        ...x.s, fileName: x.f.name, filePath: x.f.path, fileTheme: x.f.theme, score: Math.round(x.score * 1000) / 1000, matched: x.cov.matched,
+        ...x.s, kind: x.f.kind || 'ppt', fileName: x.f.name, filePath: x.f.path, fileTheme: x.f.theme, score: Math.round(x.score * 1000) / 1000, matched: x.cov.matched,
         counterpart: other ? { id: other.id, theme: other.theme, idx: other.idx, title: other.title, fileName: of ? of.name : '', fileId: other.file_id, score: c.score } : null,
       };
     };
     result.slides.light = light.map(view);
     result.slides.dark = dark.map(view);
+    result.slides.word = word.map(view);
     result.totalSlides = scored.length;
     result.retrievers = lists.map((l) => `${l.name}:${l.ids.length}`);
     result.timing.total = Date.now() - t0;

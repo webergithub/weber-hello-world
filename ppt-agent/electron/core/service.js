@@ -7,6 +7,7 @@ const { EventEmitter } = require('events');
 const logger = require('./logger');
 const { Store } = require('./db');
 const { parsePptx, quickProps } = require('./pptx');
+const { parseDocx } = require('./docx');
 const { slideToMd, docToMd } = require('./markdown');
 const { tokenize, detectLang } = require('./textproc');
 const { hashVector, mean, embedder } = require('./vectors');
@@ -14,13 +15,35 @@ const { fileTerms, computeTags } = require('./tagger');
 const { computeGroups, computePairs, normSlideTitle } = require('./similarity');
 const { SearchEngine } = require('./search');
 const { exportPptx, exportMarkdown } = require('./exporter');
+const { convertTheme } = require('./converter');
+const gen = require('./generate');
 const { Office } = require('./office');
 const { imageLuminance } = require('./image');
 const llm = require('./llm');
 
-const PPT_EXT = new Set(['.pptx', '.pptm', '.ppsx', '.ppsm', '.potx', '.potm', '.ppt', '.pps', '.pot']);
-const LEGACY = new Set(['.ppt', '.pps', '.pot']);
-const SKIP_DIRS = new Set(['node_modules', '.git', '$recycle.bin', 'system volume information', 'windows', 'program files', 'program files (x86)', 'appdata', '.cache', '.trash']);
+// 支持的文档类型（设置中多选启用）
+const DOC_TYPES = {
+  ppt: { label: 'PPT 演示文稿', exts: ['.pptx', '.pptm', '.ppsx', '.ppsm', '.potx', '.potm', '.ppt', '.pps', '.pot'], legacy: ['.ppt', '.pps', '.pot'] },
+  word: { label: 'Word 文档', exts: ['.docx', '.docm', '.dotx', '.dotm', '.doc', '.dot'], legacy: ['.doc', '.dot'] },
+};
+const KIND_OF = new Map(Object.entries(DOC_TYPES).flatMap(([k, t]) => t.exts.map((e) => [e, k])));
+const LEGACY = new Set(Object.values(DOC_TYPES).flatMap((t) => t.legacy));
+const SKIP_DIRS = new Set(['node_modules', '.git', '.svn', '$recycle.bin', 'recycler', 'system volume information', 'windows', 'windows.old', '$windows.~bt', '$windows.~ws', '$winreagent',
+  'program files', 'program files (x86)', 'programdata', 'appdata', 'msocache', 'recovery', 'perflogs', 'config.msi', 'intel', 'amd', 'nvidia',
+  '.cache', '.trash', '.npm', '.gradle', '.m2', '.cargo', '.rustup', '.conda', 'anaconda3', 'miniconda3', 'site-packages', '__pycache__']);
+// 全盘扫描时跳过的系统路径（Linux / macOS）
+const SKIP_ROOT_PATHS = ['/proc', '/sys', '/dev', '/run', '/snap', '/boot', '/usr', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/libx32', '/etc', '/var/lib', '/var/cache', '/var/log', '/opt/pw-browsers',
+  '/System', '/Library', '/private', '/Applications', '/cores', '/Volumes/Recovery'];
+
+function localRoots() {
+  if (process.platform === 'win32') {
+    const roots = [];
+    for (let c = 67; c <= 90; c++) { const d = String.fromCharCode(c) + ':\\'; try { if (fs.existsSync(d)) roots.push(d); } catch { /* 无法访问的盘符 */ } }
+    return roots;
+  }
+  if (process.platform === 'darwin') return ['/Users', '/Volumes'].filter((d) => fs.existsSync(d));
+  return ['/'];
+}
 
 const DEFAULT_CONFIG = {
   thumbnails: 'auto', // auto | powerpoint | libreoffice | off
@@ -28,6 +51,8 @@ const DEFAULT_CONFIG = {
   llm: { enabled: false, baseUrl: 'https://api.deepseek.com/v1', apiKey: '', model: 'deepseek-chat', useForQuery: true, useForTags: false },
   embedding: { provider: 'none', baseUrl: 'http://127.0.0.1:11434', apiKey: '', model: 'bge-m3' },
   similarityThreshold: 0.82,
+  docTypes: ['ppt', 'word'],
+  uiTheme: 'system', // dark | light | system
 };
 
 class AgentService extends EventEmitter {
@@ -69,26 +94,87 @@ class AgentService extends EventEmitter {
     return this.config;
   }
 
+  enabledExts() {
+    const types = (this.config.docTypes && this.config.docTypes.length ? this.config.docTypes : ['ppt']).filter((k) => DOC_TYPES[k]);
+    return new Set(types.flatMap((k) => DOC_TYPES[k].exts));
+  }
+
+  docTypes() { return Object.entries(DOC_TYPES).map(([key, t]) => ({ key, label: t.label, exts: t.exts })); }
+
   // ================= 解析任务 =================
-  addTask(dir) {
+  /** 扫描本机所有磁盘中的 PPT / Word 文件（按盘符、目录名顺序） */
+  addAllLocalTask() {
+    const roots = localRoots();
+    const id = this.store.createTask(roots.join(' ; '), '本机全部文档');
+    this.store.updateTask(id, { roots: JSON.stringify(roots) });
+    this.store.updateTask(id, { status: 'draft' });
+    this.log.info(`[任务#${id}] 已添加全盘扫描任务（待手动开始）：${roots.join(' ')}（类型：${[...this.enabledExts()].join(' ')}）`);
+    this.emitTask(id);
+    return id;
+  }
+
+  addTask(dir, { autoStart = false } = {}) {
     dir = path.resolve(dir);
     if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new Error('目录不存在：' + dir);
     const id = this.store.createTask(dir, path.basename(dir) || dir);
-    this.log.info(`[任务#${id}] 已添加解析任务：${dir}`);
+    this.store.updateTask(id, { status: autoStart ? 'pending' : 'draft' });
+    this.log.info(`[任务#${id}] 已添加解析任务${autoStart ? '' : '（待手动开始）'}：${dir}`);
+    if (autoStart) { this.queue.push(id); setImmediate(() => this.pump()); }
+    this.emitTask(id);
+    return id;
+  }
+
+  /** 对已解析过 / 重复的文件强制重新解析（用户确认后），作为一个新任务排队执行 */
+  reparseFiles(paths, name) {
+    const list = [...new Set(paths)].filter((p) => fs.existsSync(p));
+    if (!list.length) throw new Error('没有可重新解析的文件（文件可能已被移动或删除）');
+    const id = this.store.createTask(path.dirname(list[0]), name || `重新解析 ${list.length} 个文件`);
+    this.store.updateTask(id, { roots: JSON.stringify({ files: list, force: true }) });
+    this.log.info(`[任务#${id}] 用户选择重新解析 ${list.length} 个文件`);
+    this.startTask(id);
+    return id;
+  }
+
+  /** 全部解析历史（每个文件每次被处理的记录） */
+  history({ limit = 5000, action, q } = {}) {
+    return this.store.history({ limit, action, q });
+  }
+
+  /** 手动开始（或重新扫描）：加入队列，按顺序依次解析 */
+  startTask(id) {
+    const t = this.store.getTask(id);
+    if (!t) throw new Error('任务不存在');
+    if (this.running === id || this.queue.includes(id)) return id;
+    this.cancelled.delete(id);
+    this.store.updateTask(id, { status: 'pending', message: '' });
     this.queue.push(id);
+    this.log.info(`[任务#${id}] 加入解析队列（第 ${this.queue.length} 位）`);
     this.emitTask(id);
     setImmediate(() => this.pump());
     return id;
   }
 
-  rerunTask(id) {
-    const t = this.store.getTask(id);
-    if (!t) throw new Error('任务不存在');
-    this.store.updateTask(id, { status: 'pending', message: '' });
-    this.queue.push(id);
-    setImmediate(() => this.pump());
-    return id;
+  rerunTask(id) { return this.startTask(id); }
+
+  startAll() {
+    const ids = this.store.listTasks().filter((t) => ['draft', 'interrupted', 'cancelled', 'failed'].includes(t.status)).map((t) => t.id).reverse();
+    for (const id of ids) this.startTask(id);
+    return ids.length;
   }
+
+  /** 调整排队顺序 */
+  moveTask(id, delta) {
+    const i = this.queue.indexOf(id);
+    const j = i + delta;
+    if (i < 0 || j < 0 || j >= this.queue.length) return this.queue;
+    [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+    this.emitTask(id);
+    return this.queue;
+  }
+
+  queueState() { return { running: this.running, queue: [...this.queue] }; }
+
+  emitProgress(taskId, data) { this.emit('progress', { taskId, at: Date.now(), ...data }); }
 
   cancelTask(id) {
     this.cancelled.add(id);
@@ -123,27 +209,39 @@ class AgentService extends EventEmitter {
 
   emitTask(id, extra = {}) { this.emit('task', { ...(this.store.getTask(id) || { id }), ...extra }); }
 
-  scan(dir, log) {
+  /** 异步扫描（不阻塞界面），按目录名顺序深度优先；跳过系统目录、符号链接、本工具数据目录 */
+  async scan(roots, log, { onProgress, isCancelled, fullDisk = false } = {}) {
+    const exts = this.enabledExts();
     const out = [];
-    const walk = (d, depth) => {
-      if (depth > 40) return;
+    const self = path.resolve(this.dataDir).toLowerCase();
+    let dirs = 0, last = Date.now();
+    const stack = [...roots].reverse().map((r) => ({ d: r, depth: 0 }));
+    while (stack.length) {
+      if (isCancelled && isCancelled()) break;
+      const { d, depth } = stack.pop();
+      if (depth > 40 || path.resolve(d).toLowerCase() === self) continue;
+      if (fullDisk && SKIP_ROOT_PATHS.some((p) => d === p || d.startsWith(p + '/'))) continue;
       let list;
-      try { list = fs.readdirSync(d, { withFileTypes: true }); } catch (e) { log.warn(`无法读取目录 ${d}：${e.code || e.message}`); return; }
+      try { list = await fs.promises.readdir(d, { withFileTypes: true }); } catch (e) { if (!fullDisk) log.warn(`无法读取目录 ${d}：${e.code || e.message}`); continue; }
+      dirs++;
+      list.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
+      const sub = [];
       for (const ent of list) {
         const p = path.join(d, ent.name);
         if (ent.isDirectory()) {
-          if (ent.name.startsWith('.') || SKIP_DIRS.has(ent.name.toLowerCase())) continue;
-          walk(p, depth + 1);
+          if (ent.name.startsWith('.') || ent.name.startsWith('$') && fullDisk || SKIP_DIRS.has(ent.name.toLowerCase())) continue;
+          sub.push({ d: p, depth: depth + 1 });
         } else if (ent.isFile()) {
           const ext = path.extname(ent.name).toLowerCase();
-          if (!PPT_EXT.has(ext)) continue;
+          if (!exts.has(ext)) continue;
           if (ent.name.startsWith('~$') || ent.name.startsWith('._')) { log.info(`忽略 Office 临时锁文件：${p}`); continue; }
           out.push(p);
         }
       }
-    };
-    walk(dir, 0);
-    return out.sort((a, b) => a.localeCompare(b, 'zh'));
+      for (let i = sub.length - 1; i >= 0; i--) stack.push(sub[i]);
+      if (Date.now() - last > 500) { last = Date.now(); if (onProgress) onProgress({ dirs, found: out.length, current: d }); await new Promise((r) => setImmediate(r)); }
+    }
+    return out;
   }
 
   async runTask(id) {
@@ -152,11 +250,22 @@ class AgentService extends EventEmitter {
     const log = logger.child('task');
     const t0 = Date.now();
     this.store.updateTask(id, { status: 'running', started_at: t0, parsed: 0, skipped: 0, duplicate: 0, failed: 0 });
-    log.info(`${tag} 开始扫描目录 ${task.dir}`);
+    let roots = null;
+    try { roots = task.roots ? JSON.parse(task.roots) : null; } catch { roots = null; }
+    const explicit = roots && !Array.isArray(roots) ? roots : null;
+    if (explicit) roots = null;
+    const fullDisk = !!roots;
+    log.info(`${tag} 开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
     const engines = await this.office.detect();
-    const files = this.scan(task.dir, log);
+    const files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, {
+      fullDisk, isCancelled: () => this.cancelled.has(id),
+      onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
+    });
     this.store.updateTask(id, { total: files.length });
-    log.info(`${tag} 发现 ${files.length} 个 PPT 文件`);
+    const byKind = {};
+    for (const f of files) { const k = KIND_OF.get(path.extname(f).toLowerCase()); byKind[k] = (byKind[k] || 0) + 1; }
+    log.info(`${tag} 发现 ${files.length} 个文档（${Object.entries(byKind).map(([k, n]) => `${DOC_TYPES[k].label} ${n}`).join('，')}）`);
+    this.emitProgress(id, { stage: 'scanned', total: files.length, byKind });
     this.emitTask(id);
     const counts = { parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
     let changed = false;
@@ -164,9 +273,11 @@ class AgentService extends EventEmitter {
       if (this.cancelled.has(id)) { log.warn(`${tag} 已取消，处理到第 ${i}/${files.length} 个文件`); break; }
       const file = files[i];
       this.emitTask(id, { current: file, done: i });
+      this.emitProgress(id, { stage: 'file', index: i + 1, total: files.length, file, counts: { ...counts } });
       try {
-        const r = await this.processFile(id, file, engines, log, tag);
+        const r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force) });
         counts[r]++;
+        if (r !== 'parsed') this.emitProgress(id, { stage: 'result', file, action: r, index: i + 1, total: files.length });
         if (r === 'parsed' || r === 'duplicate') changed = true;
       } catch (e) {
         counts.failed++;
@@ -177,13 +288,14 @@ class AgentService extends EventEmitter {
     }
     if (changed) {
       this.emitTask(id, { current: '正在计算标签、相似分组与黑白底对应关系…', done: files.length });
-      await this.afterLibraryChange(log, tag);
+      await this.afterLibraryChange(log, tag, id);
     }
     const cancelled = this.cancelled.delete(id);
     const ms = Date.now() - t0;
     const msg = `解析 ${counts.parsed}，已解析过跳过 ${counts.skipped}，重复文件 ${counts.duplicate}，失败 ${counts.failed}，耗时 ${(ms / 1000).toFixed(1)}s`;
     this.store.updateTask(id, { status: cancelled ? 'cancelled' : 'done', finished_at: Date.now(), message: msg });
     log.info(`${tag} 任务结束：${msg}`);
+    this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length });
     if (changed && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
   }
 
@@ -191,13 +303,15 @@ class AgentService extends EventEmitter {
     return crypto.createHash('sha1').update(`${name}|${size}|${Math.floor(mtime / 1000)}|${author || ''}`).digest('hex');
   }
 
-  async processFile(taskId, file, engines, log, tag) {
+  async processFile(taskId, file, engines, log, tag, { force = false } = {}) {
     const st = fs.statSync(file);
     const name = path.basename(file), ext = path.extname(file).toLowerCase();
+    const kind = KIND_OF.get(ext) || 'ppt';
+    const unit = kind === 'word' ? '节' : '页';
     let author = '', title = '';
     if (!LEGACY.has(ext)) {
       try { const p = await quickProps(file); author = p.author; title = p.title; } catch (e) {
-        const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', error: '文件损坏或不是有效的 PPTX：' + e.message, task_id: taskId, parsed_at: Date.now() });
+        const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', kind, error: `文件损坏或不是有效的 ${kind === 'word' ? 'DOCX' : 'PPTX'}：` + e.message, task_id: taskId, parsed_at: Date.now() });
         this.store.linkTaskFile(taskId, id, file, 'failed', '文件损坏或格式无效');
         log.warn(`${tag} 文件损坏或格式无效：${file}（${e.message}）`);
         return 'failed';
@@ -205,16 +319,17 @@ class AgentService extends EventEmitter {
     }
     const fp = this.fingerprint(name, st.size, st.mtimeMs, author);
     const existing = this.store.fileByPath(file);
-    if (existing && existing.fingerprint === fp && (existing.status === 'parsed' || existing.status === 'duplicate')) {
+    if (force) log.info(`${tag} 用户确认重新解析：${file}`);
+    if (!force && existing && existing.fingerprint === fp && (existing.status === 'parsed' || existing.status === 'duplicate')) {
       const when = new Date(existing.parsed_at).toLocaleString('zh-CN');
       this.store.linkTaskFile(taskId, existing.id, file, 'skipped', `已解析过（${when}），文件名/修改时间/大小/作者均未变化`);
       log.info(`${tag} 已解析过，跳过：${file}`);
       return 'skipped';
     }
     const same = this.store.fileByFingerprint(fp);
-    if (same && same.path !== file && fs.existsSync(same.path)) {
+    if (!force && same && same.path !== file && fs.existsSync(same.path)) {
       const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, title, fingerprint: fp,
-        status: 'duplicate', dup_of: same.id, error: null, slide_count: same.slide_count, theme: same.theme, tags: same.tags, category: same.category, task_id: taskId, parsed_at: Date.now() });
+        status: 'duplicate', kind, dup_of: same.id, error: null, slide_count: same.slide_count, theme: same.theme, tags: same.tags, category: same.category, task_id: taskId, parsed_at: Date.now() });
       if (existing) this.store.deleteSlidesOf(existing.id);
       this.store.linkTaskFile(taskId, id, file, 'duplicate', `与已解析文件信息完全一致：${same.path}`);
       log.info(`${tag} 与已解析文件一致，不重复解析：${file} == ${same.path}`);
@@ -224,15 +339,26 @@ class AgentService extends EventEmitter {
     const t0 = Date.now();
     let src = file;
     if (LEGACY.has(ext)) {
-      log.info(`${tag} 旧版格式，转换为 PPTX：${file}`);
-      src = await this.office.convertPpt(file, path.join(this.cacheDir, 'converted', crypto.createHash('sha1').update(file).digest('hex').slice(0, 12)));
+      log.info(`${tag} 旧版格式，转换为 ${kind === 'word' ? 'DOCX' : 'PPTX'}：${file}`);
+      const out = path.join(this.cacheDir, 'converted', crypto.createHash('sha1').update(file).digest('hex').slice(0, 12));
+      try {
+        src = kind === 'word' ? await this.office.convertDoc(file, out) : await this.office.convertPpt(file, out);
+      } catch (e) {
+        const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, kind, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
+        this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
+        log.warn(`${tag} 旧版格式转换失败：${file}（${e.message}）`);
+        return 'failed';
+      }
     }
     const mediaKey = crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
+    const onSlide = (i, n, t) => this.emitProgress(taskId, { stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit });
+    this.emitProgress(taskId, { stage: 'parse', file, kind });
     let parsed;
     try {
-      parsed = await parsePptx(src, { mediaDir: this.mediaDir, mediaKey, log, ffmpeg: engines.ffmpeg ? this.office.ffmpegExtractor(this.cacheDir) : null });
+      parsed = kind === 'word' ? await parseDocx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide })
+        : await parsePptx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide, ffmpeg: engines.ffmpeg ? this.office.ffmpegExtractor(this.cacheDir) : null });
     } catch (e) {
-      const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, fingerprint: null, status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
+      const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, kind, fingerprint: null, status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
       this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
       log.warn(`${tag} 解析失败：${file}（${e.message}）`);
       return 'failed';
@@ -242,14 +368,15 @@ class AgentService extends EventEmitter {
 
     // 页面截图（PowerPoint / LibreOffice，可选）
     let preview = null;
-    if (this.config.thumbnails !== 'off' && slides.length) {
+    if (kind === 'ppt' && this.config.thumbnails !== 'off' && slides.length) {
       try {
+        this.emitProgress(taskId, { stage: 'thumb', file });
         preview = await this.office.thumbnails(src, path.join(this.thumbDir, mediaKey), mediaKey, this.config.thumbnails, this.config.thumbWidth);
         if (preview) log.info(`${tag} 页面截图(${preview.engine})：${preview.images ? preview.images.length + ' 页' : 'PDF'} ${name}`);
       } catch (e) { log.warn(`${tag} 生成截图失败 ${name}`, e); }
     }
     for (const s of slides) {
-      s.md = slideToMd(s);
+      s.md = slideToMd(s, kind);
       s.vec = hashVector(`${s.title}\n${s.title}\n${s.text}\n${s.notes}`);
       if (preview && preview.images && preview.images[s.index - 1]) {
         s.thumb = preview.images[s.index - 1];
@@ -264,13 +391,13 @@ class AgentService extends EventEmitter {
     const allText = slides.map((s) => `${s.title}\n${s.text}\n${s.notes}`).join('\n');
     const fileRow = {
       path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, title: title || (slides[0] && slides[0].title) || '',
-      fingerprint: fp, status: 'parsed', error: null, dup_of: null, slide_count: slides.length,
+      fingerprint: fp, status: 'parsed', kind, error: null, dup_of: null, slide_count: slides.length,
       theme: !slides.length ? 'light' : dark === 0 ? 'light' : dark === slides.length ? 'dark' : (dark / slides.length >= 0.6 ? 'dark' : dark / slides.length <= 0.4 ? 'light' : 'mixed'),
       dark_slides: dark, light_slides: slides.length - dark,
       video_count: slides.reduce((a, s) => a + s.media.filter((m) => m.type === 'video').length, 0),
       notes_count: slides.filter((s) => s.notes).length,
       lang: detectLang(allText), preview,
-      meta: { props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}页 ${e}`)).slice(0, 50) },
+      meta: { props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}${unit} ${e}`)).slice(0, 50) },
       task_id: taskId, parsed_at: Date.now(),
     };
     const info = fileTerms(fileRow, slides);
@@ -278,6 +405,7 @@ class AgentService extends EventEmitter {
     fileRow.vec = mean([...slides.map((s) => s.vec), hashVector(name.replace(/\.[^.]+$/, ''))]) || hashVector(name);
     const metaTokens = tokenize(`${name} ${path.basename(path.dirname(file))}`).join(' ');
     let fileId;
+    this.emitProgress(taskId, { stage: 'store', file, slides: slides.length });
     this.store.tx(() => {
       if (existing) this.store.deleteSlidesOf(existing.id);
       fileId = this.store.upsertFile(fileRow);
@@ -293,13 +421,19 @@ class AgentService extends EventEmitter {
       fs.writeFileSync(mdPath, docToMd({ ...fileRow, tags: [] }, slides));
       this.store.updateFile(fileId, { md_path: mdPath });
     } catch (e) { log.warn(`${tag} 写入 Markdown 失败`, e); }
-    this.store.linkTaskFile(taskId, fileId, file, 'parsed', `${slides.length} 页，${fileRow.notes_count} 页含备注，${fileRow.video_count} 个视频，耗时 ${Date.now() - t0}ms`);
-    log.info(`${tag} 解析完成：${file}（${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，视频 ${fileRow.video_count}，${Date.now() - t0}ms）`);
+    this.emitProgress(taskId, { stage: 'parsed', file, kind, slides: slides.length, unit, dark, notes: fileRow.notes_count, videos: fileRow.video_count, ms: Date.now() - t0, titles: slides.slice(0, 40).map((x) => x.title) });
+    if (kind === 'word') {
+      this.store.linkTaskFile(taskId, fileId, file, 'parsed', `Word：${slides.length} 节，${fileRow.notes_count} 节含批注，耗时 ${Date.now() - t0}ms`);
+      log.info(`${tag} 解析完成：${file}（Word，${slides.length} 节，${Date.now() - t0}ms）`);
+    } else {
+      this.store.linkTaskFile(taskId, fileId, file, 'parsed', `${slides.length} 页，${fileRow.notes_count} 页含备注，${fileRow.video_count} 个视频，耗时 ${Date.now() - t0}ms`);
+      log.info(`${tag} 解析完成：${file}（${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，视频 ${fileRow.video_count}，${Date.now() - t0}ms）`);
+    }
     return 'parsed';
   }
 
   /** 资料库变化后：重算标签/分类、相似分组、黑白底对应 */
-  async afterLibraryChange(log = this.log, tag = '') {
+  async afterLibraryChange(log = this.log, tag = '', taskId = null) {
     const t0 = Date.now();
     const files = this.store.listFiles({ status: 'parsed' });
     const termRows = this.store.fileTerms();
@@ -318,6 +452,7 @@ class AgentService extends EventEmitter {
       }
       const { tags, category } = computeTags(f, slides, termMap.get(f.id) || { terms: {}, concepts: {} }, df, files.length, llmTags);
       this.store.updateFile(f.id, { tags, category });
+      if (taskId && f.task_id === taskId) this.emitProgress(taskId, { stage: 'tag', file: f.path, tags, category });
     }
     for (const d of this.store.listFiles({ status: 'duplicate' })) {
       const o = d.dup_of && this.store.getFile(d.dup_of);
@@ -363,7 +498,7 @@ class AgentService extends EventEmitter {
   }
 
   // ================= 查询接口 =================
-  tasks() { return this.store.listTasks().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id) })); }
+  tasks() { return this.store.listTasks().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
 
   taskDetail(id) {
     const task = this.store.getTask(id);
@@ -415,7 +550,7 @@ class AgentService extends EventEmitter {
       (cats[f.category || '其他'] = cats[f.category || '其他'] || []).push(f);
       for (const t of f.tags || []) tagCount[t] = (tagCount[t] || 0) + 1;
     }
-    const isAttr = (t) => /^(白底|黑底|黑白混合|含视频|含字幕|含表格|含图表|含讲解词|全页讲解词|中文|英文|中英双语|大文件|\d+页以内|\d+-\d+页|\d+页以上)$|^目录:/.test(t);
+    const isAttr = (t) => /^(白底|黑底|黑白混合|含视频|含字幕|含表格|含图表|含讲解词|全页讲解词|含批注|Word文档|中文|英文|中英双语|大文件|\d+[页节]以内|\d+-\d+[页节]|\d+[页节]以上)$|^目录:/.test(t);
     const tags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 400).map(([tag, n]) => ({ tag, n, attr: isAttr(tag) }));
     return { categories: Object.entries(cats).map(([name, list]) => ({ name, files: list })).sort((a, b) => b.files.length - a.files.length), tags };
   }
@@ -433,7 +568,7 @@ class AgentService extends EventEmitter {
   async searchQuery(q, opts = {}) {
     const useLlm = opts.useLlm !== false && this.config.llm.enabled && this.config.llm.useForQuery;
     const r = await this.search.search(q, { ...opts, useLlm });
-    logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
+    logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
     return r;
   }
 
@@ -441,8 +576,14 @@ class AgentService extends EventEmitter {
 
   /** sels: [{slideId}] → 导出 PPTX */
   async exportSlides(slideIds, outPath, opts = {}) {
-    const slides = this.store.getSlides(slideIds);
+    let slides = this.store.getSlides(slideIds);
     const sels = [];
+    const isMd = /\.md$/i.test(outPath);
+    const wordCount = slides.filter((s) => (this.store.getFile(s.file_id) || {}).kind === 'word').length;
+    if (!isMd && wordCount) {
+      slides = slides.filter((s) => (this.store.getFile(s.file_id) || {}).kind !== 'word');
+      if (!slides.length) throw new Error('所选内容都是 Word 文档的章节，只能导出为 Markdown');
+    }
     for (const s of slides) {
       const f = this.store.getFile(s.file_id);
       let src = f.path;
@@ -453,7 +594,109 @@ class AgentService extends EventEmitter {
     if (/\.md$/i.test(outPath)) {
       return exportMarkdown(slides.map((s) => ({ md: s.md, idx: s.idx, filePath: (this.store.getFile(s.file_id) || {}).path })), outPath, opts.title);
     }
-    return exportPptx(sels, outPath, { ...opts, log: logger.child('export') });
+    const r = await exportPptx(sels, outPath, { ...opts, log: logger.child('export') });
+    return { ...r, skippedWord: wordCount };
+  }
+
+  /**
+   * 黑白底互转：items = [{slideId, dir: 'auto'|'toLight'|'toDark'}]，导出合并后改写配色，并生成转换后预览
+   */
+  async convertSlides(items, outPath) {
+    const log = logger.child('convert');
+    const sels = [], dirs = [];
+    for (const it of items) {
+      const s = this.store.getSlide(it.slideId, false);
+      if (!s) continue;
+      const f = this.store.getFile(s.file_id);
+      if (!f || f.kind === 'word') continue;
+      let src = f.path;
+      if (f.meta && f.meta.legacy && f.meta.convertedFrom && fs.existsSync(f.meta.convertedFrom)) src = f.meta.convertedFrom;
+      if (!fs.existsSync(src)) throw new Error(`源文件不存在：${f.path}`);
+      const dir = it.dir === 'keep' ? null : it.dir === 'toLight' || it.dir === 'toDark' ? it.dir : (s.theme === 'dark' ? 'toLight' : 'toDark');
+      sels.push({ path: src, idx: s.idx, ns: dir || 'keep' });
+      dirs.push(dir);
+    }
+    if (!sels.length) throw new Error('转换队列中没有可转换的 PPT 页面');
+    log.info(`开始黑白底互转：${sels.length} 页（黑→白 ${dirs.filter((d) => d === 'toLight').length}，白→黑 ${dirs.filter((d) => d === 'toDark').length}）`);
+    const tmp = path.join(this.cacheDir, 'convert', `merge-${Date.now()}.pptx`);
+    fs.mkdirSync(path.dirname(tmp), { recursive: true });
+    await exportPptx(sels, tmp, { log });
+    const r = await convertTheme(tmp, outPath, dirs, { log });
+    fs.rmSync(tmp, { force: true });
+    // 转换后预览：解析输出文件；有 PowerPoint/LibreOffice 时生成真实截图
+    const key = 'conv-' + crypto.createHash('sha1').update(outPath + Date.now()).digest('hex').slice(0, 10);
+    const back = await parsePptx(outPath, { mediaDir: this.mediaDir, mediaKey: key, log });
+    let thumbs = null;
+    if (this.config.thumbnails !== 'off') {
+      try { thumbs = await this.office.thumbnails(outPath, path.join(this.thumbDir, key), key, this.config.thumbnails, 960); } catch (e) { log.warn('转换结果截图失败', e); }
+    }
+    const preview = back.slides.map((s, i) => ({ id: `${key}-${i}`, idx: s.index, title: s.title, theme: s.theme, bg: s.bg, layout: s.layout, text: s.text, dir: dirs[i], thumb: thumbs && thumbs.images ? thumbs.images[i] : null }));
+    return { ...r, preview, size: fs.statSync(outPath).size };
+  }
+
+  /**
+   * 智能生成：按描述匹配候选页面并聚类。返回 rows：每行一种不同内容，items[0] 为代表页，其余为相似页。
+   * opts: { threshold = 0.75, theme = 'any' | 'light' | 'dark', maxRows = 30, maxPerRow = 12 }
+   */
+  async smartCandidates(desc, opts = {}) {
+    const t0 = Date.now();
+    const threshold = Number(opts.threshold) || 0.75;
+    const intent = gen.parseIntent(desc);
+    const fileMap = new Map(this.store.listFiles({ status: 'parsed' }).map((f) => [f.id, f]));
+    const vecs = new Map(this.store.slideVectors().filter((v) => v.kind !== 'word').map((v) => [v.id, v]));
+    const pool = new Map();
+    let analysis = null;
+    if (intent.topic || !intent.formats.length) {
+      const r = await this.searchQuery(intent.topic || desc, { useLlm: opts.useLlm, slideLimit: 300 });
+      analysis = r.analysis;
+      for (const x of [...r.slides.light, ...r.slides.dark]) pool.set(x.id, x.score);
+    }
+    let all = null;
+    const feats = new Map();
+    const featOf = (s) => { if (!feats.has(s.id)) feats.set(s.id, gen.slideFeatures(s)); return feats.get(s.id); };
+    if (intent.formats.length) {
+      // 版式要求：在全库中查找满足版式的页面（有主题时只作为加权）
+      all = this.store.getSlides([...vecs.keys()], true);
+      for (const s of all) {
+        const ok = intent.formats.some((fm) => fm.test(featOf(s)));
+        const base = pool.get(s.id);
+        if (base !== undefined) pool.set(s.id, ok ? base + 0.4 : base * 0.6);
+        else if (ok && !intent.topic) pool.set(s.id, 0.5 + (s.notes ? 0.05 : 0));
+      }
+    }
+    const top = Math.max(0, ...pool.values());
+    const minScore = intent.topic ? top * (Number(opts.minRelevance) || 0.45) : 0;
+    const ids = [...pool.keys()].filter((id) => vecs.has(id) && pool.get(id) >= minScore).sort((a, b) => pool.get(b) - pool.get(a)).slice(0, 400);
+    const slides = all ? ids.map((id) => all.find((s) => s.id === id)).filter(Boolean) : this.store.getSlides(ids, true);
+    const cands = slides.map((s) => ({ s, score: pool.get(s.id), vec: vecs.get(s.id).vec }));
+    let rows = gen.cluster(cands, threshold);
+    for (const r of rows) r.feat = featOf(r.rep.s);
+    rows = gen.orderRows(rows).slice(0, opts.maxRows || 30);
+    const view = (c) => {
+      const f = fileMap.get(c.s.file_id) || {};
+      return { id: c.s.id, file_id: c.s.file_id, fileName: f.name, filePath: f.path, idx: c.s.idx, title: c.s.title, theme: c.s.theme, thumb: c.s.thumb, bg: c.s.bg, text: String(c.s.text || '').slice(0, 300), notes: c.s.notes ? String(c.s.notes).slice(0, 200) : '', has_video: c.s.has_video, score: Math.round(c.score * 1000) / 1000, sim: Math.round((c.sim || 1) * 1000) / 1000 };
+    };
+    const out = rows.map((r, i) => {
+      const items = [r.rep, ...r.variants.sort((a, b) => b.sim - a.sim)].slice(0, opts.maxPerRow || 12).map(view);
+      const pick = (opts.theme === 'light' || opts.theme === 'dark') ? (items.find((x) => x.theme === opts.theme) || items[0]) : items[0];
+      return { row: i + 1, title: r.rep.s.title || `第 ${r.rep.s.idx} 页`, formats: gen.FORMATS.filter((fm) => fm.test(r.feat)).map((fm) => fm.label), items, pick: pick.id, total: r.variants.length + 1 };
+    });
+    logger.child('generate').info(`智能生成「${desc}」：主题「${intent.topic || '-'}」，版式 ${intent.formats.map((f) => f.label).join('/') || '-'}，候选 ${cands.length} 页，阈值 ${threshold} → ${out.length} 组，${Date.now() - t0}ms`);
+    return { rows: out, intent: { topic: intent.topic, formats: intent.formats.map((f) => f.label) }, analysis, candidates: cands.length, threshold };
+  }
+
+  /** 生成 PPT：可选统一底色（不一致的页按黑白底互转规则转换） */
+  async generateDeck(slideIds, outPath, { unifyTheme = 'none' } = {}) {
+    if (unifyTheme !== 'light' && unifyTheme !== 'dark') return this.exportSlides(slideIds, outPath, { includeNotes: true });
+    const items = this.store.getSlides(slideIds).map((s) => ({ slideId: s.id, dir: unifyTheme === 'light' ? (s.theme === 'dark' ? 'toLight' : 'keep') : (s.theme === 'dark' ? 'keep' : 'toDark') }));
+    return this.convertSlides(items, outPath);
+  }
+
+  /** 资料库总览：每个任务及全部任务识别到的文档 */
+  overview() {
+    const files = this.store.listFiles();
+    const tasks = this.store.listTasks().map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: [...new Set(this.store.taskFiles(t.id).map((f) => f.id).filter(Boolean))] }));
+    return { tasks, files };
   }
 
   stats() { return { ...this.store.stats(), dataDir: this.dataDir, running: this.running, queued: this.queue.length }; }
@@ -485,4 +728,4 @@ async function borderLuminance(pngPath) {
   return n ? sum / n : imageLuminance(fs.readFileSync(pngPath), pngPath);
 }
 
-module.exports = { AgentService, DEFAULT_CONFIG };
+module.exports = { AgentService, DEFAULT_CONFIG, DOC_TYPES, localRoots };

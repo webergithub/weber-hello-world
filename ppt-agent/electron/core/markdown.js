@@ -26,10 +26,11 @@ function mediaMd(m) {
   return out.join('\n');
 }
 
-function slideToMd(s) {
+function slideToMd(s, kind = 'ppt') {
   const lines = [];
-  const flags = [s.hidden ? '隐藏页' : '', s.theme === 'dark' ? '黑底' : '白底', s.section ? `分节：${s.section}` : ''].filter(Boolean).join(' · ');
-  lines.push(`## 第 ${s.index} 页${s.title ? '：' + s.title.replace(/\n/g, ' ') : ''}`);
+  const word = kind === 'word';
+  const flags = word ? ['Word 文档', s.section === '续' ? '续节' : ''].filter(Boolean).join(' · ') : [s.hidden ? '隐藏页' : '', s.theme === 'dark' ? '黑底' : '白底', s.section ? `分节：${s.section}` : ''].filter(Boolean).join(' · ');
+  lines.push(`## 第 ${s.index} ${word ? '节' : '页'}${s.title ? '：' + s.title.replace(/\n/g, ' ') : ''}`);
   lines.push(`<sub>${flags}</sub>`);
   lines.push('');
   for (const b of s.blocks || []) {
@@ -38,7 +39,8 @@ function slideToMd(s) {
       for (const p of b.paras) {
         const text = p.text.replace(/\n/g, ' ').trim();
         if (!text) continue;
-        if (p.bullet || p.lvl) lines.push(`${'  '.repeat(p.lvl || 0)}- ${text}`);
+        if (p.heading) lines.push('', `#### ${text}`, '');
+        else if (p.bullet || p.lvl) lines.push(`${'  '.repeat(p.lvl || 0)}- ${text}`);
         else lines.push(text, '');
       }
       lines.push('');
@@ -49,12 +51,16 @@ function slideToMd(s) {
       if (c.categories.length) lines.push(`- 类别：${c.categories.join('、')}`);
       lines.push('');
     } else if (b.kind === 'smartart') { lines.push('🔷 **SmartArt**', ...b.items.map((t) => `- ${t}`), ''); } else if (b.kind === 'image') {
-      lines.push(`![${esc(b.alt || b.name)}](${b.src ? 'media/' + b.src : b.name})`, '');
+      // Markdown 只保留文字：不插入图片，仅保留有意义的图片说明文字
+      const alt = String(b.alt || '').trim();
+      if (alt && !/\.(png|jpe?g|gif|bmp|svg|emf|wmf|tiff?)$/i.test(alt) && !/^(图片|picture|image)\s*\d*$/i.test(alt)) lines.push(`（图片说明：${alt.replace(/\n/g, ' ')}）`, '');
     } else if (b.kind === 'video' || b.kind === 'audio') { lines.push(mediaMd(b.media), ''); } else if (b.kind === 'object') lines.push(`📎 嵌入对象：${b.name}`, '');
   }
   for (const m of s.media || []) if (m.type === 'caption') lines.push(mediaMd(m), '');
-  lines.push('### 🗣 备注（讲解词）');
-  lines.push(s.notes ? s.notes : '_（无备注）_');
+  if (word) { if (s.notes) lines.push('### 💬 批注', s.notes); } else {
+    lines.push('### 🗣 备注（讲解词）');
+    lines.push(s.notes ? s.notes : '_（无备注）_');
+  }
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
 }
 
@@ -64,7 +70,7 @@ function docToMd(file, slides) {
     `title: "${(file.title || file.name).replace(/"/g, "'")}"`,
     `source: "${file.path.replace(/\\/g, '/').replace(/"/g, "'")}"`,
     `author: "${file.author || ''}"`,
-    `slides: ${slides.length}`,
+    `${file.kind === 'word' ? 'sections' : 'slides'}: ${slides.length}`,
     `modified: ${new Date(file.mtime).toISOString()}`,
     file.tags && file.tags.length ? `tags: [${file.tags.map((t) => JSON.stringify(t)).join(', ')}]` : null,
     '---',
@@ -72,7 +78,7 @@ function docToMd(file, slides) {
     `# ${file.title || file.name}`,
     '',
   ].filter((l) => l !== null);
-  return head.join('\n') + slides.map((s) => s.md || slideToMd(s)).join('\n---\n\n');
+  return head.join('\n') + slides.map((s) => s.md || slideToMd(s, file.kind)).join('\n---\n\n');
 }
 
 module.exports = { slideToMd, docToMd, tableMd };

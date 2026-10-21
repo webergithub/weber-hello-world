@@ -1,34 +1,68 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { api, on, STATUS_LABEL, THEME_LABEL, fmtSize } from './api';
+import { api, on, STATUS_LABEL, fmtSize } from './api';
 import { AppCtx } from './ctx';
-import { renderMarkdown } from './md';
 import TaskView from './components/TaskView';
+import TaskMonitor from './components/TaskMonitor';
 import LibraryView from './components/LibraryView';
 import SearchView from './components/SearchView';
 import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
+import ConvertView from './components/ConvertView';
+import GenerateView from './components/GenerateView';
 import SettingsView from './components/SettingsView';
 import LogView from './components/LogView';
 import SlideWorkspace, { clearSlideCache, loadSlide } from './components/SlideWorkspace';
-import SlidePreview from './components/SlidePreview';
+import SlideViewer, { clearFileCache } from './components/SlideViewer';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
+const readLS = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
+const base = (p) => String(p || '').split(/[\\/]/).pop();
+
+// 把主进程推送的解析进度事件归并为每个任务的实时状态
+function reduceProgress(prev, e) {
+  const cur = { feed: [], files: [], ...(prev[e.taskId] || {}) };
+  const feed = (line) => { cur.feed = [...cur.feed.slice(-599), line]; };
+  const t = new Date(e.at).toLocaleTimeString('zh-CN', { hour12: false });
+  switch (e.stage) {
+    case 'scanning': cur.stage = 'scanning'; cur.scan = { dirs: e.dirs, found: e.found, current: e.current }; break;
+    case 'scanned': cur.total = e.total; cur.files = []; cur.index = 0; feed(`${t} 🔍 扫描完成：共发现 ${e.total} 个文档`); break;
+    case 'file': Object.assign(cur, { stage: 'file', index: e.index, total: e.total, file: e.file, slide: 0, slideTotal: 0, slideTitle: '' }); feed(`${t} 📄 [${e.index}/${e.total}] ${base(e.file)}`); break;
+    case 'parse': case 'thumb': case 'store': cur.stage = e.stage; if (e.stage === 'thumb') feed(`${t}    🖼 生成页面截图…`); break;
+    case 'slide': Object.assign(cur, { stage: 'slide', slide: e.slide, slideTotal: e.slideTotal, slideTitle: e.slideTitle, unit: e.unit }); feed(`${t}    第 ${e.slide}/${e.slideTotal} ${e.unit || '页'}：${e.slideTitle || '（无标题）'}`); break;
+    case 'parsed': cur.stage = 'parsed'; cur.files = [...cur.files, { file: e.file, kind: e.kind, slides: e.slides, unit: e.unit, dark: e.dark, notes: e.notes, videos: e.videos, ms: e.ms, titles: e.titles, action: 'parsed' }];
+      feed(`${t}    ✅ 解析完成：${e.slides} ${e.unit || '页'}，${e.ms}ms`); break;
+    case 'result': cur.files = [...cur.files, { file: e.file, action: e.action }]; feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
+    case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f)); feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
+    case 'done': cur.stage = 'done'; cur.message = e.message; feed(`${t} 🏁 任务结束：${e.message}`); break;
+    default: break;
+  }
+  return { ...prev, [e.taskId]: cur };
+}
 
 export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState({ type: 'search' });
   const [tasks, setTasks] = useState([]);
   const [liveTasks, setLiveTasks] = useState({});
+  const [progress, setProgress] = useState({});
   const [taskTick, setTaskTick] = useState(0);
   const [logLines, setLogLines] = useState([]);
   const [basket, setBasket] = useState(readBasket);
   const [toasts, setToasts] = useState([]);
   const [modal, setModal] = useState(null);
   const [config, setConfig] = useState(null);
-  const [libMode, setLibMode] = useState('folder');
+  const [libMode, setLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
+  const [genState, setGenState] = useState({});
   const [exporting, setExporting] = useState(null);
+  const [themeMode, setThemeMode] = useState(() => readLS('ppta.theme', 'system'));
+  const [sysTheme, setSysTheme] = useState(() => (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark'));
+  const [addMenu, setAddMenu] = useState(false);
+
+  const theme = themeMode === 'system' ? sysTheme : themeMode;
+  useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
+  const setTheme = (m) => { setThemeMode(m); try { localStorage.setItem('ppta.theme', m); } catch { /* ignore */ } api.setUiTheme(m).then(setConfig).catch(() => {}); };
 
   const toast = useCallback((msg, kind = 'info', action) => {
     const id = Math.random();
@@ -37,28 +71,45 @@ export default function App() {
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
-  const bump = () => { clearSlideCache(); setTaskTick((x) => x + 1); };
+  const bump = () => { clearSlideCache(); clearFileCache(); setTaskTick((x) => x + 1); };
 
   useEffect(() => {
-    refreshTasks(); reloadLogs(); api.getConfig().then(setConfig);
+    refreshTasks(); reloadLogs();
+    api.getConfig().then((c) => { setConfig(c); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
+    api.systemTheme().then(setSysTheme).catch(() => {});
+    const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
+    const onMq = () => setSysTheme(mq.matches ? 'light' : 'dark');
+    if (mq) mq.addEventListener('change', onMq);
+    const off0 = on('systemTheme', setSysTheme);
     const off1 = on('task', (t) => {
       setLiveTasks((m) => ({ ...m, [t.id]: t }));
       if (t.status !== 'running' || t.done === undefined || t.done % 5 === 0) refreshTasks();
-      if (['done', 'failed', 'cancelled'].includes(t.status)) {
+      if (['done', 'failed', 'cancelled'].includes(t.status) && t.finished_at) {
         bump();
-        toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}`, t.status === 'failed' ? 'error' : 'info');
+        const repeat = (t.skipped || 0) + (t.duplicate || 0);
+        toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}${repeat ? `（${repeat} 个文件已解析过，可在“解析任务”中选择是否重新解析）` : ''}`, t.status === 'failed' ? 'error' : 'info');
       }
     });
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
-    return () => { off1(); off2(); };
+    const off3 = on('progress', (e) => setProgress((p) => reduceProgress(p, e)));
+    return () => { off0(); off1(); off2(); off3(); if (mq) mq.removeEventListener('change', onMq); };
   }, []);
   useEffect(() => { try { localStorage.setItem(BASKET_KEY, JSON.stringify(basket)); } catch { /* ignore */ } }, [basket]);
 
   const addDir = async () => {
+    setAddMenu(false);
     const dirs = await api.selectDir();
+    let last = null;
     for (const d of dirs) {
-      try { const id = await api.addTask(d); await refreshTasks(); setView({ type: 'task', id }); toast(`已添加解析任务：${d}`); } catch (e) { toast(e.message, 'error'); }
+      try { last = await api.addTask(d); toast(`已添加任务：${d}（点击“开始解析”后执行）`); } catch (e) { toast(e.message, 'error'); }
     }
+    if (last) { await refreshTasks(); setView({ type: 'monitor' }); }
+  };
+  const addAllLocal = async () => {
+    setAddMenu(false);
+    const roots = await api.localRoots();
+    if (!confirm(`将按顺序扫描本机所有磁盘（${roots.join('  ')}）中的 PPT / Word 文件（类型以设置为准），系统目录会被跳过。\n文件较多时耗时较长，可随时取消。\n\n确定添加该任务？`)) return;
+    try { await api.addAllLocalTask(); await refreshTasks(); setView({ type: 'monitor' }); toast('已添加“本机全部文档”任务，点击“开始解析”后执行'); } catch (e) { toast(e.message, 'error'); }
   };
 
   const exportSlides = async (ids, kind) => {
@@ -69,7 +120,7 @@ export default function App() {
     setExporting({ n: ids.length });
     try {
       const r = await api.exportSlides(ids, out, { includeNotes: true });
-      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}`, 'info', { label: '打开', run: () => api.openPath(out) });
+      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}${r.skippedWord ? `；${r.skippedWord} 个 Word 章节不能放入 PPT，已跳过（可导出 Markdown）` : ''}`, 'info', { label: '打开', run: () => api.openPath(out) });
     } catch (e) { toast('导出失败：' + e.message, 'error'); } finally { setExporting(null); }
   };
 
@@ -81,19 +132,28 @@ export default function App() {
     clear: () => setBasket([]),
   }), [basket]);
 
+  const openSlide = async (id, fileIds, terms, matched) => {
+    const s = await loadSlide(id);
+    if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [] });
+  };
   const ctx = {
-    tasks, liveTasks, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump,
-    exportSlides, openSlide: (id) => setModal({ slideId: id }), openFile: (id) => setView({ type: 'file', id, back: view }),
+    tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
+    exportSlides, openSlide, modalOpen: !!modal, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
   };
 
   const nav = [
     { key: 'search', icon: '🔍', label: '智能搜索' },
+    { key: 'generate', icon: '✨', label: '智能生成' },
+    { key: 'monitor', icon: '⚙️', label: `解析任务${tasks.some((t) => t.status === 'running') ? ' ●' : ''}` },
     { key: 'library', icon: '📚', label: '资料库浏览' },
     { key: 'groups', icon: '🧩', label: '相似分组' },
     { key: 'basket', icon: '🧺', label: `导出篮${basket.length ? `（${basket.length}）` : ''}` },
+    { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'logs', icon: '📜', label: '运行日志' },
-    { key: 'settings', icon: '⚙️', label: '设置' },
+    { key: 'settings', icon: '🛠', label: '设置' },
   ];
+  const themeNext = { system: 'dark', dark: 'light', light: 'system' };
+  const themeIcon = { system: '🖥', dark: '🌙', light: '☀️' };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -103,7 +163,16 @@ export default function App() {
             {!collapsed && <div className="logo">PPT<span>智能体</span></div>}
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
-          <button className="btn primary add-btn" onClick={addDir} title="添加目录进行 PPT 解析">＋{collapsed ? '' : ' 添加目录解析'}</button>
+          <div className="add-wrap">
+            <button className="btn primary add-btn" onClick={addDir} title="添加目录（添加后手动开始解析）">＋{collapsed ? '' : ' 添加目录'}</button>
+            {!collapsed && <button className="btn primary add-more" onClick={() => setAddMenu(!addMenu)} title="更多添加方式">▾</button>}
+            {addMenu && (
+              <div className="add-menu" onMouseLeave={() => setAddMenu(false)}>
+                <div onClick={addDir}>📁 添加目录…</div>
+                <div onClick={addAllLocal}>🖥 添加所有本地文档（按盘符顺序扫描本机全部 PPT / Word）</div>
+              </div>
+            )}
+          </div>
           <div className="sb-section">{!collapsed && '解析任务'}</div>
           <div className="sb-tasks">
             {!tasks.length && !collapsed && <div className="muted small pad">还没有任务，点击上方按钮添加目录</div>}
@@ -116,14 +185,16 @@ export default function App() {
                   {!collapsed && (
                     <div className="sbt-main">
                       <div className="sbt-name">#{t.id} {t.name}</div>
-                      <div className="sbt-meta">{STATUS_LABEL[t.status]}{t.status === 'running' ? ` ${pct}%` : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
+                      <div className="sbt-meta">{STATUS_LABEL[t.status]}{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
                     </div>
                   )}
-                  {!collapsed && t.status !== 'running' && (
-                    <button className="icon-btn tiny" title="删除任务记录" onClick={async (e) => {
+                  {!collapsed && ['draft', 'interrupted', 'cancelled'].includes(t.status) && (
+                    <button className="icon-btn tiny start" title="开始解析" onClick={(e) => { e.stopPropagation(); api.startTask(t.id).then(refreshTasks); }}>▶</button>
+                  )}
+                  {!collapsed && !['running', 'pending'].includes(t.status) && (
+                    <button className="icon-btn tiny" title="删除任务（解析历史保留）" onClick={async (e) => {
                       e.stopPropagation();
-                      const rm = confirm(`删除任务 #${t.id}「${t.name}」？\n\n确定：同时从资料库移除该任务解析的文件\n取消：不删除`);
-                      if (!rm) return;
+                      if (!confirm(`删除任务 #${t.id}「${t.name}」？\n\n该任务解析的文件会从资料库移除，解析历史记录会保留。`)) return;
                       await api.deleteTask(t.id, true); refreshTasks(); bump(); if (view.id === t.id) setView({ type: 'search' });
                     }}>✕</button>
                   )}
@@ -133,27 +204,42 @@ export default function App() {
           </div>
           <div className="sb-section">{!collapsed && '功能'}</div>
           {nav.map((n) => (
-            <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
-              <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
-            </div>
+            <React.Fragment key={n.key}>
+              <div className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
+                <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
+              </div>
+              {n.key === 'library' && view.type === 'library' && !collapsed && (
+                <div className="sb-sub">
+                  {[['overview', '总览'], ['folder', '按文件夹'], ['name', '按文件名称'], ['tags', '按内容归类（标签）']].map(([k, v]) => <div key={k} className={`sb-subitem ${libMode === k ? 'active' : ''}`} onClick={() => setLibMode(k)}>{v}</div>)}
+                </div>
+              )}
+            </React.Fragment>
           ))}
-          {view.type === 'library' && !collapsed && (
-            <div className="sb-sub">
-              {[['folder', '按文件夹'], ['name', '按 PPT 名称'], ['tags', '按内容归类（标签）']].map(([k, v]) => <div key={k} className={`sb-subitem ${libMode === k ? 'active' : ''}`} onClick={() => setLibMode(k)}>{v}</div>)}
-            </div>
-          )}
+          <div className="spacer" />
+          <div className="sb-theme" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
+            <span className="ic">{themeIcon[themeMode]}</span>{!collapsed && <span>主题：{{ system: '跟随系统', dark: '黑色', light: '白色' }[themeMode]}</span>}
+          </div>
         </aside>
         <main className="main">
           {view.type === 'task' && <TaskView taskId={view.id} />}
+          {view.type === 'monitor' && <TaskMonitor />}
           {view.type === 'library' && <LibraryView mode={libMode} setMode={setLibMode} />}
           {view.type === 'search' && <SearchView state={searchState} setState={setSearchState} />}
           {view.type === 'groups' && <GroupsView />}
           {view.type === 'basket' && <BasketView />}
+          {view.type === 'convert' && <ConvertView />}
+          {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
           {view.type === 'file' && <FileView id={view.id} onBack={() => setView(view.back || { type: 'search' })} />}
         </main>
-        {modal && <SlideModal slideId={modal.slideId} onClose={() => setModal(null)} onSwitch={(id) => setModal({ slideId: id })} />}
+        {modal && (
+          <div className="overlay" onClick={() => setModal(null)}>
+            <div className="modal viewer-modal" onClick={(e) => e.stopPropagation()}>
+              <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} onClose={() => setModal(null)} />
+            </div>
+          </div>
+        )}
         {exporting && <div className="overlay"><div className="spinner-box">正在导出 {exporting.n} 页，请稍候…</div></div>}
         <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}{t.action && <button className="btn tiny" onClick={t.action.run}>{t.action.label}</button>}</div>)}</div>
       </div>
@@ -168,39 +254,6 @@ function FileView({ id, onBack }) {
     <div className="view">
       <div className="view-head"><button className="btn" onClick={onBack}>← 返回</button><div className="vh-title">{file ? file.name : ''}</div><div className="muted small">{file && file.path}</div></div>
       <div className="tab-body">{file && <SlideWorkspace files={[file]} initialFileId={file.id} />}</div>
-    </div>
-  );
-}
-
-function SlideModal({ slideId, onClose, onSwitch }) {
-  const [s, setS] = useState(null);
-  const { basket } = React.useContext(AppCtx);
-  useEffect(() => { setS(null); loadSlide(slideId).then(setS); }, [slideId]);
-  useEffect(() => { const k = (e) => e.key === 'Escape' && onClose(); window.addEventListener('keydown', k); return () => window.removeEventListener('keydown', k); }, []);
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        {!s ? <div className="pad">加载中…</div> : (
-          <>
-            <div className="detail-head">
-              <div><div className="dh-title">{s.title || `第 ${s.idx} 页`} <span className={`tag theme-${s.theme}`}>{THEME_LABEL[s.theme]}</span></div><div className="muted small">{s.file.path} · 第 {s.idx} 页</div></div>
-              <div className="spacer" />
-              {s.counterpart && <button className="btn" onClick={() => onSwitch(s.counterpart.id)}>⇄ 切换到{THEME_LABEL[s.counterpart.theme]}版本</button>}
-              <button className="btn" onClick={() => basket.add([s.id])}>加入导出篮</button>
-              <button className="btn" onClick={() => api.openPath(s.file.path)}>打开 PPT</button>
-              <button className="icon-btn" onClick={onClose}>✕</button>
-            </div>
-            {s.counterpart && <div className="hint-bar">⇄ 该页有内容相近的 <b>{THEME_LABEL[s.counterpart.theme]}</b> 版本：{s.counterpart.fileName} 第 {s.counterpart.idx} 页</div>}
-            <div className="modal-body">
-              <div className="detail-preview"><SlidePreview slide={s} file={s.file} full /></div>
-              <div className="detail-panes">
-                <div className="pane"><div className="pane-head">🗣 备注（讲解词）</div><div className="pane-body notes">{s.notes || <span className="muted">（本页无备注）</span>}</div></div>
-                <div className="pane"><div className="pane-head">📝 解析 Markdown</div><div className="pane-body md" dangerouslySetInnerHTML={{ __html: renderMarkdown(s.md) }} /></div>
-              </div>
-            </div>
-          </>
-        )}
-      </div>
     </div>
   );
 }

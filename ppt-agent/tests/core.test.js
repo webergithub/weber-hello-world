@@ -104,7 +104,12 @@ test('服务：去重（已解析过 / 重复文件）、标签 20 个、分组�
   fs.copyFileSync(src, dup);
   const st = fs.statSync(src);
   fs.utimesSync(dup, st.atime, st.mtime);
+  fs.cpSync(P('Word文档', '航班过站保障作业指导书.docx'), path.join(lib, 'Word', '航班过站保障作业指导书.docx'));
   const id = svc.addTask(lib);
+  assert.strictEqual(svc.store.getTask(id).status, 'draft', '添加后应等待手动开始');
+  const stages = new Set();
+  svc.on('progress', (p) => stages.add(p.stage));
+  svc.startTask(id);
   await done(id);
   const d = svc.taskDetail(id);
   assert.ok(d.stats.duplicate >= 1);
@@ -117,8 +122,65 @@ test('服务：去重（已解析过 / 重复文件）、标签 20 个、分组�
   assert.strictEqual(r.files[0].tier, 1);
   assert.ok(r.slides.light.length && r.slides.dark.length);
   assert.ok(r.slides.dark.some((s) => s.counterpart && s.counterpart.theme === 'light'));
+  for (const st of ['scanned', 'file', 'slide', 'parsed', 'tag', 'done']) assert.ok(stages.has(st), '缺少进度事件 ' + st);
+  const w = await svc.searchQuery('TOBT 更新规则');
+  assert.ok(w.slides.word.length >= 1, 'Word 章节应可被检索');
   const id2 = svc.addTask(lib);
+  svc.startTask(id2);
   const t2 = await done(id2);
   assert.match(t2.message, /解析 0，/);
+  // 用户确认后强制重新解析重复文件
+  const id3 = svc.reparseFiles([dup]);
+  const t3 = await done(id3);
+  assert.match(t3.message, /解析 1，/);
+  assert.ok(svc.history().length >= 3);
   svc.close();
+});
+
+test('Word：按标题分节、表格、批注', async () => {
+  const { parseDocx } = require('../electron/core/docx');
+  const r = await parseDocx(P('Word文档', '航班过站保障作业指导书.docx'), { mediaDir: tmp });
+  assert.ok(r.slides.length >= 5);
+  assert.ok(r.slides.some((s) => /2\.1 TOBT/.test(s.title)));
+  assert.ok(r.slides.some((s) => s.blocks.some((b) => b.kind === 'table')));
+  assert.ok(r.slides.some((s) => /审核人/.test(s.notes)));
+});
+
+test('Markdown 只保留文字，不含图片', async () => {
+  const { parsePptx } = require('../electron/core/pptx');
+  const { slideToMd } = require('../electron/core/markdown');
+  const r = await parsePptx(P('技术方案', '数字孪生机场_图片背景.pptx'), { mediaDir: tmp });
+  for (const s of r.slides) assert.ok(!/!\[/.test(slideToMd(s)));
+});
+
+test('黑白底互转：黑→白、白→黑', async () => {
+  const { exportPptx } = require('../electron/core/exporter');
+  const { convertTheme } = require('../electron/core/converter');
+  const { parsePptx } = require('../electron/core/pptx');
+  const f = P('技术方案', '黑白互转测试_黑底.pptx');
+  const merged = path.join(tmp, 'cv-m.pptx'), out = path.join(tmp, 'cv.pptx');
+  await exportPptx([{ path: f, idx: 1, ns: 'toLight' }, { path: P('机场运营', '航班过站保障Turnaround_白底.pptx'), idx: 5, ns: 'toDark' }], merged, {});
+  const r = await convertTheme(merged, out, ['toLight', 'toDark'], {});
+  assert.ok(r.stats.logos >= 1 && r.stats.tables >= 2 && r.stats.shapes >= 2);
+  const back = await parsePptx(out, { mediaDir: tmp });
+  assert.deepStrictEqual(back.slides.map((s) => s.theme), ['light', 'dark']);
+  const runs = back.slides[0].layout.items.flatMap((i) => (i.paras || []).flatMap((p) => p.runs || []));
+  assert.ok(runs.some((x) => x.color === 'C00000'), '彩色文字应变为深红');
+  assert.ok(runs.filter((x) => x.text.trim()).every((x) => ['000000', 'C00000'].includes(x.color)));
+});
+
+test('智能生成：版式意图识别与相似聚类', () => {
+  const gen = require('../electron/core/generate');
+  const it = gen.parseIntent('需要一个对比格式的模板页面');
+  assert.deepStrictEqual(it.formats.map((f) => f.key), ['compare']);
+  assert.strictEqual(it.topic, '');
+  const t = gen.parseIntent('航班过站保障的时间线');
+  assert.ok(t.formats.some((f) => f.key === 'timeline'));
+  assert.match(t.topic, /航班过站保障/);
+  const v = (a) => Float32Array.from(a);
+  const rows = gen.cluster([{ s: { id: 1 }, vec: v([1, 0]) }, { s: { id: 2 }, vec: v([0.99, 0.141]) }, { s: { id: 3 }, vec: v([0, 1]) }], 0.9);
+  assert.strictEqual(rows.length, 2);
+  assert.strictEqual(rows[0].variants.length, 1);
+  const two = gen.slideFeatures({ idx: 3, title: 'A', text: 'x', layout: { items: [{ t: 'text', x: 0.05, y: 0.3, w: 0.42, h: 0.5, paras: [{ text: '左' }] }, { t: 'text', x: 0.53, y: 0.3, w: 0.42, h: 0.5, paras: [{ text: '右' }] }] } });
+  assert.strictEqual(two.twoCol, true);
 });

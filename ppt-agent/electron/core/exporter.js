@@ -98,7 +98,7 @@ async function exportPptx(selections, outPath, opts = {}) {
       if (!part) throw new Error(`页码超出范围：${path.basename(sel.path)} 第 ${sel.idx} 页`);
       const name = `ppt/slides/slide${i + 1}.xml`;
       used.add(name);
-      return { src, part, name };
+      return { src, part, name, ns: sel.ns || '' };
     });
     const firstPlanned = new Map();
     for (const p of planned) { const k = `${p.src.file}|${p.part}`; if (!firstPlanned.has(k)) firstPlanned.set(k, p.name); }
@@ -106,7 +106,8 @@ async function exportPptx(selections, outPath, opts = {}) {
     const SHAREABLE = /\/(slideLayouts|slideMasters|theme|notesMasters|media)\//;
     async function importPart(src, part, ctx = {}) {
       // 母版/版式/主题/媒体可共享；图表、备注页、SmartArt、嵌入对象等按页独立复制（同一页被选多次时不共用）
-      const key = SHAREABLE.test(part) ? `${src.file}|${part}` : `${src.file}|${part}|${ctx.occ}`;
+      // ns：命名空间（如黑白底互转的不同方向），不同命名空间的母版/版式各自独立复制
+      const key = SHAREABLE.test(part) && !/\/notesMasters\//.test(part) ? `${ctx.ns || ''}|${src.file}|${part}` : SHAREABLE.test(part) ? `${src.file}|${part}` : `${src.file}|${part}|${ctx.occ}`;
       if (!ctx.forceName && memo.has(key)) return memo.get(key);
       if (!src.zip.has(part)) return null;
       const name = ctx.forceName || alloc(part);
@@ -126,12 +127,12 @@ async function exportPptx(selections, outPath, opts = {}) {
             target = ctx.slideName && /notesSlide/.test(part) ? ctx.slideName : (firstPlanned.get(`${src.file}|${r.abs}`) || ctx.slideName || name);
           } else if (r.type.endsWith('/notesSlide')) {
             if (!includeNotes) continue;
-            target = await importPart(src, r.abs, { slideName: name, occ: ctx.occ });
+            target = await importPart(src, r.abs, { slideName: name, occ: ctx.occ, ns: ctx.ns });
           } else if (r.type === RT.notesMaster) {
             if (!notesMaster) notesMaster = await importPart(src, r.abs);
             target = notesMaster;
           } else {
-            target = await importPart(src, r.abs, { slideName: ctx.slideName, occ: ctx.occ });
+            target = await importPart(src, r.abs, { slideName: ctx.slideName, occ: ctx.occ, ns: ctx.ns });
           }
           if (!target) { log.warn(`跳过缺失部件 ${r.abs}（${path.basename(src.file)}）`); continue; }
           out.push({ ...r, target: relTarget(name, target), external: false });
@@ -141,7 +142,7 @@ async function exportPptx(selections, outPath, opts = {}) {
       return name;
     }
 
-    for (let i = 0; i < planned.length; i++) await importPart(planned[i].src, planned[i].part, { forceName: planned[i].name, slideName: planned[i].name, occ: i });
+    for (let i = 0; i < planned.length; i++) await importPart(planned[i].src, planned[i].part, { forceName: planned[i].name, slideName: planned[i].name, occ: i, ns: planned[i].ns });
 
     // 演示文稿级部件取自第一个来源
     const base = planned[0].src;
