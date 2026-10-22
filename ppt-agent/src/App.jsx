@@ -70,6 +70,7 @@ export default function App() {
   );
   const [view, setViewState] = useState({ type: 'search' });
   const [subOpen, setSubOpen] = useState({});
+  const [taskMenu, setTaskMenu] = useState(true); // 选中任务下方的“任务详情”菜单是否展开
   const [version, setVersion] = useState('');
   useEffect(() => { api.appVersion().then(setVersion).catch(() => {}); }, []);
   // 当前选择的解析任务：“任务详情”模块下的菜单只显示该任务的内容
@@ -286,8 +287,10 @@ export default function App() {
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
   ];
+  // 点击任务：选中并在任务下方展开“任务详情”菜单（任务概览 / 解析过程）；再次点击已选中的任务收起菜单
   const selectTask = (t) => {
-    setCurTask(t.id);
+    if (t.id === curTask && SCOPED.includes(view.type)) { setTaskMenu((v) => !v); return; }
+    setCurTask(t.id); setTaskMenu(true);
     if (['running', 'pending'].includes(t.status)) setViewState({ type: 'tmonitor', tab: 'live' });
     else if (!SCOPED.includes(view.type)) setViewState({ type: 'task' });
   };
@@ -333,6 +336,8 @@ export default function App() {
               </div>
             )}
           </div>
+          {/* 解析任务（蓝）：任务列表，选中任务的下方挂载“任务详情”菜单（任务概览 / 解析过程） */}
+          <div className={`sb-mod m-detail ${folded.tasks ? 'is-folded' : ''}`}>
           {secHead('tasks', <>📂 解析任务{tasks.length ? <span className="sb-count">{tasks.length}</span> : null}</>, '📂')}
           {!folded.tasks && <div className="sb-tasks" data-tour="tasks">
             {!tasks.length && !collapsed && <div className="sb-empty">还没有任务，点击上方“添加目录”</div>}
@@ -341,7 +346,8 @@ export default function App() {
               const pct = t.total ? Math.round(((live && live.done) || (t.parsed + t.skipped + t.duplicate + t.failed)) / t.total * 100) : 0;
               const on = t.id === curTask;
               return (
-                <div key={t.id} className={`sb-task ${on ? 'active' : ''}`} onClick={() => selectTask(t)} title={t.dir}>
+                <React.Fragment key={t.id}>
+                <div className={`sb-task ${on ? 'active' : ''} ${on && taskMenu ? 'open' : ''}`} onClick={() => selectTask(t)} title={t.dir}>
                   <span className={`dot s-${t.status}`} />
                   {!collapsed && (
                     <div className="sbt-main">
@@ -365,15 +371,15 @@ export default function App() {
                       }}>✕</button>
                     )}
                   </div>}
+                  {!collapsed && <span className="sbt-caret" title={on && taskMenu ? '收起任务详情菜单' : '展开任务详情菜单'}>{on && taskMenu ? '▾' : '▸'}</span>}
                 </div>
+                {on && taskMenu && <div className="sb-group sb-task-menu" data-tour="task-menu">{taskNav.map((n) => navItem(n))}</div>}
+                </React.Fragment>
               );
             })}
           </div>}
-          {/* 四个功能模块：各用一种主题色的卡片区分 */}
-          <div className={`sb-mod m-detail ${folded.detail ? 'is-folded' : ''}`}>
-            {secHead('detail', <>🧭 任务详情{cur && !collapsed ? <span className="sb-scope" title={cur.dir}>{cur.name}</span> : null}</>, '🧭')}
-            {!folded.detail && <div className="sb-group">{taskNav.map((n) => navItem(n, { disabled: !cur }))}{!cur && !collapsed && <div className="sb-empty">添加并选择一个解析任务后可用</div>}</div>}
           </div>
+          {/* 其余功能模块：各用一种主题色的卡片区分 */}
           <div className={`sb-mod m-over ${folded.over ? 'is-folded' : ''}`}>
             {secHead('over', '📊 总览分析', '📊')}
             {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}

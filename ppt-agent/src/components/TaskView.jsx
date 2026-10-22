@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
@@ -20,10 +20,14 @@ export default function TaskView({ taskId }) {
   const [data, setData] = useState(null);
   const [focusFile, setFocusFile] = useState(null);
   const [dupes, setDupes] = useState(null);
-  const load = () => api.taskDetail(taskId).then(setData);
+  const curId = useRef(taskId);
+  curId.current = taskId;
+  // 只接收当前任务的数据（快速切换任务时，旧任务较慢返回的数据不会覆盖新任务）
+  const load = () => { const id = taskId; return api.taskDetail(id).then((d) => { if (curId.current === id) setData(d); }); };
   useEffect(() => { setTabState(TAB_MEMO.get(taskId) || 'slides'); setFocusFile(null); load(); }, [taskId]);
   useEffect(() => { load(); }, [app.taskTick]);
-  if (!data) return <div className="empty-tip">加载中…</div>;
+  // 切换任务时，新任务的数据到达前不显示上一个任务的内容
+  if (!data || !data.task || data.task.id !== taskId) return <div className="empty-tip">加载中…</div>;
   const { task, stats } = data;
   const files = dedupe(data.files);
   const live = app.liveTasks[taskId];
@@ -61,7 +65,7 @@ export default function TaskView({ taskId }) {
         <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
       </div>
       <div className="tab-body">
-        {tab === 'slides' && <SlideWorkspace files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
+        {tab === 'slides' && <SlideWorkspace key={`ws-${taskId}`} files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
         {tab === 'files' && <FilesStats files={files} stats={stats} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
         {tab === 'log' && <LogView taskId={taskId} />}
       </div>

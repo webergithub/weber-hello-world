@@ -44,6 +44,7 @@ Each table must support:
 ## 3. Navigation
 
 - **Scope views to the selected item**: when the app manages several sources / projects / tasks, the sidebar lets the user pick one, and a "detail" section lists views that show ONLY that item's data (overview, process, files, search, groups). A separate "overview" section shows everything across all items (statistics, all-items library, all history, recycle bin). Never mix other items' data into the scoped views; search offers a toggle "当前任务 / 所有资料库".
+- The scoped "detail" menu hangs directly under the selected item in the item list (expand on select, click again to collapse), not in a separate block far from it.
 - Sidebar look: grouped sections with icon + title + count / current-scope chip, foldable; items as rounded pills with an accent bar when active; item cards with status dot, mini progress bar and hover actions; tools (basket, logs, settings, help, theme) pinned at the bottom.
 - Collapsible left sidebar (icon-only mode); each sidebar section can be folded separately; remember both.
 - **No duplicated buttons**: global actions (e.g. 添加目录, 扫描本机) live in one place only, normally the left sidebar. Sub-views that are switched from the sidebar do not get duplicate tabs on the right.

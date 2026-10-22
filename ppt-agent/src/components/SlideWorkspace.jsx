@@ -49,6 +49,17 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
   useEffect(() => {
     if (!fileId && visible.length) setFileId((visible.find((f) => f.status !== 'failed') || visible[0]).id);
   }, [visible, fileId]);
+  // 文件列表换了（如切换到另一个任务）而当前文件不在新列表中：切到新列表的第一个文件，不再显示上一个列表的页面
+  const filesKey = files.map((f) => f.id).join(',');
+  const prevKey = useRef(filesKey);
+  useEffect(() => {
+    if (prevKey.current === filesKey) return;
+    prevKey.current = filesKey;
+    if (fileId && !files.some((f) => f.id === fileId)) {
+      const first = files.find((f) => f.status !== 'failed') || files[0];
+      setFileId(first ? first.id : null); setSlideId(null); setSelected(new Set()); setBack([]);
+    }
+  }, [filesKey]);
 
   useEffect(() => {
     let off = false;
