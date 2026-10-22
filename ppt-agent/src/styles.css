@@ -1375,3 +1375,6 @@ body.resizing-v, body.resizing-v * { cursor: ns-resize !important; user-select: 
 /* 智能合成（建设中） */
 .merge-body { gap: 10px; }
 .merge-foot { display: flex; align-items: center; gap: 8px; padding-top: 4px; }
+/* v3.1.1 侧栏顶部冻结：logo + 添加目录 + 解析任务在侧栏滚动时保持不动，其余菜单在下方滚动 */
+.sb-top { position: sticky; top: 0; z-index: 6; background: var(--bg2); padding-bottom: 4px; }
+.sidebar.scrolled .sb-top { box-shadow: 0 8px 12px -10px var(--shadow); border-bottom: 1px solid var(--line2); }

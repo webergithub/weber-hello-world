@@ -79,6 +79,7 @@ export default function App() {
   const [feedback, setFeedback] = useState(false);
   // 设置按钮：第一次点击打开设置，再次点击收起并还原打开前的界面
   const prevView = useRef(null);
+  const helpPrev = useRef(null); // 打开帮助指南前的视图（收起帮助时还原）
   // 解析任务标题右侧的按钮：在右侧打开 / 收起“全部任务与历史”（收起时回到原来的界面）
   const toggleAllTasks = () => {
     if (view.type === 'monitor') { setViewState(prevView.current && prevView.current.type !== 'monitor' ? prevView.current : { type: 'search' }); return; }
@@ -91,6 +92,7 @@ export default function App() {
   const [taskMenu, setTaskMenu] = useState(true); // 选中任务下方的“任务详情”菜单是否展开
   // 侧栏任务列表：超过 3 个任务时只显示 3 个的高度，可滚动；底部拖动条可上下拖动调整高度（记住在 ppta.sbTasksH）
   const tasksBox = useRef(null);
+  const [sbScrolled, setSbScrolled] = useState(false);
   const [userTasksH, setUserTasksH] = useState(() => { try { return Number(localStorage.getItem('ppta.sbTasksH')) || null; } catch { return null; } });
   const [autoTasksH, setAutoTasksH] = useState(null);
   const tasksH = userTasksH || autoTasksH;
@@ -99,7 +101,7 @@ export default function App() {
     e.preventDefault();
     const box = tasksBox.current; if (!box) return;
     const y0 = e.clientY, h0 = box.getBoundingClientRect().height;
-    const move = (ev) => saveTasksH(Math.round(Math.max(90, Math.min(window.innerHeight * 0.7, h0 + ev.clientY - y0))));
+    const move = (ev) => saveTasksH(Math.round(Math.max(90, Math.min(window.innerHeight * 0.5, h0 + ev.clientY - y0))));
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('resizing-v'); };
     document.body.classList.add('resizing-v');
     window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
@@ -113,6 +115,7 @@ export default function App() {
   const setView = (v) => {
     // back: true 表示记住当前视图，目标页左上角显示“← 返回”回到这里（如从“全部任务与历史”查看某个任务）
     const back = v && v.back === true ? view : v && v.back;
+    if (v && v.type === 'help' && view.type !== 'help') helpPrev.current = view;
     if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live', back }); return; }
     if (v && v.type === 'task' && v.id) { setCurTask(v.id); setTaskMenu(true); setViewState({ type: 'task', back }); return; }
     if (v && v.type === 'library') { setViewState({ type: 'alllib' }); return; }
@@ -294,8 +297,11 @@ export default function App() {
     setModal(null);
     setCompare({ fileIds: ids.slice(0, COMPARE_MAX), starts });
   };
-  // 帮助按钮：第一次点击打开帮助指南，再次点击收起并回到智能搜索
-  const toggleHelp = () => setViewState(view.type === 'help' ? { type: 'search' } : { type: 'help' });
+  // 帮助按钮：第一次点击打开帮助指南，再次点击收起并回到打开帮助前的界面（不论从哪里打开的帮助）
+  const toggleHelp = () => {
+    if (view.type === 'help') { const p = helpPrev.current; setViewState(p && p.type !== 'help' ? p : { type: 'search' }); return; }
+    helpPrev.current = view; setViewState({ type: 'help' });
+  };
   const startTour = () => { setModal(null); setCompare(null); setWelcome(false); setTour(true); };
   const onWelcomeClose = async ({ again, next }) => {
     setWelcome(false);
@@ -366,10 +372,12 @@ export default function App() {
   return (
     <AppCtx.Provider value={ctx}>
       <div className={`app ${collapsed ? 'collapsed' : ''}`}>
-        <aside className="sidebar">
+        <aside className={`sidebar ${sbScrolled ? 'scrolled' : ''}`} onScroll={(e) => { const v = e.currentTarget.scrollTop > 2; if (v !== sbScrolled) setSbScrolled(v); }}>
+          {/* 顶部冻结：logo、添加目录与解析任务模块在侧栏上下滚动时保持不动 */}
+          <div className="sb-top">
           <div className="sb-head">
             {!collapsed && <div className="logo" title={version ? `PPT智能体 v${version}` : ''}>PPT<span>智能体</span>{version && <sup className="sb-ver">v{version}</sup>}</div>}
-            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title={view.type === 'help' ? '收起帮助指南，回到智能搜索' : '帮助指南：功能详解、快捷键、新手指引'} onClick={toggleHelp}>{view.type === 'help' ? '收起' : '❓ 帮助'}</button>}
+            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title={view.type === 'help' ? '收起帮助指南，回到原来的界面' : '帮助指南：功能详解、快捷键、新手指引'} onClick={toggleHelp}>{view.type === 'help' ? '收起' : '❓ 帮助'}</button>}
             <div className="spacer" />
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
@@ -420,6 +428,7 @@ export default function App() {
             })}
           </div>}
           {!folded.tasks && !collapsed && tasks.length > 3 && <div className="sb-tasks-grip" title="上下拖动调整任务列表高度（双击恢复默认）" onMouseDown={dragTasksH} onDoubleClick={() => saveTasksH(null)} />}
+          </div>
           </div>
           {/* 其余功能模块：各用一种主题色的卡片区分 */}
           <div className={`sb-mod m-over ${folded.over ? 'is-folded' : ''}`}>
