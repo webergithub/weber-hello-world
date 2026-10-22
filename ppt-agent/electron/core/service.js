@@ -25,6 +25,7 @@ const gen = require('./generate');
 const { Office } = require('./office');
 const { imageLuminance } = require('./image');
 const llm = require('./llm');
+const { OFFLINE_ONLY, OFFLINE_MSG } = require('./offline');
 
 // 支持的文档类型（设置中多选启用）
 const DOC_TYPES = {
@@ -117,8 +118,9 @@ class AgentService extends EventEmitter {
       return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
-  getConfig() { return this.config; }
+  getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY }; }
   setConfig(patch) {
+    if (patch && 'offlineOnly' in patch) { patch = { ...patch }; delete patch.offlineOnly; }
     const w0 = this.config.watch || DEFAULT_CONFIG.watch;
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
@@ -129,7 +131,7 @@ class AgentService extends EventEmitter {
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
     if (patch.docTypes && this.store) setImmediate(() => this.computeRelations().catch((e) => this.log.warn('重算页面关联失败', e)));
     this.log.info('配置已更新', { thumbnails: this.config.thumbnails, llm: this.config.llm.enabled ? this.config.llm.model : '未启用', embedding: this.config.embedding.provider });
-    return this.config;
+    return this.getConfig();
   }
 
   enabledExts() {
@@ -323,6 +325,22 @@ class AgentService extends EventEmitter {
     this.log.info(`[任务#${id}] 已删除${removeFiles ? '（同时移除其解析的文件）' : ''}`);
   }
 
+  /**
+   * 智能搜索首页的推荐词：从已导入（已解析）文档的标签生成，按覆盖的文档数排序；
+   * 去掉底色、页数、语言、含视频等属性类标签。taskIds 非空时只统计这些任务的文档。
+   */
+  searchSuggestions({ taskIds = [], limit = 12 } = {}) {
+    const ATTR = /^(白底|黑底|黑白混合|含视频|含字幕|含表格|含图表|含批注|含讲解词|全页讲解词|大文件|中文|英文|中英双语|Word文档|PDF文档|目录:.*|\d.*(页|节).*)$/;
+    let files = this.store.listFiles({ status: 'parsed' });
+    if (taskIds && taskIds.length) {
+      const ids = new Set(taskIds.flatMap((t) => this.store.taskFiles(t).map((f) => f.id)));
+      files = files.filter((f) => ids.has(f.id));
+    }
+    const count = new Map();
+    for (const f of files) for (const t of new Set(f.tags || [])) if (t && !ATTR.test(t)) count.set(t, (count.get(t) || 0) + 1);
+    return [...count.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).slice(0, limit).map(([tag, files]) => ({ tag, files }));
+  }
+
   /** 批量删除任务（全部任务与历史中多选）：解析中 / 排队中的任务跳过；解析历史保留 */
   deleteTasks(ids, removeFiles = true) {
     const done = [], skipped = [];
@@ -492,7 +510,7 @@ class AgentService extends EventEmitter {
     log.info(`${tag} 任务结束：${msg}`);
     this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length, inc: incremental ? inc : null });
     if (incremental && !cancelled) this.emit('watch', { taskId: id, name: task.name, ...inc, reason: incremental });
-    if (changed && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
+    if (changed && !OFFLINE_ONLY && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
   }
 
   fingerprint(name, size, mtime, author) {
@@ -1346,7 +1364,7 @@ class AgentService extends EventEmitter {
     const file = this.store.getFile(s.file_id);
     const client = llm.client(this.config.llm);
     if (!client || (!this.config.llm.apiKey && !/127\.0\.0\.1|localhost/.test(this.config.llm.baseUrl || ''))) {
-      throw new Error('未配置 Agent 接口：请在“设置 → Agent 接口”中选择服务商（如 DeepSeek）、填写 API Key 并启用');
+      throw new Error(OFFLINE_ONLY ? OFFLINE_MSG : '未配置 Agent 接口：请在“设置 → Agent 接口”中选择服务商（如 DeepSeek）、填写 API Key 并启用');
     }
     let text = '';
     try { text = (await client.speakerNotes({ fileName: file.name, title: s.title, text: s.text, md: s.md, notes: s.notes })).trim(); } catch (e) { throw new Error('调用 Agent 接口失败：' + e.message); }
@@ -1380,6 +1398,7 @@ class AgentService extends EventEmitter {
     const hit = !force && this.store.kbGet(f.path, s.idx, variant, lang);
     if (hit) return { text: hit.text, source: hit.source, writtenBack: !!hit.written_back, cached: true, lang, variant };
     const client = llm.client(this.config.llm);
+    if (!client && OFFLINE_ONLY) throw new Error(OFFLINE_MSG);
     if (!client) throw new Error('未配置 Agent 接口：请在“设置 → Agent 接口”中填写接口地址、API Key 与模型（支持 DeepSeek、通义千问、Kimi、智谱、OpenAI、本地 Ollama）');
     const name = LANG_NAMES[lang] || lang;
     const text = await client.translate(src, name);
@@ -1457,6 +1476,7 @@ class AgentService extends EventEmitter {
   }
 
   async testLlm(cfg) {
+    if (OFFLINE_ONLY) throw new Error(OFFLINE_MSG);
     const client = llm.client({ ...this.config.llm, ...(cfg || {}), enabled: true });
     if (!client) throw new Error('请填写模型名称');
     const t0 = Date.now();

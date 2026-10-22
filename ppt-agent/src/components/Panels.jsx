@@ -229,7 +229,7 @@ export function MdBody({ slide, terms = [], onGenerated }) {
           <>
             {slide.md !== slide.md_orig && <button className="btn tiny" onClick={async () => { const s = await api.updateSlideText(slide.id, { md: null }); emitSlide(s); }}>恢复原文</button>}
             <button className="btn tiny" onClick={() => navigator.clipboard.writeText(slide.md || '')}>复制</button>
-            <button className="btn tiny gen-btn" disabled={busy} onClick={gen} title="调用“设置 → Agent 接口”中配置的大模型（如 DeepSeek）根据本页内容生成讲解词，结果显示在“生成讲解词”页签（建设中）">{busy ? '生成中…' : <>🤖 自动调用 Agent 生成讲解词 <span className="wip">建设中</span></>}</button>
+            <button className="btn tiny gen-btn" disabled={busy || !!(app.config && app.config.offlineOnly)} onClick={gen} title={app.config && app.config.offlineOnly ? "单机版不联网，暂不可用" : "调用“设置 → Agent 接口”中配置的大模型（如 DeepSeek）根据本页内容生成讲解词，结果显示在“生成讲解词”页签（建设中）"}>{busy ? '生成中…' : <>🤖 自动调用 Agent 生成讲解词 <span className="wip">建设中</span></>}</button>
           </>
         )}
       </div>

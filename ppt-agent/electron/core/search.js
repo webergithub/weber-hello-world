@@ -212,7 +212,7 @@ class SearchEngine {
 
   async answer(q, slideIds) {
     const client = llm.client(this.getConfig().llm);
-    if (!client) throw new Error('未配置大模型，无法生成 RAG 回答（可在"设置"中配置 OpenAI 兼容接口）');
+    if (!client) throw new Error(require('./offline').OFFLINE_ONLY ? require('./offline').OFFLINE_MSG : '未配置大模型，无法生成 RAG 回答（可在"设置"中配置 OpenAI 兼容接口）');
     const { fileMap } = this.load();
     const slides = this.store.getSlides(slideIds.slice(0, 8));
     const ctx = slides.map((s) => ({ file: (fileMap.get(s.file_id) || {}).name || '', idx: s.idx, title: s.title, text: s.text.slice(0, 1500), notes: (s.notes || '').slice(0, 800) }));

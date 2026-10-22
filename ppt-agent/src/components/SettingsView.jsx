@@ -10,9 +10,17 @@ const LLM_PRESETS = [
   { key: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
   { key: 'kimi', label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
   { key: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-  { key: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { key: 'openai', label: 'OpenAI GPT', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5' },
+  { key: 'claude', label: 'Anthropic Claude', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-5-5' },
+  { key: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-pro' },
+  { key: 'grok', label: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', model: 'grok-4' },
+  { key: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-large-latest' },
   { key: 'ollama', label: '本地 Ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
 ];
+
+const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
+const FOCUS_TAB = { watch: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const LAST_TAB = { k: null };
 
 export default function SettingsView({ focus }) {
   const app = useApp();
@@ -31,8 +39,13 @@ export default function SettingsView({ focus }) {
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
   useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
+  // 设置分页签：focus 定位到对应页签与段落；所选页签在会话内记住
+  const [tab, setTab] = useState(() => FOCUS_TAB[focus] || LAST_TAB.k || 'general');
+  const pickTab = (k) => { LAST_TAB.k = k; setTab(k); };
+  useEffect(() => { if (FOCUS_TAB[focus]) pickTab(FOCUS_TAB[focus]); }, [focus]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
   if (!cfg) return null;
+  const offline = !!cfg.offlineOnly;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
   const setE = (patch) => setCfg({ ...cfg, embedding: { ...cfg.embedding, ...patch } });
@@ -45,7 +58,11 @@ export default function SettingsView({ focus }) {
   return (
     <div className="view">
       <div className="view-head"><div className="vh-title">⚙️ 设置</div><div className="spacer" /><button className="btn primary" onClick={save}>保存设置</button></div>
+      <div className="tabs attached settings-tabs">
+        {SET_TABS.map(([k, label]) => <button key={k} className={`${tab === k ? 'on' : ''} ${k === 'ai' && offline ? 'off' : ''}`} title={k === 'ai' && offline ? '单机版不联网，此页设置暂不可用' : undefined} onClick={() => pickTab(k)}>{label}{k === 'ai' && offline ? <span className="tag small">单机版不可用</span> : null}</button>)}
+      </div>
       <div className="tab-body scroll pad settings">
+        {tab === 'general' && <>
         <section>
           <h3>解析文档类型（多选）</h3>
           <p className="muted">选择要扫描、解析和检索的文档类型。修改后对之后开始的解析任务生效；已解析的文档仍可检索。</p>
@@ -71,6 +88,29 @@ export default function SettingsView({ focus }) {
           <WatchSettings />
         </section>
         <section>
+          <h3>页面截图（PPT 原始页预览）</h3>
+          <p className="muted">优先使用 PowerPoint 导出每页截图（保真度最高），其次 LibreOffice；均不可用时使用内置版式渲染。截图也会用于更准确地判断黑底/白底。</p>
+          <div className="row"><label>截图引擎</label>
+            <select className="input" value={cfg.thumbnails} onChange={(e) => set({ thumbnails: e.target.value })}>
+              <option value="auto">自动（PowerPoint → LibreOffice）</option><option value="powerpoint">仅 PowerPoint</option><option value="libreoffice">仅 LibreOffice</option><option value="off">关闭（只用内置渲染，速度最快）</option>
+            </select>
+          </div>
+          <div className="row"><label>截图宽度</label><input className="input" type="number" value={cfg.thumbWidth} onChange={(e) => set({ thumbWidth: Number(e.target.value) || 1280 })} /></div>
+          {eng && <div className="engines">
+            <span className={`tag ${eng.powerpoint ? 'ok' : ''}`}>PowerPoint：{eng.powerpoint ? '可用' : '未检测到'}</span>
+            <span className={`tag ${eng.soffice ? 'ok' : ''}`}>LibreOffice：{eng.soffice || '未检测到'}</span>
+            <span className={`tag ${eng.ffmpeg ? 'ok' : ''}`}>ffmpeg（仅提取字幕流）：{eng.ffmpeg || '未检测到'}</span>
+            <button className="btn tiny" onClick={() => api.engines(true).then(setEng)}>重新检测</button>
+          </div>}
+        </section>
+        <section>
+          <h3>相似分组与维护</h3>
+          <div className="row"><label>内容相似阈值</label><input className="input" type="number" step="0.01" min="0.5" max="0.99" value={cfg.similarityThreshold} onChange={(e) => set({ similarityThreshold: Number(e.target.value) })} /></div>
+          <div className="row"><label /><button className="btn" onClick={async () => { await save(); await api.rebuild(); app.bump(); app.toast('已重新计算标签、分组与黑白底对应关系'); }}>重新计算标签 / 分组 / 黑白底对应</button></div>
+        </section>
+        </>}
+        {tab === 'ui' && <>
+        <section>
           <h3>界面主题</h3>
           <div className="seg">
             {[['dark', '🌙 黑色'], ['light', '☀️ 白色'], ['system', '🖥 跟随系统']].map(([k, v]) => <button key={k} className={(cfg.uiTheme || 'system') === k ? 'on' : ''} onClick={() => { set({ uiTheme: k }); app.setTheme(k); }}>{v}</button>)}
@@ -91,6 +131,69 @@ export default function SettingsView({ focus }) {
           </div>
           <p className="muted small">在关闭提示框中勾选“记住我的选择”会自动设置这里；改完点击右上角“保存设置”生效。</p>
         </section>
+        </>}
+        {tab === 'mail' && <>
+        <section ref={mailRef} className={focus === 'mail' ? 'flash-sec' : ''}>
+          <h3>💬 反馈邮件发送设置</h3>
+          <p className="muted">左下角“💬 意见反馈”会通过这里配置的发件邮箱在后台发送给开发者。应用不内置任何邮箱账号；未配置或发送失败时反馈先保存在本机，配置好后自动补发{fbSt && fbSt.queued ? `（当前待发送 ${fbSt.queued} 条）` : ''}。密码一般填写邮箱的“授权码 / 客户端专用密码”。</p>
+          <div className="row"><label>SMTP 服务器</label><input className="input" value={mail.host || ''} placeholder="如 smtp.qq.com / smtp.163.com / smtp.office365.com" onChange={(e) => setM({ host: e.target.value.trim() })} />
+            <label className="short">端口</label><input className="input num" type="number" value={mail.port || ''} onChange={(e) => setM({ port: Number(e.target.value) })} />
+            <div className="seg small"><button className={mail.secure !== false ? 'on' : ''} onClick={() => setM({ secure: true, port: mail.port === 587 ? 465 : mail.port || 465 })}>SSL（465）</button><button className={mail.secure === false ? 'on' : ''} onClick={() => setM({ secure: false, port: mail.port === 465 ? 587 : mail.port || 587 })}>STARTTLS（587）</button></div></div>
+          <div className="row"><label>账号</label><input className="input" value={mail.user || ''} placeholder="登录邮箱的账号" onChange={(e) => setM({ user: e.target.value.trim(), from: mail.from || '' })} />
+            <label className="short">密码</label><input className="input" type="password" value={mail.pass || ''} placeholder="授权码" onChange={(e) => setM({ pass: e.target.value })} /></div>
+          <div className="row"><label>发件地址</label><input className="input" value={mail.from || ''} placeholder="默认与账号相同" onChange={(e) => setM({ from: e.target.value.trim() })} />
+            <button className="btn primary" onClick={async () => { await saveNow({ mail: { ...mail, from: mail.from || mail.user } }, '发件邮箱已保存（待发送的反馈会自动补发）'); setFbSt(await api.feedbackStatus()); }}>保存发件邮箱</button>
+            <button className="btn" disabled={mailBusy || !mail.host} onClick={async () => { setMailBusy(true); try { await api.testMail({ ...mail, from: mail.from || mail.user }); app.toast('测试邮件已发送到发件邮箱，请查收'); } catch (e) { app.toast('测试失败：' + e.message, 'error'); } finally { setMailBusy(false); } }}>{mailBusy ? '发送中…' : '发送测试邮件'}</button></div>
+        </section>
+        </>}
+        {tab === 'ai' && <>
+          {offline && <div className="notice offline-notice">🔒 当前为<b>单机版</b>：应用不联网，大模型与语义向量接口暂不可用，本页设置已锁定。解析、检索（本地 RAG）、黑白底互转、智能生成等全部在本机完成。</div>}
+          <fieldset className="settings-lock" disabled={offline}>
+        <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
+          <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>
+          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未配置时，讲解词生成（建设中）与翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
+          <div className="row"><label>服务商</label>
+            <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>
+          </div>
+          <div className="row"><label>启用</label><input type="checkbox" checked={cfg.llm.enabled} onChange={(e) => setL({ enabled: e.target.checked })} /></div>
+          <div className="row"><label>接口地址</label><input className="input wide" value={cfg.llm.baseUrl} onChange={(e) => setL({ baseUrl: e.target.value })} /></div>
+          <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.llm.apiKey} placeholder="在服务商控制台创建的 API Key（本地 Ollama 可留空）" onChange={(e) => setL({ apiKey: e.target.value })} /></div>
+          <div className="row"><label>模型</label><input className="input" value={cfg.llm.model} onChange={(e) => setL({ model: e.target.value })} />
+            <button className="btn" onClick={async () => { try { const r = await api.testLlm(cfg.llm); app.toast(`连接成功（${r.ms}ms）：${r.reply}`); } catch (e) { app.toast('连接失败：' + e.message, 'error'); } }}>测试连接</button></div>
+          <div className="row"><label>用于查询解析</label><input type="checkbox" checked={cfg.llm.useForQuery} onChange={(e) => setL({ useForQuery: e.target.checked })} /></div>
+          <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析 / 重算标签时调用，每个文件一次）</span></div>
+          <h4>讲解词翻译</h4>
+          <p className="muted small">译文只保存在应用知识库，不会改动原文件；需要时在讲解词模块手动点击“写入 PPT 备注”（确认后先备份再写入）。</p>
+          <div className="row"><label>常用小语种</label>
+            <div className="row wrap" style={{ margin: 0 }}>{Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').map(([k, v]) => {
+              const on = (cfg.minorLangs || []).includes(k);
+              return <label key={k} className={`type-chip small ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => set({ minorLangs: on ? cfg.minorLangs.filter((x) => x !== k) : [...(cfg.minorLangs || []), k] })} />{v}</label>;
+            })}</div>
+          </div>
+          <p className="muted small">修改后点击右上角“保存设置”生效。</p>
+        </section>
+        <section>
+          <h3>语义向量（可选，增强 RAG 召回）</h3>
+          <p className="muted">内置“中英概念哈希向量”离线可用；如需更强的语义召回，可接入 Ollama（推荐 bge-m3，多语言）或 OpenAI 兼容的 embeddings 接口。</p>
+          <div className="row"><label>提供方</label>
+            <select className="input" value={cfg.embedding.provider} onChange={(e) => setE({ provider: e.target.value })}>
+              <option value="none">仅内置（离线）</option><option value="ollama">Ollama</option><option value="openai">OpenAI 兼容</option>
+            </select>
+          </div>
+          {cfg.embedding.provider !== 'none' && <>
+            <div className="row"><label>Base URL</label><input className="input wide" value={cfg.embedding.baseUrl} onChange={(e) => setE({ baseUrl: e.target.value })} /></div>
+            <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.embedding.apiKey} onChange={(e) => setE({ apiKey: e.target.value })} /></div>
+            <div className="row"><label>模型</label><input className="input" value={cfg.embedding.model} onChange={(e) => setE({ model: e.target.value })} /></div>
+            <div className="row"><label /><button className="btn" onClick={async () => {
+              await save();
+              const off = window.ppta.on('embedding', setEmbProg);
+              try { const n = await api.buildEmbeddings(false); app.toast(`语义向量生成完成：${n} 页`); } catch (e) { app.toast('生成失败：' + e.message, 'error'); } finally { off(); }
+            }}>为已解析页面生成语义向量</button>{embProg && <span className="muted">{embProg.done}/{embProg.total}</span>}</div>
+          </>}
+        </section>
+          </fieldset>
+        </>}
+        {tab === 'data' && <>
         <section>
           <h3>数据保存目录（解析结果 · 数据库 · 本地 RAG 索引）</h3>
           <p className="muted">解析出的页面、Markdown、标签、全文索引与向量都保存在本地 SQLite 数据库中，检索完全在本机进行（本地 RAG）。可把数据目录放到空间更大的磁盘。切换后程序会自动重启。</p>
@@ -129,85 +232,11 @@ export default function SettingsView({ focus }) {
           )}
         </section>
         <section>
-          <h3>页面截图（PPT 原始页预览）</h3>
-          <p className="muted">优先使用 PowerPoint 导出每页截图（保真度最高），其次 LibreOffice；均不可用时使用内置版式渲染。截图也会用于更准确地判断黑底/白底。</p>
-          <div className="row"><label>截图引擎</label>
-            <select className="input" value={cfg.thumbnails} onChange={(e) => set({ thumbnails: e.target.value })}>
-              <option value="auto">自动（PowerPoint → LibreOffice）</option><option value="powerpoint">仅 PowerPoint</option><option value="libreoffice">仅 LibreOffice</option><option value="off">关闭（只用内置渲染，速度最快）</option>
-            </select>
-          </div>
-          <div className="row"><label>截图宽度</label><input className="input" type="number" value={cfg.thumbWidth} onChange={(e) => set({ thumbWidth: Number(e.target.value) || 1280 })} /></div>
-          {eng && <div className="engines">
-            <span className={`tag ${eng.powerpoint ? 'ok' : ''}`}>PowerPoint：{eng.powerpoint ? '可用' : '未检测到'}</span>
-            <span className={`tag ${eng.soffice ? 'ok' : ''}`}>LibreOffice：{eng.soffice || '未检测到'}</span>
-            <span className={`tag ${eng.ffmpeg ? 'ok' : ''}`}>ffmpeg（仅提取字幕流）：{eng.ffmpeg || '未检测到'}</span>
-            <button className="btn tiny" onClick={() => api.engines(true).then(setEng)}>重新检测</button>
-          </div>}
-        </section>
-        <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
-          <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>
-          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未配置时，讲解词生成（建设中）与翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
-          <div className="row"><label>服务商</label>
-            <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>
-          </div>
-          <div className="row"><label>启用</label><input type="checkbox" checked={cfg.llm.enabled} onChange={(e) => setL({ enabled: e.target.checked })} /></div>
-          <div className="row"><label>接口地址</label><input className="input wide" value={cfg.llm.baseUrl} onChange={(e) => setL({ baseUrl: e.target.value })} /></div>
-          <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.llm.apiKey} placeholder="在服务商控制台创建的 API Key（本地 Ollama 可留空）" onChange={(e) => setL({ apiKey: e.target.value })} /></div>
-          <div className="row"><label>模型</label><input className="input" value={cfg.llm.model} onChange={(e) => setL({ model: e.target.value })} />
-            <button className="btn" onClick={async () => { try { const r = await api.testLlm(cfg.llm); app.toast(`连接成功（${r.ms}ms）：${r.reply}`); } catch (e) { app.toast('连接失败：' + e.message, 'error'); } }}>测试连接</button></div>
-          <div className="row"><label>用于查询解析</label><input type="checkbox" checked={cfg.llm.useForQuery} onChange={(e) => setL({ useForQuery: e.target.checked })} /></div>
-          <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析 / 重算标签时调用，每个文件一次）</span></div>
-          <h4>讲解词翻译</h4>
-          <p className="muted small">译文只保存在应用知识库，不会改动原文件；需要时在讲解词模块手动点击“写入 PPT 备注”（确认后先备份再写入）。</p>
-          <div className="row"><label>常用小语种</label>
-            <div className="row wrap" style={{ margin: 0 }}>{Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').map(([k, v]) => {
-              const on = (cfg.minorLangs || []).includes(k);
-              return <label key={k} className={`type-chip small ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => set({ minorLangs: on ? cfg.minorLangs.filter((x) => x !== k) : [...(cfg.minorLangs || []), k] })} />{v}</label>;
-            })}</div>
-          </div>
-          <p className="muted small">修改后点击右上角“保存设置”生效。</p>
-        </section>
-        <section ref={mailRef} className={focus === 'mail' ? 'flash-sec' : ''}>
-          <h3>💬 反馈邮件发送设置</h3>
-          <p className="muted">左下角“💬 意见反馈”会通过这里配置的发件邮箱在后台发送给开发者。应用不内置任何邮箱账号；未配置或发送失败时反馈先保存在本机，配置好后自动补发{fbSt && fbSt.queued ? `（当前待发送 ${fbSt.queued} 条）` : ''}。密码一般填写邮箱的“授权码 / 客户端专用密码”。</p>
-          <div className="row"><label>SMTP 服务器</label><input className="input" value={mail.host || ''} placeholder="如 smtp.qq.com / smtp.163.com / smtp.office365.com" onChange={(e) => setM({ host: e.target.value.trim() })} />
-            <label className="short">端口</label><input className="input num" type="number" value={mail.port || ''} onChange={(e) => setM({ port: Number(e.target.value) })} />
-            <div className="seg small"><button className={mail.secure !== false ? 'on' : ''} onClick={() => setM({ secure: true, port: mail.port === 587 ? 465 : mail.port || 465 })}>SSL（465）</button><button className={mail.secure === false ? 'on' : ''} onClick={() => setM({ secure: false, port: mail.port === 465 ? 587 : mail.port || 587 })}>STARTTLS（587）</button></div></div>
-          <div className="row"><label>账号</label><input className="input" value={mail.user || ''} placeholder="登录邮箱的账号" onChange={(e) => setM({ user: e.target.value.trim(), from: mail.from || '' })} />
-            <label className="short">密码</label><input className="input" type="password" value={mail.pass || ''} placeholder="授权码" onChange={(e) => setM({ pass: e.target.value })} /></div>
-          <div className="row"><label>发件地址</label><input className="input" value={mail.from || ''} placeholder="默认与账号相同" onChange={(e) => setM({ from: e.target.value.trim() })} />
-            <button className="btn primary" onClick={async () => { await saveNow({ mail: { ...mail, from: mail.from || mail.user } }, '发件邮箱已保存（待发送的反馈会自动补发）'); setFbSt(await api.feedbackStatus()); }}>保存发件邮箱</button>
-            <button className="btn" disabled={mailBusy || !mail.host} onClick={async () => { setMailBusy(true); try { await api.testMail({ ...mail, from: mail.from || mail.user }); app.toast('测试邮件已发送到发件邮箱，请查收'); } catch (e) { app.toast('测试失败：' + e.message, 'error'); } finally { setMailBusy(false); } }}>{mailBusy ? '发送中…' : '发送测试邮件'}</button></div>
-        </section>
-        <section>
-          <h3>语义向量（可选，增强 RAG 召回）</h3>
-          <p className="muted">内置“中英概念哈希向量”离线可用；如需更强的语义召回，可接入 Ollama（推荐 bge-m3，多语言）或 OpenAI 兼容的 embeddings 接口。</p>
-          <div className="row"><label>提供方</label>
-            <select className="input" value={cfg.embedding.provider} onChange={(e) => setE({ provider: e.target.value })}>
-              <option value="none">仅内置（离线）</option><option value="ollama">Ollama</option><option value="openai">OpenAI 兼容</option>
-            </select>
-          </div>
-          {cfg.embedding.provider !== 'none' && <>
-            <div className="row"><label>Base URL</label><input className="input wide" value={cfg.embedding.baseUrl} onChange={(e) => setE({ baseUrl: e.target.value })} /></div>
-            <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.embedding.apiKey} onChange={(e) => setE({ apiKey: e.target.value })} /></div>
-            <div className="row"><label>模型</label><input className="input" value={cfg.embedding.model} onChange={(e) => setE({ model: e.target.value })} /></div>
-            <div className="row"><label /><button className="btn" onClick={async () => {
-              await save();
-              const off = window.ppta.on('embedding', setEmbProg);
-              try { const n = await api.buildEmbeddings(false); app.toast(`语义向量生成完成：${n} 页`); } catch (e) { app.toast('生成失败：' + e.message, 'error'); } finally { off(); }
-            }}>为已解析页面生成语义向量</button>{embProg && <span className="muted">{embProg.done}/{embProg.total}</span>}</div>
-          </>}
-        </section>
-        <section>
-          <h3>相似分组与维护</h3>
-          <div className="row"><label>内容相似阈值</label><input className="input" type="number" step="0.01" min="0.5" max="0.99" value={cfg.similarityThreshold} onChange={(e) => set({ similarityThreshold: Number(e.target.value) })} /></div>
-          <div className="row"><label /><button className="btn" onClick={async () => { await save(); await api.rebuild(); app.bump(); app.toast('已重新计算标签、分组与黑白底对应关系'); }}>重新计算标签 / 分组 / 黑白底对应</button></div>
-        </section>
-        <section>
           <h3>数据</h3>
           {stats && <p>数据目录：<code>{stats.dataDir}</code>（数据库、Markdown、截图缓存、唯一的运行日志 ppt-agent.log）<br />已解析 {stats.files} 个文件、{stats.slides} 页；重复 {stats.duplicates}；失败 {stats.failed}；任务 {stats.tasks} 个。</p>}
           <button className="btn" onClick={() => api.openDataDir()}>打开数据目录</button>
         </section>
+        </>}
       </div>
     </div>
   );

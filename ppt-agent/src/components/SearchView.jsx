@@ -35,7 +35,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const [fileFilter, setFileFilter] = useState(null);
   const [cmpSel, setCmpSel] = useState(() => new Set());
   const inputRef = useRef(null);
-  const llmOn = app.config && app.config.llm && app.config.llm.enabled;
+  const llmOn = app.config && !app.config.offlineOnly && app.config.llm && app.config.llm.enabled;
   const [stats, setStats] = useState(null);
   // 检索范围：在已经执行过的任务中多选；不选 = 所有资料库（选择会记住）
   const ran = app.tasks.filter((t) => t.status !== 'draft' && (t.status === 'done' || (t.parsed || 0) + (t.skipped || 0) + (t.duplicate || 0) > 0));
@@ -43,6 +43,11 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const scopeIds = scopeIdsRaw.filter((id) => ran.some((t) => t.id === id));
   const setScopeIds = (ids) => { setScopeIdsRaw(ids); try { localStorage.setItem('ppta.searchScope', JSON.stringify(ids)); } catch { /* ignore */ } };
   const scopeKey = scopeIds.join(',');
+  // 推荐词：根据已导入文档的标签生成（随检索范围、资料库变化刷新），不再使用固定的预置示例
+  const [suggest, setSuggest] = useState([]);
+  useEffect(() => { api.searchSuggestions({ taskIds: scopeIds, limit: 12 }).then(setSuggest).catch(() => setSuggest([])); }, [scopeKey, app.taskTick]);
+  const tagQuery = (t) => String(t).replace(/\//g, ' ').trim();
+  const placeholder = suggest.length ? `输入关键词或一句描述，例如：${suggest.slice(0, 2).map((x) => tagQuery(x.tag)).join(' / ')}` : '输入关键词或一句描述';
   useEffect(() => {
     if (!scopeIds.length) { api.stats().then(setStats).catch(() => {}); return; }
     Promise.all(scopeIds.map((id) => api.library({ taskId: id }).catch(() => []))).then((ls) => {
@@ -133,20 +138,20 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             <div className="sl-sub">在本机的 PPT、Word 与 PDF 中按文件名、标签与内容检索，中英文混合均可</div>
           </div>
           <div className="sl-box">
-            <input ref={inputRef} className="input sl-input" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
+            <input ref={inputRef} className="input sl-input" placeholder={placeholder} value={input}
               onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
             <button className="btn primary sl-btn" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '搜索'}</button>
           </div>
           <div className="row center sl-actions">{scopeSeg}<button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>{tasksBtn}</div>
           {recent.length > 0 && <div className="chips sl-recent"><span className="muted small">最近搜索：</span>{recent.map((h) => <span key={h.id} className="chip link" title={`${fmtTime(h.at)} · 文件 ${h.files}`} onClick={() => viewHistory(h.id)}>🕘 {h.q}</span>)}</div>}
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
-          <div className="chips sl-chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
+          {suggest.length > 0 && <div className="chips sl-chips">{suggest.map((x) => <span key={x.tag} className="chip link" title={`${x.files} 个文档带有该标签`} onClick={() => { const q = tagQuery(x.tag); setInput(q); run(q); }}>{x.tag}</span>)}</div>}
           {stats && <div className="sl-stats"><span><b>{stats.files}</b> 个文档</span><span><b>{stats.slides}</b> 页 / 节</span><span>本地 RAG · 不上传数据</span></div>}
           <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word / PDF 分开推荐页面</div>
         </div>
       ) : (
         <div className="search-bar">
-          <input ref={inputRef} className="input big" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
+          <input ref={inputRef} className="input big" placeholder={placeholder} value={input}
             onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
           <button className="btn primary big" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '🔍 智能搜索'}</button>
           <button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>

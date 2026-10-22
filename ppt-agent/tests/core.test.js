@@ -180,6 +180,30 @@ test('PDF：逐页提取文字与标题、黑底识别；服务解析入库并�
   svc.store.close && svc.store.close();
 });
 
+test('单机版：不创建大模型 / 语义向量客户端；搜索推荐词来自文档标签', async () => {
+  const llm = require('../electron/core/llm');
+  const { embedder } = require('../electron/core/vectors');
+  assert.strictEqual(llm.client({ enabled: true, model: 'x', baseUrl: 'http://127.0.0.1:9' }), null, '单机版不应创建大模型客户端');
+  assert.strictEqual(embedder({ provider: 'ollama', model: 'bge-m3' }), null, '单机版不应创建语义向量客户端');
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'data-sugg'));
+  svc.setConfig({ thumbnails: 'off', llm: { enabled: true, model: 'x' } });
+  assert.strictEqual(svc.getConfig().offlineOnly, true);
+  await assert.rejects(svc.testLlm({ enabled: true, model: 'x' }), /单机版/);
+  const lib = path.join(tmp, 'lib-sugg');
+  fs.cpSync(P('机场运营'), lib, { recursive: true });
+  const id = svc.addTask(lib);
+  const done = new Promise((res) => svc.on('task', (t) => { if (t.id === id && ['done', 'failed'].includes(t.status)) res(t); }));
+  svc.startTask(id);
+  await done;
+  const sg = svc.searchSuggestions({ limit: 10 });
+  assert.ok(sg.length >= 3, '应根据文档标签生成推荐词');
+  assert.ok(sg.every((x) => !/^(白底|黑底|黑白混合|含视频|含表格|含图表|中文|英文|中英双语)$|页/.test(x.tag)), '不含底色 / 页数 / 语言等属性标签: ' + sg.map((x) => x.tag).join(','));
+  for (let i = 1; i < sg.length; i++) assert.ok(sg[i - 1].files >= sg[i].files, '按覆盖文档数排序');
+  assert.deepStrictEqual(svc.searchSuggestions({ taskIds: [999] }), []);
+  svc.store.close();
+});
+
 test('Markdown 只保留文字，不含图片', async () => {
   const { parsePptx } = require('../electron/core/pptx');
   const { slideToMd } = require('../electron/core/markdown');
@@ -285,7 +309,7 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   // 讲解词编辑；Agent 生成未配置接口时提示去设置（不再使用内置模板）
   const any = svc.library().find((x) => x.status === 'parsed' && x.slide_count > 2);
   const sl = svc.store.slidesOf(any.id)[1];
-  await assert.rejects(svc.generateNotes(sl.id), /未配置 Agent 接口/);
+  await assert.rejects(svc.generateNotes(sl.id), /单机版（不联网）/);
   const e = svc.updateSlideText(sl.id, { notes: '唯一测试讲解词XYZ' });
   assert.strictEqual(e.notes, '唯一测试讲解词XYZ');
   const r = await svc.searchQuery('唯一测试讲解词XYZ');
@@ -410,8 +434,8 @@ test('讲解词译文：保存到知识库、写回 PPT 备注（同语言再次
   await new Promise((res) => { svc.on('task', (t) => { if (t.id === id && t.status === 'done' && t.finished_at) res(); }); svc.startTask(id); });
   const f = svc.library()[0];
   const s = svc.store.slidesOf(f.id).find((x) => x.notes);
-  // 未配置 Agent 接口时给出明确提示
-  await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /未配置 Agent 接口/);
+  // 单机版不联网：调用大模型的功能给出明确提示
+  await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /单机版（不联网）/);
   // 中文讲解词切到中文直接返回原文
   assert.strictEqual((await svc.translateNotes(s.id, { lang: 'zh' })).same, true);
   svc.store.kbPut({ path: f.path, idx: s.idx, variant: 'final', lang: 'en', text: 'Line one.\nLine two & more.', source: 'test' });

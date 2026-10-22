@@ -20,7 +20,7 @@ export default function FeedbackDialog({ onClose }) {
     try {
       const r = await api.sendFeedback({ type, text, contact, withEnv, withLog });
       if (r.sent) app.toast('反馈已发送，感谢你的意见！', 'info', { cat: '反馈' });
-      else if (r.reason === 'unconfigured') app.toast('反馈已保存。在“设置 → 反馈邮件发送设置”中配置发件邮箱后会自动发送', 'info', { label: '去设置', link: { type: 'view', view: { type: 'settings', focus: 'mail' } }, cat: '反馈' });
+      else if (r.reason === 'unconfigured') app.toast('反馈已保存。在“设置 → 反馈邮件”中配置发件邮箱后会自动发送', 'info', { label: '去设置', link: { type: 'view', view: { type: 'settings', focus: 'mail' } }, cat: '反馈' });
       else app.toast(`反馈暂未发出（${r.error || '网络或邮箱错误'}），已保存在本机，稍后自动重试`, 'error', { label: '检查设置', link: { type: 'view', view: { type: 'settings', focus: 'mail' } }, cat: '反馈' });
       onClose();
     } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(false); }
@@ -35,7 +35,7 @@ export default function FeedbackDialog({ onClose }) {
           <input className="input" placeholder="联系方式（选填：邮箱 / 电话，便于回复你）" value={contact} onChange={(e) => setContact(e.target.value)} />
           <label className="chk"><input type="checkbox" checked={withEnv} onChange={(e) => setWithEnv(e.target.checked)} /> 附带运行环境（版本、系统、资料库规模）</label>
           <label className="chk"><input type="checkbox" checked={withLog} onChange={(e) => setWithLog(e.target.checked)} /> 附带最近 200 行运行日志</label>
-          {st && !st.configured && <div className="notice small">尚未配置发件邮箱：反馈会先保存在本机，在“设置 → 反馈邮件发送设置”配置后自动发送{st.queued ? `（当前待发送 ${st.queued} 条）` : ''}。</div>}
+          {st && !st.configured && <div className="notice small">尚未配置发件邮箱：反馈会先保存在本机，在“设置 → 反馈邮件”配置后自动发送{st.queued ? `（当前待发送 ${st.queued} 条）` : ''}。</div>}
         </div>
         <div className="detail-head"><div className="spacer" /><button className="btn" onClick={onClose}>取消</button><button className="btn primary" disabled={busy || !text.trim()} onClick={send}>{busy ? '发送中…' : '发送反馈'}</button></div>
       </div>

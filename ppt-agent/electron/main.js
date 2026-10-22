@@ -273,6 +273,7 @@ app.whenReady().then(async () => {
     cancelTask: (id) => service.cancelTask(id),
     deleteTask: (id, removeFiles) => service.deleteTask(id, removeFiles),
     deleteTasks: (ids, removeFiles) => service.deleteTasks(ids, removeFiles),
+    searchSuggestions: (opts) => service.searchSuggestions(opts),
     taskDetail: (id) => service.taskDetail(id),
     library: (opts) => service.library(opts),
     fileDetail: (id) => service.fileDetail(id),

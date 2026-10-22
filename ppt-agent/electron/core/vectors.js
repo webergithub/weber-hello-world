@@ -58,6 +58,7 @@ async function postJson(url, body, headers = {}, timeoutMs = 60000) {
 
 /** 语义向量提供方。cfg: {provider:'none'|'ollama'|'openai', baseUrl, apiKey, model} */
 function embedder(cfg) {
+  if (require('./offline').OFFLINE_ONLY) return null; // 单机版不联网：只用内置向量
   if (!cfg || !cfg.provider || cfg.provider === 'none' || !cfg.model) return null;
   const base = (cfg.baseUrl || (cfg.provider === 'ollama' ? 'http://127.0.0.1:11434' : 'https://api.openai.com/v1')).replace(/\/+$/, '');
   return {

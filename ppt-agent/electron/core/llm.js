@@ -1,8 +1,10 @@
 'use strict';
 // 可选的大模型（OpenAI 兼容接口：OpenAI / DeepSeek / 通义千问 / Kimi / Ollama 等）——用于查询中英解析、打标签与 RAG 回答。
 const { postJson } = require('./vectors');
+const { OFFLINE_ONLY } = require('./offline');
 
 function client(cfg) {
+  if (OFFLINE_ONLY) return null; // 单机版不联网
   if (!cfg || !cfg.enabled || !cfg.model) return null;
   const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
   async function chat(messages, { temperature = 0.2, maxTokens = 1200, timeoutMs = 90000 } = {}) {
