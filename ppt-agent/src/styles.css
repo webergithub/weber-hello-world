@@ -1323,3 +1323,6 @@ table.grid tbody tr:hover td { background: var(--hover2); }
 /* 空状态：图标 + 说明，更易识别 */
 .empty-tip { line-height: 1.7; }
 .tab-body > .empty-tip::before, .view > .empty-tip::before, .basket-list + .empty-tip::before, .tab-body.scroll > .empty-tip::before { content: '🗂'; display: block; font-size: 26px; opacity: .55; margin-bottom: 6px; }
+/* 搜索栏：宽度不够时（如展开了搜索任务面板）按钮换行，不被裁掉 */
+.search-bar { flex-wrap: wrap; row-gap: 6px; }
+.search-bar > .input.big { flex: 1 1 280px; min-width: 220px; }

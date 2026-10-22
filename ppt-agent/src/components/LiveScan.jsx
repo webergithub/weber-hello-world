@@ -64,7 +64,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
     const next = scans[cursor + 1];
     if (!next) return undefined;
     const backlog = scans.length - 1 - cursor;
-    const minShow = backlog > 40 ? 120 : backlog > 20 ? 220 : backlog > 8 ? 380 : MIN_SHOW_MS;
+    const minShow = backlog > 40 ? 180 : backlog > 20 ? 260 : backlog > 8 ? 400 : MIN_SHOW_MS;
     const wait = Math.max(0, minShow - (Date.now() - shownAt.current));
     const timer = setTimeout(() => { shownAt.current = Date.now(); setShowSeq(next.seq); }, wait);
     return () => clearTimeout(timer);
