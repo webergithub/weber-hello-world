@@ -85,7 +85,7 @@ export function StatCards({ cards, onDrill }) {
   return (
     <div className="cards">{cards.map(([k, v, pick, show]) => (
       <div key={k} className={`card ${pick ? 'drill' : ''}`} title={pick ? '点击查看清单' : undefined} onClick={pick ? () => onDrill(k, pick, show) : undefined}>
-        <div className="card-v">{v}</div><div className="card-k">{k}</div>
+        <div className="card-v">{typeof v === 'string' && /^[\d.]+\s(B|KB|MB|GB)$/.test(v) ? <>{v.split(' ')[0]}<small className="cv-unit">{v.split(' ')[1]}</small></> : v}</div><div className="card-k">{k}</div>
       </div>
     ))}</div>
   );

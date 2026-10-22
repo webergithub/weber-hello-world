@@ -136,9 +136,8 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             <input ref={inputRef} className="input sl-input" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
               onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
             <button className="btn primary sl-btn" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '搜索'}</button>
-            <button className="btn sl-btn2" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>
           </div>
-          <div className="row center">{scopeSeg}{tasksBtn}</div>
+          <div className="row center sl-actions">{scopeSeg}<button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>{tasksBtn}</div>
           {recent.length > 0 && <div className="chips sl-recent"><span className="muted small">最近搜索：</span>{recent.map((h) => <span key={h.id} className="chip link" title={`${fmtTime(h.at)} · 文件 ${h.files}`} onClick={() => viewHistory(h.id)}>🕘 {h.q}</span>)}</div>}
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
           <div className="chips sl-chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
@@ -191,13 +190,13 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             </div>
             <div className="sr-slides">
               <div className="tabs">
-                <button className={tab === 'light' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'light' })}>⬜ 白底页面（{counts.light}）</button>
-                <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底页面（{counts.dark}）</button>
-                <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word 文档（{counts.word}）</button>
+                <button className={tab === 'light' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'light' })}>⬜ 白底（{counts.light}）</button>
+                <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底（{counts.dark}）</button>
+                <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word（{counts.word}）</button>
                 <button className={tab === 'viewer' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'viewer' })}>⛶ 逐页浏览</button>
                 <div className="spacer" />
                 <span className="badge">已选 {sel.size}</span>
-                <button className="btn small" onClick={() => setSel(new Set([...sel, ...slidesFiltered.map((s) => s.id)]))}>全选本页签</button>
+                <button className="btn small" onClick={() => setSel(new Set([...sel, ...slidesFiltered.map((s) => s.id)]))}>全选</button>
                 <button className="btn small" disabled={!sel.size} onClick={() => { app.basket.add([...sel]); setSel(new Set()); }}>＋ 加入导出篮</button>
                 <button className="btn small primary" disabled={!sel.size} onClick={() => app.exportSlides([...sel], 'pptx')}>⇩ 导出为新 PPT</button>
                 {selFiles.length >= 2 && <button className="btn small" disabled={selFiles.length > 4} title="所选页面来自 2–4 个文件时，可并排对比这些文件（从所选页开始）" onClick={() => app.openCompare(selFiles, Object.fromEntries(selFiles.map((f) => [f, allHits.find((h) => h.file_id === f && sel.has(h.id)).id])))}>⧉ 对比所选页所在文件（{selFiles.length}）</button>}

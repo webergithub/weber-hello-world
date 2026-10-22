@@ -31,6 +31,12 @@ Each table must support:
 
 ## 2. Layout and visual quality
 
+- **One design system, tokens only**: neutral cool-gray surfaces (canvas / panel / subtle fill / hover) plus a single brand accent; semantic colors for ok / warn / danger; module colors only as accents (icon chips, section rules, active state), never as large tinted backgrounds. Define light and dark sets for every token; components never hard-code colors.
+- Consistent elevation (small / medium / large shadows), radii (8 controls, 12 cards, 14 modals), control heights (40 / 32 / 28 / 24) and type (page title 17px semibold, body 13px).
+- Primary action = solid brand button (one per area), secondary = white outlined, tertiary = ghost; segmented controls look like pills on a subtle track; tabs are underlined; tables have a tinted header, row hover, selected and "last viewed" states.
+- Floating controls (zoom bars, toolbars over content) appear on hover and never cover content permanently; stat cards keep value and unit on one line (unit smaller).
+- Review every page in both themes from screenshots before shipping a visual change.
+
 - **Search pages**: before searching, put the search box in the centre of the page (horizontally and vertically), large and rounded, with a title, example chips and a short stats line. After searching, move it to a compact top bar with a clear button.
 - **Every statistic drills down**: anywhere a count is shown (stat cards, "N 条 · 新增 x" counts, per-item counters on cards, category / extension chips, progress "n / total"), clicking it opens the list of the underlying items in one shared drill-down dialog (sortable / filterable table, the counted column shown first and sorted, open / reveal / compare actions). Counts inside a list's own toolbar may filter that list in place instead.
 - **Dashboards and analytics**: every number tile and every bar / column is clickable and **drills down to the underlying item list**, shown as a closable tab with a "← 返回". Charts: one axis, thin bars, value labels, hover tooltips. Let the user set the refresh frequency (每次打开 / 每天 / 每周 / 仅手动); show the "统计时间" and next refresh time.

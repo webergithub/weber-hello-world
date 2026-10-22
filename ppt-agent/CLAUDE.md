@@ -46,6 +46,8 @@
 - 智能搜索：后端返回全部命中页（不截断），文件的“命中 N 页”= 该文件在结果中的页数；选中文件时页签数字只统计该文件，再次单击取消；结果过多时前端分批显示。
 - 浏览窗口从搜索结果打开时传 `results`（结果页顺序），左右键只在搜索结果之间翻页；点击相关推荐后必须显示醒目的“↩ 返回原来的页面”。
 - 每个页面（含逐页浏览 / 对比窗口）左下角固定有“?”帮助图标，不放在标题栏、不挤占关闭等按钮；侧栏标题旁的“❓ 帮助”按钮保持原位（`src/components/PageHelp.jsx` 的 `PAGES`），新增页面或功能时同步补充该页的操作指导；不要在界面上常驻快捷键提示条。
+- 3.0 设计系统在 `src/styles.css` 末尾“v3.0 设计系统”段：颜色只用变量（`--bg/--bg2/--bg3/--bg4/--line/--fg*/--accent*/--ok/--warn/--danger`、模块色 `--m-detail/--m-over/--m-smart/--m-maint`、阴影 `--sh-sm/md/lg`、圆角 `--radius/--radius-lg`），浅色 / 深色两套都要定义；新组件不要写死颜色，主操作用 `.btn.primary`，次要用 `.btn`，弱操作用 `.btn.ghost`。
+- 黑白底互转“按文件 / 文件夹”：`listPptx` 递归列出 PPT，`convertFile(src, { direction, outMode: 'suffix'|'dir', outDir })` 只读原文件、另存（同名加序号），记入 `convert_history`。
 - 通用 UI / 列表规范见仓库根目录 `.claude/skills/desktop-app-ui-conventions/SKILL.md`。
 - 文档删除一律先进回收站（可还原），彻底删除需二次确认，且只删除移入回收站的那份文件。
 - 任务状态颜色：解析中浅蓝底黑字、已完成绿色、待解析浅橙底。
