@@ -4,7 +4,8 @@ import { useApp } from '../ctx';
 import SlidePreview from './SlidePreview';
 import { loadFile } from './SlideViewer';
 import { loadSlide } from './SlideWorkspace';
-import { useKeymap, comboOf, isTyping, viewerHint, keysLabel } from '../keymap';
+import { useKeymap, comboOf, isTyping, keysLabel } from '../keymap';
+import PageHelp from './PageHelp';
 
 export const COMPARE_MAX = 4;
 const NUM = ['①', '②', '③', '④'];
@@ -194,9 +195,9 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
         <button className={`btn small ${strip ? 'primary' : ''}`} onClick={() => toggle(setStrip, 'ppta.cmpStrip')}>缩略条</button>
         <button className="btn small" onClick={() => toggle(setMaxed, 'ppta.cmpMax')} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原' : '⛶ 最大化'}</button>
         <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
+        <PageHelp page="compare" onBeforeNav={onClose} />
         <button className="icon-btn" onClick={onClose} title={keysLabel(keys.map, 'close')}>✕</button>
       </div>
-      <div className="viewer-keys muted small">{viewerHint(keys.map, { compare: true })}　<span className="link" onClick={() => { onClose(); app.go({ type: 'settings', focus: 'keys' }); }}>⌨ 自定义快捷键</span></div>
       <div className={`cmp-panes n${n} ${grid ? 'grid' : 'cols'}`}>
         {ids.map((id, i) => {
           const d = details[i];

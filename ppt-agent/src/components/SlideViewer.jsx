@@ -7,8 +7,9 @@ import { PanelLayout, useStoredLayout, DEFAULT_LAYOUT, NotesBody, MdBody, onSlid
 const esc = (t) => String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 import SlidePreview from './SlidePreview';
 import { loadSlide } from './SlideWorkspace';
-import { useKeymap, comboOf, isTyping, viewerHint, keysLabel } from '../keymap';
+import { useKeymap, comboOf, isTyping, keysLabel } from '../keymap';
 import RelatedRail from './RelatedRail';
+import PageHelp from './PageHelp';
 
 const fileCache = new Map();
 export function loadFile(id) {
@@ -199,9 +200,9 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         <button className="btn small" onClick={() => setPanes(!panes)} title={keysLabel(keys.map, 'panes')}>{panes ? '隐藏讲解词/MD' : '显示讲解词/MD'}</button>
         <button className="btn small" onClick={toggleMax} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原窗口' : '⛶ 最大化'}</button>
         <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
+        <PageHelp page="viewer" onBeforeNav={onClose} />
         {onClose && <button className="icon-btn" onClick={onClose}>✕</button>}
       </div>
-      <div className="viewer-keys muted small" title="可在“设置 → 快捷键”中自定义">{viewerHint(keys.map)}　<span className="link" onClick={() => { if (onClose) onClose(); app.go({ type: 'settings', focus: 'keys' }); }}>⌨ 自定义快捷键</span></div>
       {slide ? (() => {
         const panels = {
           slide: {

@@ -71,6 +71,7 @@ Each table must support:
 - First launch: a short welcome page (what the app does, a 4–6 card overview, a one-line flow) with "下次打开时继续显示" unchecked by default.
 - A guided tour of at most 8 steps: each step switches to the right view, spotlights the target area, and says "👉 做什么" and "👀 能看到什么", with 上一步 / 下一步 / 跳过 and keyboard ← → Esc.
 - A "❓ 帮助指南" button at the bottom left opens the detailed help (table of contents, one section per feature, current shortcuts, replay tour).
+- **Every page has a "?" help icon** (top-right of the page, and in viewer toolbars). Clicking it opens a popover with that page's operation guide (what you can do, step by step), the current keyboard shortcuts for viewers, and links to the matching help-guide section and to shortcut settings. Do not keep permanent shortcut hint bars on screen; fold them into this icon. Esc closes the popover without closing the underlying window.
 
 ## 8. Every iteration
 

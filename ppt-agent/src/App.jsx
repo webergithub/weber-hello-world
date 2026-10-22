@@ -19,6 +19,7 @@ import CompareView, { COMPARE_MAX } from './components/CompareView';
 import { WatchAskDialog } from './components/WatchSettings';
 import { clearRelatedCache } from './components/RelatedRail';
 import { Tour, WelcomeDialog, HelpView } from './components/Guide';
+import PageHelp from './components/PageHelp';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
@@ -320,6 +321,7 @@ export default function App() {
           </div>
         </aside>
         <main className="main">
+          <div className="page-help-fab"><PageHelp page={view.type} /></div>
           {view.type === 'task' && (cur ? <TaskView taskId={cur.id} /> : <NoTask />)}
           {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab })} /> : <NoTask />)}
           {view.type === 'library' && (cur ? <LibraryView key={`lib-${cur.id}`} taskId={cur.id} title={`📚 资料库浏览 · ${cur.name}`} mode={libMode} setMode={setLibMode} /> : <NoTask />)}
@@ -333,7 +335,7 @@ export default function App() {
           {view.type === 'recycle' && <RecycleView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
-          {view.type === 'help' && <HelpView onTour={startTour} onWelcome={() => setWelcome(true)} />}
+          {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
           {view.type === 'file' && <FileView id={view.id} onBack={() => setView(view.back || { type: 'search' })} />}
         </main>

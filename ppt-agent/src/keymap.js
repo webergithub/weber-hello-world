@@ -132,45 +132,47 @@ export const comboLabel = (c) => String(c).split('+').map((p) => KEY_LABEL[p] ||
 export const keysLabel = (map, action, n = 2) => (map[action] || []).slice(0, n).map(comboLabel).join(' / ') || '未设置';
 
 /** 浏览窗口底部的按键提示（根据当前按键设置生成） */
-export function viewerHint(map, { compare = false } = {}) {
+/** 浏览窗口的快捷键说明（根据当前按键设置生成）：[[按键, 说明], …] */
+export function viewerHintItems(map, { compare = false } = {}) {
   const k = (a) => keysLabel(map, a);
-  const kp = (a, b) => `${keysLabel(map, a, 1)} ${keysLabel(map, b, 1)}`;
-  const parts = compare
+  const kp = (a, b) => `${keysLabel(map, a, 1)}  ${keysLabel(map, b, 1)}`;
+  return compare
     ? [
-      `${kp('prev', 'next')} 一起翻页（关闭联动时只翻选中窗格）`,
-      `${kp('panePrev', 'paneNext')} 只翻选中窗格（跳过一页）`,
-      `${kp('first', 'last')} 首/末页`,
-      `${kp('prevFile', 'nextFile')} 切换选中窗格`,
-      `${keysLabel(map, 'pane1', 1)}–${keysLabel(map, 'pane4', 1)} 选中窗格`,
-      `${k('link')} 开关一起翻页`,
-      `${k('align')} 按标题对齐`,
-      `${k('panes')} 讲解词`,
-      `${k('layout')} 并排/田字格`,
-      `${k('full')} 全屏`,
-      `${k('basket')} 导出篮`,
-      `${k('close')} 关闭`,
+      [kp('prev', 'next'), '一起翻页（关闭联动时只翻选中窗格）'],
+      [kp('panePrev', 'paneNext'), '只翻选中窗格（跳过一页）'],
+      [kp('first', 'last'), '首页 / 末页'],
+      [kp('prevFile', 'nextFile'), '切换选中的窗格'],
+      [`${keysLabel(map, 'pane1', 1)}–${keysLabel(map, 'pane4', 1)}`, '选中第 1–4 个窗格'],
+      [k('link'), '开关“一起翻页”'],
+      [k('align'), '按标题对齐'],
+      [k('panes'), '显示 / 隐藏讲解词'],
+      [k('layout'), '并排 / 田字格'],
+      [k('full'), '全屏'],
+      [k('basket'), '加入 / 移出导出篮'],
+      [k('close'), '关闭'],
     ]
     : [
-      `${kp('prev', 'next')} 翻页（到末页自动进入下一个文件）`,
-      `${kp('prev5', 'next5')} 跳 5 页`,
-      `${kp('first', 'last')} 首/末页`,
-      `${kp('prevFile', 'nextFile')} 上/下一个文件（${kp('prevFile5', 'nextFile5')} 跳 5 个）`,
-      `${kp('firstFile', 'lastFile')} 第一个/最后一个文件`,
-      `${k('max')} 最大化`,
-      `${k('full')} 全屏`,
-      `${k('panes')} 显示/隐藏讲解词与 MD`,
-      `${k('layout')} 切换上1下2/左1右2`,
-      `${k('rail')} 相关推荐栏`,
-      `${k('back')} 返回推荐前的页面`,
-      '拖动模块标题栏可交换位置，拖动分隔条调整大小',
-      `${k('basket')} 加入/移出导出篮`,
-      `${k('close')} 还原/关闭`,
+      [kp('prev', 'next'), '上一页 / 下一页（到末页自动进入下一个文件）'],
+      [kp('prev5', 'next5'), '跳 5 页'],
+      [kp('first', 'last'), '首页 / 末页'],
+      [kp('prevFile', 'nextFile'), `上一个 / 下一个文件（${kp('prevFile5', 'nextFile5')} 跳 5 个）`],
+      [kp('firstFile', 'lastFile'), '第一个 / 最后一个文件'],
+      [k('max'), '最大化 / 还原'],
+      [k('full'), '全屏'],
+      [k('panes'), '显示 / 隐藏讲解词与 MD'],
+      [k('layout'), '切换上1下2 / 左1右2'],
+      [k('rail'), '显示 / 隐藏相关推荐栏'],
+      [k('back'), '返回推荐前的页面'],
+      [k('basket'), '加入 / 移出导出篮'],
+      [k('close'), '还原 / 关闭'],
+      ['拖动', '拖动模块标题栏交换位置，拖动分隔条调整大小'],
     ];
-  return parts.join(' · ');
 }
 
-/** 输入框中不响应浏览快捷键 */
-export const isTyping = (t) => !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable));
+export function viewerHint(map, opts) { return viewerHintItems(map, opts).map(([a, b]) => `${a} ${b}`).join(' · '); }
+
+/** 输入框中、或打开了帮助 / 筛选弹框、新手指引时，不响应浏览快捷键 */
+export const isTyping = (t) => !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) || !!document.querySelector('.page-help-pop, .dt-filter, .tour');
 
 /** 当前生效的按键设置：{ map: 动作→组合[], lut: 组合→动作 } */
 export function useKeymap() {

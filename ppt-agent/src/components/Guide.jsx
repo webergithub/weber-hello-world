@@ -165,11 +165,12 @@ export function WelcomeDialog({ onClose }) {
 }
 
 // ================= 帮助指南（详细介绍） =================
-export function HelpView({ onTour, onWelcome }) {
+export function HelpView({ onTour, onWelcome, focus }) {
   const app = useApp();
   const keys = useKeymap();
   const k = (a) => keysLabel(keys.map, a);
   const body = useRef(null);
+  useEffect(() => { const el = focus && body.current && body.current.querySelector(`#help-${focus}`); if (el) { el.scrollIntoView({ block: 'start' }); el.classList.add('flash-sec'); setTimeout(() => el.classList.remove('flash-sec'), 1700); } }, [focus]);
   const SECTIONS = [
     ['start', '快速开始', <>
       <ol>
@@ -206,7 +207,7 @@ export function HelpView({ onTour, onWelcome }) {
       <p>所有列表都可以点击列标题排序、在“☰ 列设置”中显示 / 隐藏列；每列标题旁的 <b>▾</b> 可像 Excel 一样筛选（文本 / 数字 / 日期条件，或按值勾选），工具栏可在整个列表中搜索关键字；支持多选后 <b>⧉ 对比查看</b> 或 <b>🗑 移到回收站</b>。</p>
     </>],
     ['viewer', '逐页浏览与快捷键', <>
-      <p>点击任意页面的 ⛶ 打开逐页浏览窗口，可最大化、全屏，布局可切换上1下2 / 左1右2。默认快捷键：</p>
+      <p>点击任意页面的 ⛶ 打开逐页浏览窗口，可最大化、全屏，布局可切换上1下2 / 左1右2。窗口工具栏的“?”图标中列出当前快捷键；应用每个页面右上角的“?”都可查看本页的操作指导。默认快捷键：</p>
       <ul className="help-keys">
         <li><b>{k('prev')} / {k('next')}</b> 上一页 / 下一页（到末页进入下一个文件）</li>
         <li><b>{k('prevFile')} / {k('nextFile')}</b> 上一个 / 下一个文件</li>
