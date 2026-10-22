@@ -5,6 +5,7 @@ import { highlight } from '../md';
 import SlidePreview from './SlidePreview';
 import SlideViewer from './SlideViewer';
 
+const PAGE = 120;
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 function snippet(text, terms, n = 140) {
@@ -60,7 +61,23 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const topHit = allHits.slice().sort((a, b) => b.score - a.score)[0];
   const viewerFiles = result ? result.files.map((f) => f.file.id) : [];
   const [viewerStart, setViewerStart] = useState(null);
-  const slides = fileFilter ? slidesAll.filter((s) => s.file_id === fileFilter) : slidesAll;
+  // 选中左侧某个文件时，页签数字与页面都只统计该文件的搜索结果；再次单击取消选择回到全部结果
+  const ofFile = (arr) => (fileFilter ? (arr || []).filter((s) => s.file_id === fileFilter) : arr || []);
+  const counts = result ? { light: ofFile(result.slides.light).length, dark: ofFile(result.slides.dark).length, word: ofFile(result.slides.word).length } : {};
+  const slidesFiltered = ofFile(slidesAll);
+  // 全部结果较多时分批显示，避免一次渲染上千张页面
+  const [shown, setShown] = useState(PAGE);
+  useEffect(() => { setShown(PAGE); }, [result, tab, fileFilter]);
+  const slides = slidesFiltered.slice(0, shown);
+  const pickFile = (fid) => {
+    const next = fileFilter === fid ? null : fid;
+    setFileFilter(next);
+    // 当前页签没有该文件的结果时，自动切到有结果的页签
+    if (next && result && tab !== 'viewer' && !(result.slides[tab] || []).some((x) => x.file_id === next)) {
+      const t = ['light', 'dark', 'word'].find((k) => (result.slides[k] || []).some((x) => x.file_id === next));
+      if (t) setState({ ...state, tab: t });
+    }
+  };
   const toggle = (id) => { const n = new Set(sel); if (n.has(id)) n.delete(id); else n.add(id); setSel(n); };
   const jumpCounterpart = (cp) => {
     const other = cp.theme === 'dark' ? 'dark' : 'light';
@@ -136,7 +153,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
               <div className="side-title">相关 PPT（{result.files.length}）{fileFilter && <button className="btn tiny" onClick={() => setFileFilter(null)}>显示全部页面</button>}
                 {cmpSel.size > 0 && <button className="btn tiny primary" disabled={cmpSel.size < 2 || cmpSel.size > 4} title="勾选 2–4 个文件后并排对比（从各自命中度最高的页开始）" onClick={() => compareFiles([...cmpSel])}>⧉ 对比（{cmpSel.size}）</button>}</div>
               {result.files.map((f) => (
-                <div key={f.file.id} className={`sr-file ${fileFilter === f.file.id ? 'active' : ''}`} onClick={() => setFileFilter(fileFilter === f.file.id ? null : f.file.id)}>
+                <div key={f.file.id} className={`sr-file ${fileFilter === f.file.id ? 'active' : ''}`} onClick={() => pickFile(f.file.id)}>
                   <div className="fi-name"><label className="fi-cmp" title="勾选 2–4 个文件进行对比" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={cmpSel.has(f.file.id)} onChange={() => toggleCmp(f.file.id)} /></label><span dangerouslySetInnerHTML={{ __html: highlight(esc(f.file.name), terms) }} /></div>
                   <div className="fi-meta">
                     <span className={`tag ${tierCls[f.tier]}`}>{f.tierLabel}</span>
@@ -150,13 +167,13 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             </div>
             <div className="sr-slides">
               <div className="tabs">
-                <button className={tab === 'light' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'light' })}>⬜ 白底页面（{result.slides.light.length}）</button>
-                <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底页面（{result.slides.dark.length}）</button>
-                <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word 文档（{(result.slides.word || []).length}）</button>
+                <button className={tab === 'light' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'light' })}>⬜ 白底页面（{counts.light}）</button>
+                <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底页面（{counts.dark}）</button>
+                <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word 文档（{counts.word}）</button>
                 <button className={tab === 'viewer' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'viewer' })}>⛶ 逐页浏览</button>
                 <div className="spacer" />
                 <span className="badge">已选 {sel.size}</span>
-                <button className="btn small" onClick={() => setSel(new Set([...sel, ...slides.map((s) => s.id)]))}>全选本页签</button>
+                <button className="btn small" onClick={() => setSel(new Set([...sel, ...slidesFiltered.map((s) => s.id)]))}>全选本页签</button>
                 <button className="btn small" disabled={!sel.size} onClick={() => { app.basket.add([...sel]); setSel(new Set()); }}>加入导出篮</button>
                 <button className="btn small primary" disabled={!sel.size} onClick={() => app.exportSlides([...sel], 'pptx')}>导出新 PPT</button>
                 {selFiles.length >= 2 && <button className="btn small" disabled={selFiles.length > 4} title="所选页面来自 2–4 个文件时，可并排对比这些文件（从所选页开始）" onClick={() => app.openCompare(selFiles, Object.fromEntries(selFiles.map((f) => [f, allHits.find((h) => h.file_id === f && sel.has(h.id)).id])))}>⧉ 对比所选页所在文件（{selFiles.length}）</button>}
@@ -179,11 +196,11 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     initialSlideId={(viewerStart && viewerStart.slideId) || (!fileFilter && topHit ? topHit.id : null)} />
                 </div>
               )}
-              {tab !== 'viewer' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : '没有匹配的白底页面'}{result.slides[tab === 'dark' ? 'light' : 'dark'].length ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
+              {tab !== 'viewer' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : '没有匹配的白底页面'}{counts[tab === 'dark' ? 'light' : 'dark'] ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
               {tab !== 'viewer' && <div className="card-grid">
                 {slides.map((s) => (
                   <div key={s.id} data-rid={s.id} className={`slide-card ${sel.has(s.id) ? 'sel' : ''} ${flash === s.id ? 'flash' : ''}`}>
-                    <div className="sc-preview" onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slides)}>
+                    <div className="sc-preview" onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slidesFiltered)}>
                       <SlidePreview slide={s} highlight={terms} />
                       <label className="sc-check" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(s.id)} onChange={() => toggle(s.id)} /></label>
                       <span className="sc-score">{Math.round(s.score * 100)}</span>
@@ -207,6 +224,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                   </div>
                 ))}
               </div>}
+              {tab !== 'viewer' && slidesFiltered.length > shown && <div className="more-row"><button className="btn" onClick={() => setShown((n) => n + PAGE)}>显示更多（已显示 {shown} / {slidesFiltered.length}）</button><button className="btn ghost" onClick={() => setShown(slidesFiltered.length)}>全部显示</button></div>}
             </div>
           </div>
         </div>

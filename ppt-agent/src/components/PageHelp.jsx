@@ -2,14 +2,14 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApp } from '../ctx';
 import { useKeymap, viewerHintItems } from '../keymap';
 
-// 每个页面的操作指导：点击页面右上角的 ❔ 图标展开；help 为帮助指南中对应章节
+// 每个页面的操作指导：点击页面左下角的“?”图标展开（侧栏标题旁的“帮助”按钮除外）；help 为帮助指南中对应章节
 const PAGES = {
   search: {
     title: '智能搜索', help: 'search',
     items: [
       '输入关键词或一句话后按回车，中英文混合均可，例如“机航 turnaround”。',
       '搜索框下方切换检索范围：当前任务 / 所有资料库。',
-      '左侧“相关 PPT”按文件名 → 标签 → 内容命中排序；点击文件只看它的页面，勾选 2–4 个文件可并排对比。',
+      '左侧“相关 PPT”按文件名 → 标签 → 内容命中排序；单击文件只看它的搜索结果（白底 / 黑底 / Word 页签数字随之变化），再次单击取消选择回到全部结果；勾选 2–4 个文件可并排对比。',
       '右侧按白底 / 黑底 / Word 页签展示命中的页面与讲解词；有另一底色版本时可点“⇄”切换。',
       '勾选页面后可“加入导出篮”或直接“导出新 PPT”；“⛶ 逐页浏览”页签可用键盘逐页翻看。',
       '点击页面卡片打开浏览窗口：左右键（或两侧 ‹ ›、底部缩略条）按结果顺序在搜索结果之间翻页。',
@@ -56,9 +56,9 @@ const PAGES = {
   groups: {
     title: '相似分组', help: 'compare',
     items: [
-      '内容相近的 PPT（如黑底 / 白底版本、不同版本副本）归为一组，可按名称或大小排序。',
+      '内容相近的 PPT（如黑底 / 白底版本、不同版本副本）归为一组：左侧是分组列表（可按分组名、文件数、总大小等排序与筛选），右侧显示所选分组的全部文件。',
       '“⧉ 对比本组”把组内文档并排打开，一起翻页对比。',
-      '勾选文档后可对比查看或移到回收站。',
+      '勾选文档后可对比查看、在资源管理器中显示或移到回收站；可跨分组勾选。',
     ],
   },
   analytics: {
@@ -147,7 +147,8 @@ export default function PageHelp({ page, onBeforeNav, className = '' }) {
     if (!open || !btn.current) return;
     const r = btn.current.getBoundingClientRect();
     const w = pop.current ? pop.current.offsetWidth : 380, h = pop.current ? pop.current.offsetHeight : 300;
-    const left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
+    // 图标固定在左下角：弹窗与图标左对齐、向上展开
+    const left = r.left < window.innerWidth / 2 ? Math.max(8, Math.min(r.left, window.innerWidth - w - 8)) : Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8));
     const top = r.bottom + 6 + h > window.innerHeight ? Math.max(8, r.top - h - 6) : r.bottom + 6;
     setPos({ left, top });
   }, [open]);

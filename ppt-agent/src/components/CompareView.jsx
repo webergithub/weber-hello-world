@@ -174,6 +174,7 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
   return (
     <div ref={root} className={`compare ${maxed ? 'maxed' : ''}`}>
       {osd && <div className="viewer-osd cmp-osd">{osd}</div>}
+      <div className="corner-help"><PageHelp page="compare" onBeforeNav={onClose} /></div>
       <div className="viewer-bar">
         <b>⧉ 对比窗口</b><span className="muted small">{n} 个文档</span>
         <div className="spacer" />
@@ -195,7 +196,6 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
         <button className={`btn small ${strip ? 'primary' : ''}`} onClick={() => toggle(setStrip, 'ppta.cmpStrip')}>缩略条</button>
         <button className="btn small" onClick={() => toggle(setMaxed, 'ppta.cmpMax')} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原' : '⛶ 最大化'}</button>
         <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
-        <PageHelp page="compare" onBeforeNav={onClose} />
         <button className="icon-btn" onClick={onClose} title={keysLabel(keys.map, 'close')}>✕</button>
       </div>
       <div className={`cmp-panes n${n} ${grid ? 'grid' : 'cols'}`}>

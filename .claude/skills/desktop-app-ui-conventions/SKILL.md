@@ -22,6 +22,8 @@ Each table must support:
 - **Keyword search across the whole list** in the toolbar; show "x / total 条" while filtered, active filters as removable chips, a "✕ 清除筛选" button, and an empty state with "清除筛选".
 - **Multi-select with checkboxes**: select all, Shift+click range, "已选 N" badge, and bulk actions next to the selection (export, compare, move to recycle bin, …).
 - **Remember per-table settings** (sort, hidden columns) in local storage under a per-table id.
+- **Many items → master / detail**: when a page would show many groups or sections each with its own list, use a list of groups on the left and the selected group's table filling the right; never stack several tables in one scroll area (they collapse).
+- **Counts must match what is shown**: a per-item count ("命中 13 页") must equal what appears when that item is selected; never cap the underlying result set silently — page the rendering instead ("显示更多 / 全部显示"). Selecting an item to filter updates every dependent count (tab badges); clicking it again clears the filter.
 - **Fill the available height**: the list stretches to the bottom of the window and scrolls inside; never stop half-way down the page.
 - Row actions for files: "打开文件" (open with the default app) and "在资源管理器中显示" (reveal in Explorer / Finder). Every list or process view that shows files gets a toolbar "📂 在资源管理器中显示" for the selected / last-clicked file plus a per-row 📂.
 - **Coming back restores the context**: when a row opens a detail page and the user clicks "← 返回", return to the same view, tab, filters, keyword and scroll position, and highlight the row they opened (e.g. pale gold background + accent bar) scrolled into view. Keep this per-list state in memory for the session (keyed by list id + scope); also reopen any drill-down list that was open.
@@ -80,7 +82,7 @@ Each table must support:
 - First launch: a short welcome page (what the app does, a 4–6 card overview, a one-line flow) with "下次打开时继续显示" unchecked by default.
 - A guided tour of at most 8 steps: each step switches to the right view, spotlights the target area, and says "👉 做什么" and "👀 能看到什么", with 上一步 / 下一步 / 跳过 and keyboard ← → Esc.
 - A "❓ 帮助指南" button at the bottom left opens the detailed help (table of contents, one section per feature, current shortcuts, replay tour).
-- **Every page has a "?" help icon** (top-right of the page, and in viewer toolbars). Clicking it opens a popover with that page's operation guide (what you can do, step by step), the current keyboard shortcuts for viewers, and links to the matching help-guide section and to shortcut settings. Do not keep permanent shortcut hint bars on screen; fold them into this icon. Esc closes the popover without closing the underlying window.
+- **Every page has a "?" help icon**, pinned to the **bottom-left corner** of the page and of each viewer / compare window, never in the title bar where it crowds close buttons (the app-level help button next to the app title stays where it is). Clicking it opens a popover with that page's operation guide (what you can do, step by step), the current keyboard shortcuts for viewers, and links to the matching help-guide section and to shortcut settings. Do not keep permanent shortcut hint bars on screen; fold them into this icon. Esc closes the popover without closing the underlying window.
 
 ## 8. Every iteration
 

@@ -121,7 +121,7 @@ class SearchEngine {
       const nameCov = this.coverage(name, groups);
       const tagHay = (f.tags || []).join(' | ').toLowerCase() + ' | ' + (f.category || '').toLowerCase();
       const tagCov = this.coverage(tagHay, groups);
-      fileScores.set(f.id, { nameScore: nameCov.score, nameMatched: nameCov.matched, tagScore: tagCov.score, tagMatched: tagCov.matched, content: 0, hits: 0 });
+      fileScores.set(f.id, { nameScore: nameCov.score, nameMatched: nameCov.matched, tagScore: tagCov.score, tagMatched: tagCov.matched, content: 0, hits: 0, pages: 0 });
     }
     result.timing.meta = Date.now() - t0;
 
@@ -163,6 +163,7 @@ class SearchEngine {
       if (!cov.score && rrf.get(s.id) / maxR < 0.35) continue;
       const score = 0.55 * (rrf.get(s.id) / maxR) + 0.3 * cov.score + 0.1 * fs_.nameScore + 0.05 * fs_.tagScore;
       scored.push({ s, f, score, cov });
+      fs_.pages++; // 返回给界面的命中页数 = 该文件出现在结果中的页面数
       if (cov.score > 0) { fs_.content = Math.max(fs_.content, score); fs_.hits++; }
     }
     scored.sort((a, b) => b.score - a.score);
@@ -174,14 +175,14 @@ class SearchEngine {
       if (!tier) continue;
       const tierScore = tier === 1 ? sc.nameScore : tier === 2 ? sc.tagScore : sc.content;
       ranked.push({ file: fileMap.get(id), tier, tierLabel: ['', '文件名命中', '标签命中', '内容命中'][tier], nameScore: sc.nameScore, tagScore: sc.tagScore,
-        contentScore: Math.round(sc.content * 1000) / 1000, hits: sc.hits, matched: [...new Set([...sc.nameMatched, ...sc.tagMatched])],
+        contentScore: Math.round(sc.content * 1000) / 1000, hits: sc.pages, matched: [...new Set([...sc.nameMatched, ...sc.tagMatched])],
         sort: tier * -10 + tierScore * 2 + sc.content + Math.min(sc.hits, 10) * 0.01 });
     }
     ranked.sort((a, b) => b.sort - a.sort);
     result.files = ranked.slice(0, opts.fileLimit || 200);
 
-    // 页面推荐：附带备注讲解词与 黑/白底 对应页
-    const limit = opts.slideLimit || 80;
+    // 页面推荐：附带备注讲解词与 黑/白底 对应页；返回全部命中页（界面按文件筛选时与“命中 N 页”一致，全部结果分批显示）
+    const limit = opts.slideLimit || 3000;
     const light = [], dark = [], word = [];
     for (const x of scored) {
       const target = x.f.kind === 'word' ? word : x.s.theme === 'dark' ? dark : light;
@@ -195,7 +196,7 @@ class SearchEngine {
       const other = c && cpSlides.get(c.id);
       const of = other && fileMap.get(other.file_id);
       return {
-        ...x.s, kind: x.f.kind || 'ppt', fileName: x.f.name, filePath: x.f.path, fileTheme: x.f.theme, score: Math.round(x.score * 1000) / 1000, matched: x.cov.matched,
+        ...x.s, text: String(x.s.text || '').slice(0, 3000), notes: String(x.s.notes || '').slice(0, 3000), kind: x.f.kind || 'ppt', fileName: x.f.name, filePath: x.f.path, fileTheme: x.f.theme, score: Math.round(x.score * 1000) / 1000, matched: x.cov.matched,
         counterpart: other ? { id: other.id, theme: other.theme, idx: other.idx, title: other.title, fileName: of ? of.name : '', fileId: other.file_id, score: c.score } : null,
       };
     };

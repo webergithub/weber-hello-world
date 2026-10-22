@@ -202,6 +202,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   return (
     <div ref={root} className={`viewer ${compact ? 'compact' : ''} ${maxed ? 'maxed' : ''}`}>
       {osd && <div className="viewer-osd">{osd}</div>}
+      {!compact && <div className="corner-help"><PageHelp page={resMode ? 'viewerResults' : 'viewer'} onBeforeNav={onClose} /></div>}
       <div className="viewer-bar">
         {!resMode && <>
           <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title={`上一个文件（${keysLabel(keys.map, 'prevFile')}）`}>▲ 上个文件</button>
@@ -235,7 +236,6 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         <button className="btn small" onClick={() => setPanes(!panes)} title={keysLabel(keys.map, 'panes')}>{panes ? '隐藏讲解词/MD' : '显示讲解词/MD'}</button>
         <button className="btn small" onClick={toggleMax} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原窗口' : '⛶ 最大化'}</button>
         <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
-        <PageHelp page={resMode ? 'viewerResults' : 'viewer'} onBeforeNav={onClose} />
         {onClose && <button className="icon-btn" onClick={onClose}>✕</button>}
       </div>
       {slide ? (() => {

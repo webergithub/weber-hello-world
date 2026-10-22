@@ -854,8 +854,9 @@ th.filtered { color: var(--accent); }
 
 /* ===== 页面帮助图标 ===== */
 .main { position: relative; }
-.page-help-fab { position: absolute; top: 13px; right: 14px; z-index: 30; }
-.main .view-head { padding-right: 54px; }
+/* “?”帮助图标固定在每个页面（及浏览 / 对比窗口）的左下角，不占用标题栏与关闭按钮的位置 */
+.page-help-fab, .corner-help { position: absolute; left: 12px; bottom: 12px; z-index: 40; }
+.page-help-fab .page-help-btn, .corner-help .page-help-btn { width: 30px; height: 30px; line-height: 28px; font-size: 14px; box-shadow: 0 2px 8px rgba(0, 0, 0, .18); }
 .page-help-btn { width: 26px; height: 26px; border-radius: 50%; border: 1px solid var(--line); background: var(--bg); color: var(--fg2); font-weight: 700; font-size: 13px; cursor: pointer; flex: none; line-height: 24px; padding: 0; box-shadow: 0 1px 3px rgba(0, 0, 0, .08); }
 .page-help-btn:hover, .page-help-btn.on { border-color: var(--accent); color: #fff; background: var(--accent); }
 .page-help-pop { position: fixed; z-index: 130; width: min(420px, 92vw); max-height: 80vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 12px 32px rgba(0, 0, 0, .3); padding: 10px 14px 12px; font-size: 13px; }
@@ -972,3 +973,12 @@ th.filtered { color: var(--accent); }
 /* 推荐页查看中：返回原页面按钮醒目显示 */
 .btn.back-origin { background: #ffe0b2; color: #000; border-color: #f0a500; font-weight: 600; }
 .btn.back-origin:hover { background: #ffd08a; }
+.more-row { display: flex; justify-content: center; gap: 8px; padding: 12px 0 16px; }
+/* 相似分组：左侧分组列表 + 右侧所选分组的文件（文件较多时两侧各自滚动并铺满到底部） */
+.groups-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(380px, 38%) 1fr; gap: 12px; padding: 10px 16px 12px; }
+.gs-list, .gs-detail { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+.gs-detail { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 0 10px 10px; }
+.gs-detail .gc-head { padding: 10px 2px; }
+.gs-list tbody tr { cursor: pointer; }
+.grid tr.row-cur td { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.grid tr.row-cur td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
