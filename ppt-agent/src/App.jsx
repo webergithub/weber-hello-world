@@ -216,7 +216,10 @@ export default function App() {
     { key: 'analytics', icon: '📈', label: '总览分析' },
     { key: 'alllib', icon: '🗂', label: '所有资料库' },
     { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => t.status === 'running') ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
+  ];
+  const maintNav = [
     { key: 'recycle', icon: '🗑', label: '回收站' },
+    { key: 'logs', icon: '📜', label: '运行日志' },
   ];
   const smartNav = [
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
@@ -224,8 +227,6 @@ export default function App() {
   ];
   const toolNav = [
     { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
-    { key: 'logs', icon: '📜', label: '运行日志' },
-    { key: 'settings', icon: '🛠', label: '设置' },
   ];
   const selectTask = (t) => {
     setCurTask(t.id);
@@ -246,8 +247,6 @@ export default function App() {
       )}
     </React.Fragment>
   );
-  const themeNext = { system: 'dark', dark: 'light', light: 'system' };
-  const themeIcon = { system: '🖥', dark: '🌙', light: '☀️' };
 
   return (
     <AppCtx.Provider value={ctx}>
@@ -309,15 +308,21 @@ export default function App() {
           {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}
           {secHead('smart', <>🤖 智能模块<span className="wip">建设中</span></>, '🤖')}
           {!folded.smart && <div className="sb-group">{smartNav.map((n) => navItem(n))}</div>}
+          {secHead('maint', '🧰 维护', '🧰')}
+          {!folded.maint && <div className="sb-group">{maintNav.map((n) => navItem(n))}</div>}
           <div className="spacer" />
           <div className="sb-tools">
             {toolNav.map((n) => navItem(n))}
             <div className={`sb-item ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>
               <span className="ic">❓</span>{!collapsed && <span className="lbl">帮助指南</span>}
             </div>
-            <div className="sb-item" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
-              <span className="ic">{themeIcon[themeMode]}</span>{!collapsed && <span className="lbl">主题：{{ system: '跟随系统', dark: '黑色', light: '白色' }[themeMode]}</span>}
+          </div>
+          <div className="sb-foot">
+            <div className="sb-user" title="用户信息（预留）">
+              <span className="sb-avatar">👤</span>
+              {!collapsed && <div className="sb-user-main"><div className="sb-user-name">本地用户</div><div className="sb-user-sub">用户信息（预留）</div></div>}
             </div>
+            <button className={`sb-gear ${view.type === 'settings' ? 'active' : ''}`} title="设置" data-tour="nav-settings" onClick={() => setViewState({ type: 'settings' })}>⚙</button>
           </div>
         </aside>
         <main className="main">

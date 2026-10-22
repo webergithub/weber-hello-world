@@ -868,3 +868,15 @@ th.filtered { color: var(--accent); }
 .php-keys .kbd { justify-self: start; white-space: nowrap; }
 .php-foot { display: flex; gap: 14px; flex-wrap: wrap; margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line2); font-size: 12.5px; }
 .viewer-bar .page-help-btn, .compare .viewer-bar .page-help-btn { width: 24px; height: 24px; line-height: 22px; }
+/* 侧栏底部：左侧用户信息（预留），右侧设置图标 */
+.sb-foot { display: flex; align-items: center; gap: 8px; padding: 8px 10px 4px; margin-top: 4px; border-top: 1px solid var(--line); }
+.sb-user { display: flex; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+.sb-avatar { width: 30px; height: 30px; border-radius: 50%; background: var(--bg4); display: inline-flex; align-items: center; justify-content: center; font-size: 15px; flex: none; }
+.sb-user-main { min-width: 0; }
+.sb-user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-user-sub { font-size: 11px; color: var(--fg3); white-space: nowrap; }
+.sb-gear { width: 32px; height: 32px; border-radius: 8px; border: 1px solid transparent; background: transparent; color: var(--fg2); font-size: 18px; cursor: pointer; flex: none; }
+.sb-gear:hover { background: var(--bg3); color: var(--fg); }
+.sb-gear.active { background: rgba(79, 140, 255, .14); color: var(--accent); border-color: rgba(79, 140, 255, .35); }
+.collapsed .sb-foot { flex-direction: column; padding: 8px 0 4px; }
+.collapsed .sb-user { flex: none; }

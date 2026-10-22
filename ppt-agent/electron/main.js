@@ -2,7 +2,7 @@
 // Electron 主进程：窗口、IPC、本地资源协议（ppta://）、日志推送。
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme, Tray, nativeImage } = require('electron');
 const { pathToFileURL } = require('url');
 
 process.env.NODE_NO_WARNINGS = '1';
@@ -11,6 +11,54 @@ protocol.registerSchemesAsPrivileged([{ scheme: 'ppta', privileges: { standard: 
 let win = null;
 let service = null;
 let logger = null;
+let tray = null;
+let trayHinted = false;
+
+// 只允许运行一个实例：再次启动时恢复已有窗口（包括已最小化到系统托盘的窗口）
+if (!app.requestSingleInstanceLock()) app.quit();
+else app.on('second-instance', () => showWindow());
+
+function showWindow() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+/** 系统托盘图标（右下角图标栏）：单击 / 双击恢复窗口，右键菜单可彻底退出 */
+function createTray() {
+  if (tray) return;
+  try {
+    let img = nativeImage.createFromPath(path.join(__dirname, 'assets', 'tray.png'));
+    if (process.platform === 'win32') img = img.resize({ width: 16, height: 16 });
+    tray = new Tray(img);
+    tray.setToolTip('PPT智能体');
+    tray.on('click', showWindow);
+    tray.on('double-click', showWindow);
+    updateTrayMenu();
+  } catch (e) { if (logger) logger.child('app').warn('创建系统托盘图标失败', e); }
+}
+function updateTrayMenu() {
+  if (!tray) return;
+  const running = service && service.running ? service.store.getTask(service.running) : null;
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: '显示主窗口', click: showWindow },
+    ...(running ? [{ label: `正在解析：${running.name}`, enabled: false }] : []),
+    { type: 'separator' },
+    { label: '完全退出', click: () => { showWindow(); confirmQuit(); } },
+  ]));
+  tray.setToolTip(running ? `PPT智能体 · 正在解析：${running.name}` : 'PPT智能体');
+}
+/** 最小化到系统托盘：隐藏窗口，程序与解析任务继续在后台运行 */
+function hideToTray() {
+  createTray();
+  if (!tray) { win.minimize(); return; }
+  win.hide();
+  if (!trayHinted && process.platform === 'win32') {
+    trayHinted = true;
+    try { tray.displayBalloon({ title: 'PPT智能体 仍在运行', content: '已最小化到右下角图标栏。单击图标恢复窗口，右击图标可完全退出。' }); } catch { /* ignore */ }
+  }
+}
 
 const bootstrapFile = () => path.join(app.getPath('userData'), 'bootstrap.json');
 function readBootstrap() { try { return JSON.parse(fs.readFileSync(bootstrapFile(), 'utf8')); } catch { return {}; } }
@@ -38,7 +86,7 @@ function createWindow() {
   if (devUrl) win.loadURL(devUrl); else win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:/.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.on('closed', () => { win = null; });
-  // 关闭窗口：询问“完全退出”还是“最小化到任务栏”，可记住选择
+  // 关闭窗口：询问“完全退出”还是“最小化到系统托盘”，可记住选择
   win.on('close', (e) => {
     if (quitting || !service) return;
     e.preventDefault();
@@ -51,22 +99,22 @@ let closeDialogOpen = false;
 async function handleClose() {
   if (closeDialogOpen) return;
   const action = service.getConfig().closeAction || 'ask';
-  if (action === 'minimize') { win.minimize(); return; }
+  if (action === 'minimize') { hideToTray(); return; }
   if (action === 'quit') { await confirmQuit(); return; }
   closeDialogOpen = true;
   try {
     const running = service.running ? '\n\n当前有解析任务正在运行；完全退出后，下次启动可点击“继续”从断点继续。' : '';
     const r = await dialog.showMessageBox(win, {
-      type: 'question', title: '退出 PPT智能体', message: '要完全关闭程序，还是最小化到任务栏？',
-      detail: '最小化后程序继续在后台运行（解析任务不中断），点击任务栏图标即可恢复。' + running,
-      buttons: ['最小化到任务栏', '完全退出', '取消'], defaultId: 0, cancelId: 2, noLink: true,
+      type: 'question', title: '退出 PPT智能体', message: '要完全关闭程序，还是最小化到右下角图标栏？',
+      detail: '最小化后程序继续在后台运行（解析任务不中断）：单击右下角图标栏中的 PPT智能体 图标即可恢复，右击图标可完全退出。' + running,
+      buttons: ['最小化到图标栏', '完全退出', '取消'], defaultId: 0, cancelId: 2, noLink: true,
       checkboxLabel: '记住我的选择（可在“设置”中修改）', checkboxChecked: false,
     });
     if (r.response === 2) return;
     const choice = r.response === 0 ? 'minimize' : 'quit';
     if (r.checkboxChecked) service.setConfig({ closeAction: choice });
-    logger.child('app').info(`关闭窗口：用户选择${choice === 'minimize' ? '最小化到任务栏' : '完全退出'}${r.checkboxChecked ? '（已记住）' : ''}`);
-    if (choice === 'minimize') win.minimize(); else await confirmQuit(true);
+    logger.child('app').info(`关闭窗口：用户选择${choice === 'minimize' ? '最小化到系统托盘' : '完全退出'}${r.checkboxChecked ? '（已记住）' : ''}`);
+    if (choice === 'minimize') hideToTray(); else await confirmQuit(true);
   } finally { closeDialogOpen = false; }
 }
 
@@ -77,6 +125,7 @@ async function confirmQuit(skipAsk = false) {
   }
   if (service.running) { service.pauseTask(service.running); logger.child('app').info('退出前中断正在运行的任务（可继续）'); }
   quitting = true;
+  if (tray) { tray.destroy(); tray = null; }
   app.quit();
 }
 
@@ -102,11 +151,12 @@ app.whenReady().then(async () => {
   let pending = [];
   logger.on('line', (l) => { pending.push(l); });
   setInterval(() => { if (pending.length) { send('log', pending); pending = []; } }, 400);
-  service.on('task', (t) => send('task', t));
+  service.on('task', (t) => { send('task', t); updateTrayMenu(); });
   service.on('embedding', (e) => send('embedding', e));
   service.on('progress', (p) => send('progress', p));
   service.on('watch', (w) => send('watch', w));
   service.startScheduler();
+  createTray();
   const applyTheme = (t) => { nativeTheme.themeSource = t === 'dark' || t === 'light' ? t : 'system'; };
   applyTheme(service.getConfig().uiTheme);
   nativeTheme.on('updated', () => send('systemTheme', nativeTheme.shouldUseDarkColors ? 'dark' : 'light'));

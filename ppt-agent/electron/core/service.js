@@ -1116,17 +1116,19 @@ class AgentService extends EventEmitter {
     } catch (e) { this.log.warn('更新 Markdown 文件失败', e); }
   }
 
-  /** Agent 生成讲解词：配置了大模型则调用大模型，否则使用内置模板离线生成 */
+  /** Agent 生成讲解词（建设中）：只调用“设置 → Agent 接口”中配置的大模型，未配置时提示去设置 */
   async generateNotes(id) {
     const s = this.store.getSlide(id, false);
     if (!s) throw new Error('页面不存在');
     const file = this.store.getFile(s.file_id);
     const client = llm.client(this.config.llm);
-    let text = '', source = '';
-    if (client) {
-      try { text = (await client.speakerNotes({ fileName: file.name, title: s.title, text: s.text, md: s.md, notes: s.notes })).trim(); source = `大模型 ${this.config.llm.model}`; } catch (e) { this.log.warn('大模型生成讲解词失败，改用内置模板', e); }
+    if (!client || (!this.config.llm.apiKey && !/127\.0\.0\.1|localhost/.test(this.config.llm.baseUrl || ''))) {
+      throw new Error('未配置 Agent 接口：请在“设置 → Agent 接口”中选择服务商（如 DeepSeek）、填写 API Key 并启用');
     }
-    if (!text) { text = templateNotes(s, file); source = '内置模板（未配置大模型）'; }
+    let text = '';
+    try { text = (await client.speakerNotes({ fileName: file.name, title: s.title, text: s.text, md: s.md, notes: s.notes })).trim(); } catch (e) { throw new Error('调用 Agent 接口失败：' + e.message); }
+    if (!text) throw new Error('Agent 接口没有返回内容');
+    const source = `大模型 ${this.config.llm.model}`;
     this.store.setSlideUser(id, { notes_ai: text });
     logger.child('agent').info(`生成讲解词：${file.name} 第 ${s.idx} 页（${source}，${text.length} 字）`);
     return { text, source };
@@ -1288,27 +1290,6 @@ function moveFileSafe(from, to) {
 }
 
 /** 内置讲解词模板：根据标题、要点、表格与图表组织成口语化讲解 */
-function templateNotes(s, file) {
-  const title = String(s.title || '').trim() || `第 ${s.idx} 页`;
-  const lines = String(s.md || '').split('\n');
-  const bullets = lines.filter((l) => /^\s*-\s+/.test(l)).map((l) => l.replace(/^\s*-\s+/, '').replace(/\*\*/g, '').trim()).filter(Boolean);
-  const paras = String(s.text || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.includes('|'));
-  const points = (bullets.length ? bullets : paras).filter((p) => p !== title).slice(0, 6);
-  const table = lines.filter((l) => /^\|/.test(l) && !/^\|\s*-/.test(l));
-  const chart = lines.find((l) => l.startsWith('📊'));
-  const num = ['第一', '第二', '第三', '第四', '第五', '第六'];
-  const out = [`接下来我们看「${title}」。`];
-  if (points.length === 1) out.push(`这一页的核心是：${points[0]}。`);
-  else if (points.length > 1) out.push(`这一页主要讲 ${points.length} 点：${points.map((p, i) => `${num[i]}，${p.replace(/[。；;]$/, '')}`).join('；')}。`);
-  if (table.length > 1) {
-    const head = table[0].split('|').map((c) => c.trim()).filter(Boolean);
-    out.push(`表格从${head.slice(0, 4).join('、')}等维度做了对比，共 ${table.length - 1} 行数据，大家可以重点关注差异最大的几项。`);
-  }
-  if (chart) out.push(`图表${chart.replace(/^📊\s*\*\*图表[^*]*\*\*[:：]?/, '').trim() ? '「' + chart.replace(/^📊\s*\*\*图表[^*]*\*\*[:：]?/, '').trim() + '」' : ''}直观展示了变化趋势。`);
-  out.push(`以上就是${title}的主要内容${file && file.kind === 'word' ? '' : '，下面我们继续'}。`);
-  return out.join('\n');
-}
-
 async function borderLuminance(pngPath) {
   const { PNG } = require('pngjs');
   const png = PNG.sync.read(fs.readFileSync(pngPath));

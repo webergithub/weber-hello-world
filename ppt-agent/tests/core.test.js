@@ -227,12 +227,10 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   svc.purgeRecycled(svc.recycleList().map((r) => r.id));
   assert.ok(fs.existsSync(f.path), '仅移出资料库时彻底删除不应删除原文件');
   assert.strictEqual(svc.recycleList().length, 0);
-  // 讲解词编辑与 Agent 生成（未配置大模型时使用内置模板）
+  // 讲解词编辑；Agent 生成未配置接口时提示去设置（不再使用内置模板）
   const any = svc.library().find((x) => x.status === 'parsed' && x.slide_count > 2);
   const sl = svc.store.slidesOf(any.id)[1];
-  const g = await svc.generateNotes(sl.id);
-  assert.match(g.source, /内置模板/);
-  assert.ok(g.text.length > 10);
+  await assert.rejects(svc.generateNotes(sl.id), /未配置 Agent 接口/);
   const e = svc.updateSlideText(sl.id, { notes: '唯一测试讲解词XYZ' });
   assert.strictEqual(e.notes, '唯一测试讲解词XYZ');
   const r = await svc.searchQuery('唯一测试讲解词XYZ');

@@ -31,7 +31,7 @@ export function WatchAskDialog({ roots, onClose }) {
               <label className="chk"><input type="checkbox" checked={catchUp} onChange={(e) => setCatchUp(e.target.checked)} /> 错过时（程序未运行）下次启动后补扫</label>
             </div>
           )}
-          <p className="muted small">定时扫描需要程序在运行（可最小化到任务栏）；时间点与开关之后可在“设置 → 定时监测更新”中修改。</p>
+          <p className="muted small">定时扫描需要程序在运行（可最小化到右下角图标栏）；时间点与开关之后可在“设置 → 定时监测更新”中修改。</p>
         </div>
         <div className="detail-head"><div className="spacer" /><button className="btn" onClick={() => onClose(null)}>取消</button><button className="btn primary" onClick={() => onClose({ watch, time, catchUp })}>添加任务</button></div>
       </div>

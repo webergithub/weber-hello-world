@@ -58,7 +58,7 @@ export default function SettingsView({ focus }) {
         </section>
         <section ref={watchRef} className={focus === 'watch' ? 'flash-sec' : ''}>
           <h3>定时监测更新（增量解析）</h3>
-          <p className="muted">对开启监测的任务（如“本机全部文档”），每天在设定的时间自动重新扫描：新增的文档自动解析入库，修改过的文档重新解析并替换旧结果，原文件已删除的移入回收站（仅移出资料库，可还原），未变化的直接跳过。需要程序在运行（可最小化到任务栏）。修改立即生效。</p>
+          <p className="muted">对开启监测的任务（如“本机全部文档”），每天在设定的时间自动重新扫描：新增的文档自动解析入库，修改过的文档重新解析并替换旧结果，原文件已删除的移入回收站（仅移出资料库，可还原），未变化的直接跳过。需要程序在运行（可最小化到右下角图标栏）。修改立即生效。</p>
           <WatchSettings />
         </section>
         <section>
@@ -75,7 +75,7 @@ export default function SettingsView({ focus }) {
         <section>
           <h3>关闭窗口时</h3>
           <div className="seg">
-            {[['ask', '每次询问'], ['minimize', '最小化到任务栏'], ['quit', '完全退出']].map(([k, v]) => <button key={k} className={(cfg.closeAction || 'ask') === k ? 'on' : ''} onClick={() => set({ closeAction: k })}>{v}</button>)}
+            {[['ask', '每次询问'], ['minimize', '最小化到右下角图标栏'], ['quit', '完全退出']].map(([k, v]) => <button key={k} className={(cfg.closeAction || 'ask') === k ? 'on' : ''} onClick={() => set({ closeAction: k })}>{v}</button>)}
           </div>
           <p className="muted small">在关闭提示框中勾选“记住我的选择”会自动设置这里；改完点击右上角“保存设置”生效。</p>
         </section>
@@ -115,7 +115,7 @@ export default function SettingsView({ focus }) {
         </section>
         <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
           <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>
-          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未启用时，讲解词生成使用内置模板，翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
+          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未配置时，讲解词生成（建设中）与翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
           <div className="row"><label>服务商</label>
             <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>
           </div>

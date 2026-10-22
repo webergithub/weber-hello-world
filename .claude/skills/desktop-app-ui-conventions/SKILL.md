@@ -42,6 +42,9 @@ Each table must support:
 - Sidebar look: grouped sections with icon + title + count / current-scope chip, foldable; items as rounded pills with an accent bar when active; item cards with status dot, mini progress bar and hover actions; tools (basket, logs, settings, help, theme) pinned at the bottom.
 - Collapsible left sidebar (icon-only mode); each sidebar section can be folded separately; remember both.
 - **No duplicated buttons**: global actions (e.g. 添加目录, 扫描本机) live in one place only, normally the left sidebar. Sub-views that are switched from the sidebar do not get duplicate tabs on the right.
+- Sidebar order: work items → item detail (scoped) → overview → smart / experimental modules → maintenance (recycle bin, logs) → bottom tools (basket, help). The very bottom row: user info on the left (placeholder until accounts exist), a ⚙ settings icon on the right; theme switching lives in settings.
+- Closing the window offers "minimize to the system tray (右下角图标栏)" / "quit" (rememberable). In the tray: click restores, right-click menu has show window and quit. Allow only one running instance; launching again restores the window.
+- AI-dependent features with no configured API key show a clear "去设置" prompt instead of silently falling back to a canned template; mark unfinished AI features "建设中".
 - Features still being built are marked "建设中" (a small tag on the menu item or button).
 - Clicking a running item jumps straight to its live detail view.
 

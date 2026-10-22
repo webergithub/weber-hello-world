@@ -156,7 +156,7 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
     try { const s = await api.updateSlideText(slide.id, { notes: text }); emitSlide(s); setEdit(false); setTab('final'); app.toast(msg); } catch (e) { app.toast('保存失败：' + e.message, 'error'); }
   };
   const showing = lang === 'src' ? base : tr && tr.text ? tr.text : '';
-  const empty = { orig: word ? '（原文档没有批注）' : '（原 PPT 没有讲解词）', ai: '尚未生成。点击 Markdown 模块中的“🤖 自动调用 Agent 生成讲解词”。', final: '（无）' }[tabKey];
+  const empty = { orig: word ? '（原文档没有批注）' : '（原 PPT 没有讲解词）', ai: '尚未生成。“🤖 自动调用 Agent 生成讲解词”（建设中）需先在“设置 → Agent 接口”中配置 API Key。', final: '（无）' }[tabKey];
   const tabs = [['orig', word ? '原批注' : '原讲解词'], ['ai', `生成讲解词${slide.notes_ai ? '' : '（空）'}`], ['final', `修正讲解词${slide.edited && final !== slide.notes_orig ? ' ✎' : ''}`]];
   return (
     <div className="edit-pane">
@@ -211,7 +211,7 @@ export function MdBody({ slide, terms = [], onGenerated }) {
       emitSlide(s);
       if (onGenerated) onGenerated();
       app.toast(`Agent 已生成讲解词（${r.source}）`);
-    } catch (e) { app.toast('生成失败：' + e.message, 'error'); } finally { setBusy(false); }
+    } catch (e) { app.toast('生成失败：' + e.message, 'error', /Agent 接口/.test(e.message) ? { label: '去设置', run: () => app.go({ type: 'settings', focus: 'agent' }) } : undefined); } finally { setBusy(false); }
   };
   return (
     <div className="edit-pane">
@@ -229,7 +229,7 @@ export function MdBody({ slide, terms = [], onGenerated }) {
           <>
             {slide.md !== slide.md_orig && <button className="btn tiny" onClick={async () => { const s = await api.updateSlideText(slide.id, { md: null }); emitSlide(s); }}>恢复原文</button>}
             <button className="btn tiny" onClick={() => navigator.clipboard.writeText(slide.md || '')}>复制</button>
-            <button className="btn tiny primary" disabled={busy} onClick={gen} title="调用设置中的 Agent 接口（未配置时用内置模板）根据本页内容生成讲解词，结果显示在讲解词模块的“生成讲解词”页签">{busy ? '生成中…' : <>🤖 自动调用 Agent 生成讲解词 <span className="wip">建设中</span></>}</button>
+            <button className="btn tiny primary" disabled={busy} onClick={gen} title="调用“设置 → Agent 接口”中配置的大模型（如 DeepSeek）根据本页内容生成讲解词，结果显示在“生成讲解词”页签（建设中）">{busy ? '生成中…' : <>🤖 自动调用 Agent 生成讲解词 <span className="wip">建设中</span></>}</button>
           </>
         )}
       </div>
