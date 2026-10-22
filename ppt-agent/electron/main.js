@@ -282,6 +282,12 @@ app.whenReady().then(async () => {
     logTail: (n) => logger.tail(n),
     logClear: () => logger.clear(),
     logPath: () => logger.file,
+    // 导出运行日志：lines 为界面上筛选后的行；不传时复制完整日志文件
+    exportLog: (out, lines) => {
+      if (Array.isArray(lines)) fs.writeFileSync(out, '\ufeff' + lines.join('\r\n') + '\r\n', 'utf8');
+      else fs.copyFileSync(logger.file, out);
+      return { path: out, size: fs.statSync(out).size };
+    },
     clientLog: (level, msg) => logger.write(level === 'error' ? 'ERROR' : 'INFO', 'ui', msg),
     selectDir: async (title, single) => {
       const r = await dialog.showOpenDialog(win, { title: title || '选择要解析的 PPT / Word 目录', properties: single ? ['openDirectory', 'createDirectory'] : ['openDirectory', 'multiSelections'] });
@@ -289,7 +295,7 @@ app.whenReady().then(async () => {
     },
     // 保存对话框：按用途（key）记住上一次选择的目录
     saveFile: async (defaultName, kind = 'pptx', key = 'export') => {
-      const filters = kind === 'md' ? [{ name: 'Markdown', extensions: ['md'] }] : [{ name: 'PowerPoint', extensions: ['pptx'] }];
+      const filters = kind === 'md' ? [{ name: 'Markdown', extensions: ['md'] }] : kind === 'log' ? [{ name: '日志', extensions: ['log', 'txt'] }] : [{ name: 'PowerPoint', extensions: ['pptx'] }];
       const b = readBootstrap();
       const last = (b.lastDirs || {})[key];
       const dir = last && fs.existsSync(last) ? last : app.getPath('documents');

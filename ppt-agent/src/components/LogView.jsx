@@ -13,6 +13,19 @@ export default function LogView({ taskId }) {
   const lines = useMemo(() => logLines.filter((l) => (!onlyTask || !taskId || l.includes(`[任务#${taskId}]`))
     && (!level || l.includes(`[${level}]`)) && (!q || l.toLowerCase().includes(q.toLowerCase()))).slice(-3000), [logLines, onlyTask, level, q, taskId]);
   useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [lines, follow]);
+  const app = useApp();
+  // 导出：有筛选（本任务 / 级别 / 关键字）时导出当前显示的行，否则导出完整日志文件
+  const filtered = (onlyTask && taskId) || level || q;
+  const exportLog = async () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[-T:]/g, '');
+    const out = await api.saveFile(`PPT智能体运行日志${taskId && onlyTask ? `_任务${taskId}` : ''}_${stamp}.log`, 'log', 'log');
+    if (!out) return;
+    try {
+      const all = logLines.filter((l) => (!onlyTask || !taskId || l.includes(`[任务#${taskId}]`)) && (!level || l.includes(`[${level}]`)) && (!q || l.toLowerCase().includes(q.toLowerCase())));
+      const r = await api.exportLog(out, filtered ? all : null);
+      app.toast(`日志已导出：${out}`, 'info', { label: '打开位置', link: { type: 'reveal', path: r.path }, cat: '运行日志' });
+    } catch (e) { app.toast('导出失败：' + e.message, 'error'); }
+  };
   const cls = (l) => (l.includes('[ERROR]') ? 'err' : l.includes('[WARN]') ? 'warn' : l.includes('[DEBUG]') ? 'dbg' : '');
   return (
     <div className="logview">
@@ -31,6 +44,7 @@ export default function LogView({ taskId }) {
         <span className="muted">{lines.length} 行</span>
         <div className="spacer" />
         <button className="btn" onClick={reloadLogs}>刷新</button>
+        <button className="btn" disabled={!lines.length} title="导出当前显示的日志（含筛选条件）；未筛选时导出完整日志文件" onClick={exportLog}>⇩ 导出日志</button>
         <button className="btn" onClick={async () => api.showItem(await api.logPath())}>打开日志文件位置</button>
         <button className="btn ghost" onClick={async () => { if (confirm('确定清空运行日志？')) { await api.logClear(); reloadLogs(); } }}>清空</button>
       </div>
