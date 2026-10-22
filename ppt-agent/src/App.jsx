@@ -63,6 +63,7 @@ export default function App() {
     </div>
   );
   const [view, setViewState] = useState({ type: 'search' });
+  const [subOpen, setSubOpen] = useState({});
   // 当前选择的解析任务：“任务详情”模块下的菜单只显示该任务的内容
   const [curTask, setCurTaskState] = useState(() => Number(readLS('ppta.curTask', '0')) || null);
   const setCurTask = (id) => { setCurTaskState(id); try { localStorage.setItem('ppta.curTask', String(id || '')); } catch { /* ignore */ } };
@@ -104,7 +105,6 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 8000 : 5000);
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
-  useEffect(() => { setSearchState({}); }, [curTask]);
   useEffect(() => { if (tasks.length && !tasks.some((t) => t.id === curTask)) setCurTask(tasks[0].id); if (!tasks.length && curTask) setCurTask(null); }, [tasks]);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
   const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
@@ -203,44 +203,49 @@ export default function App() {
   };
 
   const cur = tasks.find((t) => t.id === curTask) || null;
-  const SCOPED = ['task', 'tmonitor', 'library', 'search', 'groups'];
-  // 左侧菜单：解析任务（选择任务）→ 任务详情（只显示所选任务）→ 总览分析（全部历史）→ 智能模块 → 底部工具
+  const SCOPED = ['task', 'tmonitor', 'library'];
+  // 左侧菜单：解析任务（选择任务）→ 任务详情（只显示所选任务）→ 总览分析（全部历史）→ 智能模块 → 维护 → 底部工具
   const taskNav = [
     { key: 'task', icon: '📁', label: '任务概览' },
     { key: 'tmonitor', icon: '⚙️', label: '解析过程', sub: [['live', '解析动态'], ['history', '解析历史']] },
     { key: 'library', icon: '📚', label: '资料库浏览' },
-    { key: 'search', icon: '🔍', label: '智能搜索' },
-    { key: 'groups', icon: '🧩', label: '相似分组' },
   ];
   const overNav = [
+    { key: 'search', icon: '🔍', label: '智能搜索' },
     { key: 'analytics', icon: '📈', label: '总览分析' },
     { key: 'alllib', icon: '🗂', label: '所有资料库' },
     { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => t.status === 'running') ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
+    { key: 'groups', icon: '🧩', label: '相似分组' },
   ];
   const maintNav = [
     { key: 'recycle', icon: '🗑', label: '回收站' },
     { key: 'logs', icon: '📜', label: '运行日志' },
   ];
   const smartNav = [
+    { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
-  ];
-  const toolNav = [
-    { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
   ];
   const selectTask = (t) => {
     setCurTask(t.id);
     if (['running', 'pending'].includes(t.status)) setViewState({ type: 'tmonitor', tab: 'live' });
     else if (!SCOPED.includes(view.type)) setViewState({ type: 'task' });
   };
+  // 有子菜单的菜单项：首次点击打开并展开子菜单，再次点击折叠 / 展开子菜单
+  const clickNav = (n) => {
+    if (n.sub && view.type === n.key) { setSubOpen((m) => ({ ...m, [n.key]: m[n.key] === false })); return; }
+    if (n.sub) setSubOpen((m) => ({ ...m, [n.key]: true }));
+    setViewState({ type: n.key, tab: n.sub ? n.sub[0][0] : undefined });
+  };
   const navItem = (n, { disabled = false } = {}) => (
     <React.Fragment key={n.key}>
       <div className={`sb-item ${view.type === n.key ? 'active' : ''} ${disabled ? 'disabled' : ''}`} data-tour={`nav-${n.key}`} title={n.label}
-        onClick={() => !disabled && setViewState({ type: n.key, tab: n.sub ? (view.type === n.key ? view.tab : n.sub[0][0]) : undefined })}>
+        onClick={() => !disabled && clickNav(n)}>
         <span className="ic">{n.icon}</span>{!collapsed && <span className="lbl">{n.label}{n.wip && <span className="wip">建设中</span>}</span>}
         {n.badge ? <span className="sb-badge">{n.badge}</span> : null}
+        {n.sub && !collapsed && <span className="sb-caret">{view.type === n.key && subOpen[n.key] !== false ? '▾' : '▸'}</span>}
       </div>
-      {n.sub && view.type === n.key && !collapsed && (
+      {n.sub && view.type === n.key && subOpen[n.key] !== false && !collapsed && (
         <div className="sb-sub">
           {n.sub.map(([k, v]) => <div key={k} className={`sb-subitem ${(view.tab || n.sub[0][0]) === k ? 'active' : ''}`} onClick={() => setViewState({ type: n.key, tab: k })}>{v}</div>)}
         </div>
@@ -302,17 +307,25 @@ export default function App() {
               );
             })}
           </div>}
-          {secHead('detail', <>🧭 任务详情{cur && !collapsed ? <span className="sb-scope" title={cur.dir}>{cur.name}</span> : null}</>, '🧭')}
-          {!folded.detail && <div className="sb-group">{taskNav.map((n) => navItem(n, { disabled: !cur }))}{!cur && !collapsed && <div className="sb-empty">添加并选择一个解析任务后可用</div>}</div>}
-          {secHead('over', '📊 总览分析', '📊')}
-          {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}
-          {secHead('smart', <>🤖 智能模块<span className="wip">建设中</span></>, '🤖')}
-          {!folded.smart && <div className="sb-group">{smartNav.map((n) => navItem(n))}</div>}
-          {secHead('maint', '🧰 维护', '🧰')}
-          {!folded.maint && <div className="sb-group">{maintNav.map((n) => navItem(n))}</div>}
+          {/* 四个功能模块：各用一种主题色的卡片区分 */}
+          <div className={`sb-mod m-detail ${folded.detail ? 'is-folded' : ''}`}>
+            {secHead('detail', <>🧭 任务详情{cur && !collapsed ? <span className="sb-scope" title={cur.dir}>{cur.name}</span> : null}</>, '🧭')}
+            {!folded.detail && <div className="sb-group">{taskNav.map((n) => navItem(n, { disabled: !cur }))}{!cur && !collapsed && <div className="sb-empty">添加并选择一个解析任务后可用</div>}</div>}
+          </div>
+          <div className={`sb-mod m-over ${folded.over ? 'is-folded' : ''}`}>
+            {secHead('over', '📊 总览分析', '📊')}
+            {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}
+          </div>
+          <div className={`sb-mod m-smart ${folded.smart ? 'is-folded' : ''}`}>
+            {secHead('smart', <>🤖 智能模块<span className="wip">建设中</span></>, '🤖')}
+            {!folded.smart && <div className="sb-group">{smartNav.map((n) => navItem(n))}</div>}
+          </div>
+          <div className={`sb-mod m-maint ${folded.maint ? 'is-folded' : ''}`}>
+            {secHead('maint', '🧰 维护', '🧰')}
+            {!folded.maint && <div className="sb-group">{maintNav.map((n) => navItem(n))}</div>}
+          </div>
           <div className="spacer" />
           <div className="sb-tools">
-            {toolNav.map((n) => navItem(n))}
             <div className={`sb-item ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>
               <span className="ic">❓</span>{!collapsed && <span className="lbl">帮助指南</span>}
             </div>
@@ -330,8 +343,8 @@ export default function App() {
           {view.type === 'task' && (cur ? <TaskView taskId={cur.id} /> : <NoTask />)}
           {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab })} /> : <NoTask />)}
           {view.type === 'library' && (cur ? <LibraryView key={`lib-${cur.id}`} taskId={cur.id} title={`📚 资料库浏览 · ${cur.name}`} mode={libMode} setMode={setLibMode} /> : <NoTask />)}
-          {view.type === 'search' && <SearchView key={`search-${curTask || 0}`} taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
-          {view.type === 'groups' && (cur ? <GroupsView taskId={cur.id} /> : <NoTask />)}
+          {view.type === 'search' && <SearchView defaultAll taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
+          {view.type === 'groups' && <GroupsView />}
           {view.type === 'alllib' && <LibraryView key="alllib" title="🗂 所有资料库" mode={allLibMode} setMode={setAllLibMode} />}
           {view.type === 'monitor' && <TaskMonitor tab={view.tab || 'queue'} taskId={view.taskId} setTab={(tab, taskId) => setViewState({ type: 'monitor', tab, taskId: taskId || view.taskId })} />}
           {view.type === 'basket' && <BasketView />}

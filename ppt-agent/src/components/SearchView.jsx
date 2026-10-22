@@ -16,8 +16,8 @@ function snippet(text, terms, n = 140) {
   return (start > 0 ? '…' : '') + t.slice(start, start + n) + (start + n < t.length ? '…' : '');
 }
 
-/** 智能搜索：taskId 为当前选择的任务，默认只在该任务的文档中检索，可切换到全部资料库 */
-export default function SearchView({ state, setState, taskId, taskName }) {
+/** 智能搜索（总览分析模块）：默认在所有资料库中检索，可切换为只搜当前选择的任务 */
+export default function SearchView({ state, setState, taskId, taskName, defaultAll = false }) {
   const app = useApp();
   const { q = '', result = null, tab = 'light' } = state;
   const [input, setInput] = useState(q);
@@ -31,8 +31,8 @@ export default function SearchView({ state, setState, taskId, taskName }) {
   const inputRef = useRef(null);
   const llmOn = app.config && app.config.llm && app.config.llm.enabled;
   const [stats, setStats] = useState(null);
-  const [scopeAll, setScopeAll] = useState(!taskId);
-  useEffect(() => { setScopeAll(!taskId); }, [taskId]);
+  const [scopeAll, setScopeAll] = useState(defaultAll || !taskId);
+  useEffect(() => { setScopeAll(defaultAll || !taskId); }, [taskId]);
   useEffect(() => {
     if (taskId && !scopeAll) api.library({ taskId }).then((fs) => { const ok = fs.filter((f) => f.status === 'parsed'); setStats({ files: ok.length, slides: ok.reduce((a, f) => a + (f.slide_count || 0), 0) }); }).catch(() => {});
     else api.stats().then(setStats).catch(() => {});
