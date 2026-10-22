@@ -22,6 +22,9 @@ export const ACTIONS = [
   { key: 'panes', label: '显示 / 隐藏讲解词与 MD', group: '窗口' },
   { key: 'layout', label: '切换布局（上1下2 / 左1右2；对比窗口：并排 / 田字格）', group: '窗口' },
   { key: 'rail', label: '显示 / 隐藏相关推荐栏', group: '窗口' },
+  { key: 'zoomIn', label: '放大页面（也可 Ctrl + 滚轮）', group: '窗口' },
+  { key: 'zoomOut', label: '缩小页面', group: '窗口' },
+  { key: 'zoomFit', label: '页面恢复到适配窗口', group: '窗口' },
   { key: 'back', label: '返回（点击推荐跳转前的页面）', group: '其他' },
   { key: 'basket', label: '加入 / 移出导出篮', group: '其他' },
   { key: 'close', label: '还原 / 关闭', group: '其他' },
@@ -53,6 +56,9 @@ export const DEFAULT_KEYMAP = {
   panes: ['N'],
   layout: ['L'],
   rail: ['R'],
+  zoomIn: ['=', 'Shift++', '+'],
+  zoomOut: ['-'],
+  zoomFit: ['0'],
   back: ['Backspace'],
   basket: ['Space'],
   close: ['Escape'],
@@ -128,7 +134,8 @@ export function buildLookup(map) {
 }
 
 const KEY_LABEL = { ArrowRight: '→', ArrowLeft: '←', ArrowUp: '↑', ArrowDown: '↓', Space: '空格', Escape: 'Esc', PageUp: 'PgUp', PageDown: 'PgDn', Enter: 'Enter', Delete: 'Del', Backspace: '退格' };
-export const comboLabel = (c) => String(c).split('+').map((p) => KEY_LABEL[p] || p).join('+');
+const splitCombo = (c) => { c = String(c); if (c === '+') return ['+']; if (c.endsWith('++')) return [...c.slice(0, -2).split('+'), '+']; return c.split('+'); };
+export const comboLabel = (c) => splitCombo(c).map((p) => KEY_LABEL[p] || p).join('+');
 export const keysLabel = (map, action, n = 2) => (map[action] || []).slice(0, n).map(comboLabel).join(' / ') || '未设置';
 
 /** 浏览窗口底部的按键提示（根据当前按键设置生成） */
@@ -162,6 +169,7 @@ export function viewerHintItems(map, { compare = false } = {}) {
       [k('panes'), '显示 / 隐藏讲解词与 MD'],
       [k('layout'), '切换上1下2 / 左1右2'],
       [k('rail'), '显示 / 隐藏相关推荐栏'],
+      [`${keysLabel(map, 'zoomIn', 1)}  ${keysLabel(map, 'zoomOut', 1)}  ${keysLabel(map, 'zoomFit', 1)}`, '放大 / 缩小 / 适配窗口（Ctrl + 滚轮无级缩放，放大后可拖动）'],
       [k('back'), '返回推荐前的页面'],
       [k('basket'), '加入 / 移出导出篮'],
       [k('close'), '还原 / 关闭'],
@@ -169,7 +177,6 @@ export function viewerHintItems(map, { compare = false } = {}) {
     ];
 }
 
-export function viewerHint(map, opts) { return viewerHintItems(map, opts).map(([a, b]) => `${a} ${b}`).join(' · '); }
 
 /** 输入框中、或打开了帮助 / 筛选弹框、新手指引时，不响应浏览快捷键 */
 export const isTyping = (t) => !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) || !!document.querySelector('.page-help-pop, .dt-filter, .tour');

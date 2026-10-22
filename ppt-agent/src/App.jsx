@@ -64,6 +64,8 @@ export default function App() {
   );
   const [view, setViewState] = useState({ type: 'search' });
   const [subOpen, setSubOpen] = useState({});
+  const [version, setVersion] = useState('');
+  useEffect(() => { api.appVersion().then(setVersion).catch(() => {}); }, []);
   // 当前选择的解析任务：“任务详情”模块下的菜单只显示该任务的内容
   const [curTask, setCurTaskState] = useState(() => Number(readLS('ppta.curTask', '0')) || null);
   const setCurTask = (id) => { setCurTaskState(id); try { localStorage.setItem('ppta.curTask', String(id || '')); } catch { /* ignore */ } };
@@ -258,7 +260,9 @@ export default function App() {
       <div className={`app ${collapsed ? 'collapsed' : ''}`}>
         <aside className="sidebar">
           <div className="sb-head">
-            {!collapsed && <div className="logo">PPT<span>智能体</span></div>}
+            {!collapsed && <div className="logo" title={version ? `PPT智能体 v${version}` : ''}>PPT<span>智能体</span>{version && <sup className="sb-ver">v{version}</sup>}</div>}
+            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南：功能详解、快捷键、新手指引" onClick={() => setViewState({ type: 'help' })}>❓ 帮助</button>}
+            <div className="spacer" />
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
           <div className="add-wrap" data-tour="add">
@@ -325,12 +329,8 @@ export default function App() {
             {!folded.maint && <div className="sb-group">{maintNav.map((n) => navItem(n))}</div>}
           </div>
           <div className="spacer" />
-          <div className="sb-tools">
-            <div className={`sb-item ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>
-              <span className="ic">❓</span>{!collapsed && <span className="lbl">帮助指南</span>}
-            </div>
-          </div>
           <div className="sb-foot">
+            {collapsed && <button className={`sb-gear ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>❓</button>}
             <div className="sb-user" title="用户信息（预留）">
               <span className="sb-avatar">👤</span>
               {!collapsed && <div className="sb-user-main"><div className="sb-user-name">本地用户</div><div className="sb-user-sub">用户信息（预留）</div></div>}

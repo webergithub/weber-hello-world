@@ -325,7 +325,6 @@ table.grid tr:hover td { background: var(--hover2); }
 .viewer-bar { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; background: var(--bg2); }
 .vb-file { min-width: 0; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .vb-page { min-width: 110px; text-align: center; font-variant-numeric: tabular-nums; }
-.viewer-keys { padding: 4px 12px; border-bottom: 1px solid var(--line2); }
 .viewer-body { flex: 1; overflow-y: auto; min-height: 0; padding-bottom: 12px; }
 .viewer-title { display: flex; align-items: center; gap: 8px; padding: 10px 14px 6px; flex-wrap: wrap; }
 .viewer-stage { display: grid; grid-template-columns: 44px 1fr 44px; align-items: center; gap: 6px; padding: 4px 8px 8px; }
@@ -905,3 +904,53 @@ th.filtered { color: var(--accent); }
 .collapsed .sb-mod > .sb-section.fold { padding: 7px 0; justify-content: center; }
 .collapsed .sb-mod .sb-group { padding: 3px 3px 0; }
 .sb-caret { font-size: 12px !important; color: var(--fg2) !important; }
+/* 标题旁的帮助指南按钮 */
+.sb-head { gap: 6px; }
+.sb-helpbtn { flex: none; border: 1px solid rgba(79, 140, 255, .45); background: rgba(79, 140, 255, .12); color: var(--accent); border-radius: 14px; padding: 2px 10px; font-size: 12.5px; font-weight: 600; cursor: pointer; line-height: 20px; white-space: nowrap; }
+.sb-helpbtn:hover, .sb-helpbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ===== 转换规则设置（两个页签 + 预览） ===== */
+.vh-title .rules-btn { margin-left: 12px; vertical-align: middle; }
+.rules-modal { width: min(1080px, 96vw); max-height: 92vh; display: flex; flex-direction: column; }
+.rules-tabs { padding: 8px 14px 0; }
+.rules-body { overflow-y: auto; flex: 1; min-height: 0; }
+.rules-body h4 { margin: 14px 0 6px; font-size: 14px; }
+.rule-color { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rule-color .input.hex { width: 76px; }
+.rule-color .input.num, .rule-opts .input.num { width: 64px; }
+.rule-preview { display: flex; align-items: center; gap: 14px; padding: 6px 0 4px; }
+.rp-card { flex: 1; min-width: 0; }
+.rp-cap { font-size: 12px; color: var(--fg2); margin-bottom: 4px; }
+.rp-slide { position: relative; aspect-ratio: 16 / 7; border-radius: 6px; border: 1px solid var(--line); padding: 12px 16px; display: grid; grid-template-columns: 1fr 120px; grid-template-rows: auto auto 1fr; gap: 6px 14px; overflow: hidden; }
+.rp-logo { position: absolute; right: 10px; top: 10px; width: 18px; height: 18px; border-radius: 4px; }
+.rp-title { grid-column: 1 / -1; font-size: 18px; font-weight: 700; }
+.rp-line { font-size: 13px; }
+.rp-shape { grid-row: 2 / 4; grid-column: 2; border: 2px solid; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+.rp-table { border-collapse: collapse; font-size: 12px; align-self: start; }
+.rp-table td { border: 1px solid; padding: 2px 10px; }
+.rp-arrow { font-size: 22px; color: var(--fg3); }
+.wip-box { opacity: .75; border: 1px dashed var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 12px; display: flex; flex-direction: column; gap: 6px; }
+.sb-ver { font-size: 10px; font-weight: 500; color: var(--fg3); margin-left: 4px; }
+/* “自动调用 Agent 生成讲解词”（建设中）：淡橙底黑字 */
+.btn.gen-btn, .btn.gen-btn:hover { background: #ffdcb8; color: #1a1a1a; border-color: #f5b77a; }
+.btn.gen-btn:hover { background: #ffcd9a; }
+.btn.gen-btn .wip { color: #7a3d00; border-color: #c97a2e; background: rgba(255, 255, 255, .5); }
+
+/* ===== 页面无级缩放 ===== */
+.zoom-stage { position: relative; width: 100%; height: 100%; overflow: hidden; display: flex; align-items: center; justify-content: center; }
+.zoom-stage.zoomed { cursor: grab; }
+.zoom-stage.dragging { cursor: grabbing; }
+.zoom-inner { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-origin: center center; will-change: transform; }
+.zoom-bar { position: absolute; right: 8px; bottom: 8px; z-index: 4; display: flex; align-items: center; gap: 4px; background: rgba(20, 22, 28, .72); color: #fff; border-radius: 16px; padding: 3px 8px; font-size: 12px; opacity: .25; transition: opacity .15s; cursor: default; }
+.zoom-stage:hover .zoom-bar, .zoom-stage.zoomed .zoom-bar { opacity: 1; }
+.zoom-bar button { border: none; background: transparent; color: #fff; cursor: pointer; font-size: 13px; padding: 1px 5px; border-radius: 10px; }
+.zoom-bar button:hover:not(:disabled) { background: rgba(255, 255, 255, .18); }
+.zoom-bar button:disabled { opacity: .45; cursor: default; }
+.zoom-bar .zoom-fit.on { background: var(--accent); }
+.zoom-bar input[type=range] { width: 90px; accent-color: #fff; }
+.zoom-pct { min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
+.ws-stage > .zoom-stage { flex: none; width: min(100cqw - 16px, calc((100cqh - 16px) * var(--ratio, 1.7778))); height: auto; aspect-ratio: var(--ratio, 1.7778); }
+.ws-stage > .zoom-stage .slide-box { width: 100% !important; }
+.zoom-bar, .zoom-bar button { white-space: nowrap; }
+.ws-stage .zoom-bar input[type=range] { width: 56px; }
+.rules-modal .rule-color .input.num { width: 56px; }

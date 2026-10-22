@@ -10,6 +10,7 @@ import { loadSlide } from './SlideWorkspace';
 import { useKeymap, comboOf, isTyping, keysLabel } from '../keymap';
 import RelatedRail from './RelatedRail';
 import PageHelp from './PageHelp';
+import ZoomStage, { FIT, zoomBy } from './ZoomStage';
 
 const fileCache = new Map();
 export function loadFile(id) {
@@ -50,6 +51,8 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   const [panes, setPanes] = useState(true);
   const [layout, setLayout] = useStoredLayout('ppta.viewerLayout');
   const [notesTab, setNotesTab] = useState('orig');
+  // 页面无级缩放（翻页时保持缩放比例，位置回到中心）
+  const [zoom, setZoom] = useState(FIT);
   useEffect(() => onSlideUpdated((s2) => setSlide((cur) => (cur && cur.id === s2.id ? s2 : cur))), []);
   const [osd, setOsd] = useState(null);
   const osdTimer = useRef(null);
@@ -75,6 +78,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     });
     return () => { off = true; };
   }, [fileId]);
+  useEffect(() => { setZoom((z) => ({ ...z, x: 0, y: 0 })); }, [slideId]);
   useEffect(() => {
     let off = false;
     if (!slideId) return;
@@ -137,6 +141,9 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         case 'lastFile': if (ids.length) setFileId(ids[ids.length - 1]); break;
         case 'basket': toggleBasket(); break;
         case 'rail': setRailP((v) => !v); break;
+        case 'zoomIn': setZoom((z) => zoomBy(z, 1.25)); break;
+        case 'zoomOut': setZoom((z) => zoomBy(z, 1 / 1.25)); break;
+        case 'zoomFit': setZoom(FIT); break;
         case 'back': if (back.length) goBack(); else handled = false; break;
         case 'max': toggleMax(); break;
         case 'full': toggleFull(); break;
@@ -219,7 +226,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
                 {slide.counterpart && <div className="hint-bar">⇄ 该页有内容相近的 <b>{THEME_LABEL[slide.counterpart.theme]}</b> 版本：{slide.counterpart.fileName} 第 {slide.counterpart.idx} 页 <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>切换查看</button></div>}
                 <div className="viewer-stage">
                   <button className="stage-nav left" disabled={pos <= 0 && fpos <= 0} onClick={() => go(-1, true)}>‹</button>
-                  <div className="stage-slide" onDoubleClick={toggleMax} title="双击最大化 / 还原" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}><SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} /></div>
+                  <div className="stage-slide" onDoubleClick={toggleMax} title="双击最大化 / 还原；Ctrl + 滚轮缩放" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>{unit === '页' ? <ZoomStage view={zoom} setView={setZoom}><SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} /></ZoomStage> : <SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} />}</div>
                   <button className="stage-nav right" disabled={pos >= slides.length - 1 && fpos >= ids.length - 1} onClick={() => go(1, true)}>›</button>
                 </div>
                 <div className="viewer-strip" ref={strip}>

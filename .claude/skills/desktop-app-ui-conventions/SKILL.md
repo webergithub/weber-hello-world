@@ -53,6 +53,8 @@ Each table must support:
 - Full-page viewers support maximise, fullscreen and keyboard paging: ← → previous / next page, ↑ ↓ previous / next file, Home / End, Space to select, Esc to restore.
 - **All shortcuts are user-configurable** in settings (record a key, conflict warning, presets such as "↑ ↓ 翻页 · ← → 切换文件", reset). Shortcut hints in the UI are generated from the current key map; never hard-code keys in components.
 - Allow side-by-side comparison of 2–4 items with linked paging plus per-pane controls.
+- Page / image previews support stepless zoom: Ctrl + wheel around the cursor, a small zoom bar (－ / slider / ＋ / percentage / "⤢ 适配窗口"), drag to pan when zoomed, keys = / - / 0; keep the zoom level when paging.
+- Rule editors (e.g. colour conversion) use one tab per direction, a before/after preview, a base-rule table "element · original · after · effect swatch", and a custom-rule list "element + original value (any / exact + tolerance) → result (value / keep / none)" with enable, reorder and delete; first matching custom rule wins.
 - A "related items" side rail: clicking an item replaces the current view in place, with "↩ 返回" (Backspace).
 
 ## 5. Long-running tasks

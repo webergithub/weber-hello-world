@@ -5,6 +5,7 @@ import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
 import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
 import RelatedRail from './RelatedRail';
+import ZoomStage, { FIT } from './ZoomStage';
 
 const slideCache = new Map();
 export async function loadSlide(id) {
@@ -34,6 +35,8 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
   // 资料库详情的三个模块（原始页 / 讲解词 / Markdown）可拖动调整大小、换位，下次打开时恢复
   const [layout, setLayout] = useStoredLayout('ppta.wsLayout', WS_LAYOUT);
   const [notesTab, setNotesTab] = useState('orig');
+  const [zoom, setZoom] = useState(FIT);
+  useEffect(() => { setZoom((z) => ({ ...z, x: 0, y: 0 })); }, [slideId]);
   useEffect(() => onSlideUpdated((s2) => setSlide((cur) => (cur && cur.id === s2.id ? s2 : cur))), []);
 
   const visible = useMemo(() => {
@@ -200,7 +203,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                   ),
                   body: (
                     <div className="ws-stage" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>
-                      <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} />
+                      {isWord ? <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /> : <ZoomStage view={zoom} setView={setZoom}><SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /></ZoomStage>}
                       {slide.media && slide.media.length > 0 && (
                         <div className="media-list">
                           {slide.media.map((m, i) => (

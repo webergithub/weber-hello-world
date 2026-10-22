@@ -226,6 +226,7 @@ app.whenReady().then(async () => {
     fileDetail: (id) => service.fileDetail(id),
     slideDetail: (id) => service.slideDetail(id),
     related: (id) => service.related(id),
+    appVersion: () => app.getVersion(),
     notesI18n: (id) => service.notesI18n(id),
     translateNotes: (id, opts) => service.translateNotes(id, opts),
     writeBackNotes: (id, opts) => service.writeBackNotes(id, opts),

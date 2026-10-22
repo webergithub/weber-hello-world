@@ -177,6 +177,19 @@ test('黑白底互转：黑→白、白→黑', async () => {
   z.close();
   assert.ok(!/<a:srgbClr val="FFFFFF"\/>/.test(cx.split('<c:plotArea>')[0].replace(/<c:spPr>[\s\S]*?<\/c:spPr>/g, '')), '图表文字不应再是白色');
   assert.match(cx, /<c:majorGridlines><c:spPr><a:ln[^>]*><a:solidFill><a:srgbClr val="BFBFBF"/);
+  // 自定义规则：指定原颜色的文字改为指定颜色，其余文字保持原色；规则脚本会被校验
+  const { normalizeRules } = require('../electron/core/converter');
+  const nr = normalizeRules({ toLight: { custom: [{ el: 'text', from: '*', to: 'keep' }, { el: 'bogus', from: '*', to: '000000' }, { el: 'shapeFill', from: '#ff0000', tol: 999, to: null }] } });
+  assert.strictEqual(nr.toLight.custom.length, 2);
+  assert.strictEqual(nr.toLight.custom[1].from, 'FF0000');
+  assert.strictEqual(nr.toLight.custom[1].tol, 255);
+  assert.strictEqual(nr.toLight.custom[1].to, null);
+  const outK = path.join(tmp, 'cv-custom.pptx');
+  const rk = await convertTheme(merged, outK, ['toLight', null], { rules: { toLight: { custom: [{ el: 'text', from: '*', to: '1F3864' }] } } });
+  assert.ok(rk.stats.custom > 0);
+  const backK = await parsePptx(outK, { mediaDir: tmp });
+  const runsK = backK.slides[0].layout.items.flatMap((i) => (i.paras || []).flatMap((p) => p.runs || [])).filter((x) => x.text.trim());
+  assert.ok(runsK.length && runsK.every((x) => x.color === '1F3864'), '自定义规则：所有文字改为 1F3864');
 });
 
 test('智能生成：版式意图识别与相似聚类', () => {

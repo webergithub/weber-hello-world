@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { api, fmtSize, THEME_LABEL, assetUrl } from '../api';
 import { useApp } from '../ctx';
 import SlidePreview, { HtmlSlide } from './SlidePreview';
+import DataTable from './DataTable';
 
 const DIR_LABEL = { auto: '自动（黑↔白）', toLight: '黑底 → 白底', toDark: '白底 → 黑底' };
 
@@ -48,7 +49,7 @@ export default function ConvertView() {
     <div className="view">
       {rulesOpen && <RulesDialog onClose={(r) => { setRulesOpen(false); if (r) setRules(r); }} />}
       <div className="view-head">
-        <div className="vh-title">🌓 PPT 黑白底互转</div>
+        <div className="vh-title">🌓 PPT 黑白底互转 <button className="btn small rules-btn" onClick={() => setRulesOpen(true)}>⚙ 转换规则设置</button></div>
         <div className="spacer" />
         <button className="btn ghost" disabled={!queue.length} onClick={() => setQueue([])}>清空序列</button>
         <button className="btn primary" disabled={!queue.length || busy} onClick={run}>{busy ? '转换中…' : `开始转换并导出（${queue.length} 页）`}</button>
@@ -97,7 +98,7 @@ export default function ConvertView() {
             );
           })}
           <div className="rules">
-            <div className="rules-head"><b>转化规则</b><div className="spacer" /><button className="btn small" onClick={() => setRulesOpen(true)}>⚙ 转换规则设置</button></div>
+            <div className="rules-head"><b>当前转换规则</b><div className="spacer" /><span className="link small" onClick={() => setRulesOpen(true)}>查看 / 修改</span></div>
             {rules && <RulesSummary rules={rules} />}
           </div>
         </div>
@@ -143,7 +144,8 @@ const swatch = (v) => (v ? <span className="sw" style={{ background: '#' + v }} 
 function describe(rules) {
   const c = (v) => (v ? '#' + v : '无/透明');
   const d = (r) => `背景 ${c(r.bg)}；文字 ${c(r.text)}${rules.options.keepAccentText ? `，原彩色文字 ${c(r.accentText)}` : ''}；图形填充 ${c(r.shapeFill)}、线框 ${c(r.shapeLine)}；表格框线 ${c(r.tableLine)}${r.headerFill ? `、表头 ${c(r.headerFill)}` : ''}；logo ${r.logo ? '重着色为 ' + c(r.logo) : '不处理'}`;
-  return { toLight: d(rules.toLight), toDark: d(rules.toDark), options: `小于页面面积 ${Math.round(rules.options.logoMaxArea * 100)}% 的图片视为 logo；${rules.options.removeFullBg ? `大于 ${Math.round(rules.options.fullBgMinArea * 100)}% 的整页背景图移除` : '保留整页背景图'}` };
+  const cus = (r) => (r.custom && r.custom.length ? `；自定义规则 ${r.custom.filter((c) => c.enabled !== false).length} 条` : '');
+  return { toLight: d(rules.toLight) + cus(rules.toLight), toDark: d(rules.toDark) + cus(rules.toDark), options: `小于页面面积 ${Math.round(rules.options.logoMaxArea * 100)}% 的图片视为 logo；${rules.options.removeFullBg ? `大于 ${Math.round(rules.options.fullBgMinArea * 100)}% 的整页背景图移除` : '保留整页背景图'}` };
 }
 
 function RulesSummary({ rules }) {
@@ -157,50 +159,150 @@ function RulesSummary({ rules }) {
   );
 }
 
-// 转换规则设置：表单编辑 → 生成规则脚本（JSON）→ 保存后应用到下一次转换
+// 转换规则设置：两个页签（黑底 → 白底 / 白底 → 黑底），每页有基础规则、自定义规则与效果预览；保存为规则脚本，应用到下一次转换
+const BASE_ROWS = {
+  toLight: [
+    ['bg', '背景', '黑色 / 深色背景（页面、版式、母版）'], ['text', '文字', '白色 / 浅色等普通文字'], ['accentText', '原彩色文字', '红、橙、蓝等彩色文字（需开启“保留彩色文字区分”）'],
+    ['shapeFill', '图形填充', '有填充色的形状'], ['shapeLine', '图形线框', '形状边框与连接线'], ['tableLine', '表格框线', '表格的全部边框'], ['headerFill', '表头填充', '表格首行（标题行）底色'], ['logo', 'logo', '小图片（不超过 logo 判定面积）'],
+  ],
+  toDark: [
+    ['bg', '背景', '白色 / 浅色背景（页面、版式、母版）'], ['text', '文字', '黑色 / 深色等普通文字'], ['accentText', '原彩色文字', '红、橙、蓝等彩色文字（需开启“保留彩色文字区分”）'],
+    ['shapeFill', '图形填充', '有填充色的形状'], ['shapeLine', '图形线框', '形状边框与连接线'], ['tableLine', '表格框线', '表格的全部边框'], ['headerFill', '表头填充', '表格首行（标题行）底色'], ['logo', 'logo', '小图片（不超过 logo 判定面积）'],
+  ],
+};
+const ELEMENTS = { text: '文字', shapeFill: '图形填充', shapeLine: '图形线条 / 连接线', tableLine: '表格框线', tableFill: '表格单元格填充' };
+// 预览用的“原页面”样例颜色
+const SAMPLE = {
+  toLight: { bg: '111111', text: 'FFFFFF', accent: 'FF9900', shapeFill: '2F5597', shapeLine: 'FFFFFF', tableLine: '7F7F7F', tableFill: '262626', logo: 'E0301E' },
+  toDark: { bg: 'FFFFFF', text: '000000', accent: 'C00000', shapeFill: 'D9D9D9', shapeLine: '595959', tableLine: '7F7F7F', tableFill: 'F2F2F2', logo: 'E0301E' },
+};
+const hexDist = (a, b) => { const x = parseInt(a, 16), y = parseInt(b, 16); return Math.sqrt(((x >> 16) - (y >> 16)) ** 2 + (((x >> 8) & 255) - ((y >> 8) & 255)) ** 2 + ((x & 255) - (y & 255)) ** 2); };
+/** 与转换引擎一致：先找第一条匹配的自定义规则，否则用基础规则；返回 'keep' 表示保持原色 */
+function resolve(rule, el, orig, base) {
+  for (const c of rule.custom || []) {
+    if (c.el !== el || c.enabled === false) continue;
+    if (c.from === '*' || (orig && /^[0-9A-F]{6}$/i.test(c.from) && hexDist(orig, c.from) <= (c.tol || 0))) return { v: c.to, custom: true };
+  }
+  return { v: base, custom: false };
+}
+const css = (v, orig) => (v === 'keep' ? '#' + orig : v ? '#' + v : 'transparent');
+
+function ColorEdit({ value, onChange, allowKeep = false, allowNone = true }) {
+  const mode = value === 'keep' ? 'keep' : value === null ? 'none' : 'color';
+  return (
+    <div className="rule-color">
+      <select className="input tiny" value={mode} onChange={(e) => onChange(e.target.value === 'keep' ? 'keep' : e.target.value === 'none' ? null : (mode === 'color' ? value : 'FFFFFF'))}>
+        <option value="color">指定颜色</option>
+        {allowKeep && <option value="keep">保持原色</option>}
+        {allowNone && <option value="none">无 / 透明</option>}
+      </select>
+      {mode === 'color' && <>
+        <input type="color" value={'#' + (value || 'FFFFFF')} onChange={(e) => onChange(e.target.value.slice(1).toUpperCase())} />
+        <input className="input hex" value={value || ''} onChange={(e) => onChange(/^[0-9a-f]{6}$/i.test(e.target.value) ? e.target.value.toUpperCase() : e.target.value)} />
+      </>}
+    </div>
+  );
+}
+
+function RulePreview({ dir, rule, options }) {
+  const o = SAMPLE[dir];
+  const r = (el, orig, base) => css(resolve(rule, el, orig, base).v, orig);
+  const before = { bg: '#' + o.bg, text: '#' + o.text, accent: '#' + o.accent, fill: '#' + o.shapeFill, line: '#' + o.shapeLine, tline: '#' + o.tableLine, tfill: '#' + o.tableFill, logo: '#' + o.logo };
+  const after = {
+    bg: '#' + rule.bg, text: r('text', o.text, rule.text), accent: r('text', o.accent, options.keepAccentText ? rule.accentText : rule.text),
+    fill: r('shapeFill', o.shapeFill, rule.shapeFill), line: r('shapeLine', o.shapeLine, rule.shapeLine), tline: r('tableLine', o.tableLine, rule.tableLine),
+    tfill: r('tableFill', o.tableFill, null), head: r('tableFill', o.tableFill, rule.headerFill), logo: rule.logo ? '#' + rule.logo : '#' + o.logo,
+  };
+  const card = (c, title) => (
+    <div className="rp-card">
+      <div className="rp-cap">{title}</div>
+      <div className="rp-slide" style={{ background: c.bg }}>
+        <div className="rp-logo" style={{ background: c.logo }} />
+        <div className="rp-title" style={{ color: c.text }}>标题文字 Title</div>
+        <div className="rp-line" style={{ color: c.text }}>• 普通正文 <span style={{ color: c.accent }}>彩色强调</span></div>
+        <div className="rp-shape" style={{ background: c.fill, borderColor: c.line }}><span style={{ color: c.text }}>图形</span></div>
+        <table className="rp-table" style={{ borderColor: c.tline }}><tbody>
+          <tr>{[1, 2].map((k) => <td key={k} style={{ borderColor: c.tline, background: c.head || c.tfill, color: c.text }}>表头</td>)}</tr>
+          <tr>{[1, 2].map((k) => <td key={k} style={{ borderColor: c.tline, background: c.tfill, color: c.text }}>数据</td>)}</tr>
+        </tbody></table>
+      </div>
+    </div>
+  );
+  return <div className="rule-preview">{card(before, dir === 'toLight' ? '转换前（黑底示例）' : '转换前（白底示例）')}<div className="rp-arrow">→</div>{card(after, '转换后')}</div>;
+}
+
 function RulesDialog({ onClose }) {
   const app = useApp();
   const [r, setR] = useState(null);
+  const [tab, setTab] = useState('toLight');
   const [script, setScript] = useState('');
-  const [nl, setNl] = useState('');
-  const [busy, setBusy] = useState(false);
   useEffect(() => { api.getConvertRules().then((x) => { setR(x); setScript(JSON.stringify(x, null, 2)); }); }, []);
   if (!r) return null;
   const upd = (n) => { setR(n); setScript(JSON.stringify(n, null, 2)); };
-  const setC = (dir, k, v) => upd({ ...r, [dir]: { ...r[dir], [k]: v } });
+  const rule = r[tab];
+  const setC = (k, v) => upd({ ...r, [tab]: { ...rule, [k]: v } });
   const setO = (k, v) => upd({ ...r, options: { ...r.options, [k]: v } });
-  const colorCell = (dir, k) => {
-    const v = r[dir][k];
-    return (
-      <td key={dir}>
-        <div className="rule-color">
-          <input type="color" value={'#' + (v || 'FFFFFF')} disabled={!v} onChange={(e) => setC(dir, k, e.target.value.slice(1).toUpperCase())} />
-          <input className="input hex" value={v || ''} placeholder="无" onChange={(e) => setC(dir, k, /^[0-9a-f]{6}$/i.test(e.target.value) ? e.target.value.toUpperCase() : e.target.value)} />
-          <label className="chk small"><input type="checkbox" checked={!v} onChange={(e) => setC(dir, k, e.target.checked ? null : 'FFFFFF')} />无/透明</label>
-        </div>
-      </td>
-    );
-  };
+  const custom = rule.custom || [];
+  const setCustom = (list) => upd({ ...r, [tab]: { ...rule, custom: list } });
+  const patch = (i, p) => setCustom(custom.map((c, k) => (k === i ? { ...c, ...p } : c)));
+  const move = (i, d) => { const n = [...custom]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; setCustom(n); };
+  const addRule = () => setCustom([...custom, { el: 'text', from: tab === 'toLight' ? 'FF0000' : 'C00000', tol: 40, to: tab === 'toLight' ? 'C00000' : 'FF6666', note: '', enabled: true }]);
+  const rows = custom.map((c, i) => ({ ...c, i }));
+  const columns = [
+    { key: 'i', label: '#', nosort: true, render: (c) => c.i + 1 },
+    { key: 'enabled', label: '启用', nosort: true, render: (c) => <input type="checkbox" checked={c.enabled !== false} onChange={(e) => patch(c.i, { enabled: e.target.checked })} /> },
+    { key: 'el', label: '元素', nosort: true, render: (c) => <select className="input tiny" value={c.el} onChange={(e) => patch(c.i, { el: e.target.value })}>{Object.entries(ELEMENTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> },
+    { key: 'from', label: '原颜色', nosort: true, render: (c) => (
+      <div className="rule-color">
+        <select className="input tiny" value={c.from === '*' ? 'any' : 'color'} onChange={(e) => patch(c.i, { from: e.target.value === 'any' ? '*' : 'FF0000' })}><option value="any">任意颜色</option><option value="color">指定颜色</option></select>
+        {c.from !== '*' && <>
+          <input type="color" value={'#' + (/^[0-9A-F]{6}$/i.test(c.from) ? c.from : 'FF0000')} onChange={(e) => patch(c.i, { from: e.target.value.slice(1).toUpperCase() })} />
+          <input className="input hex" value={c.from} onChange={(e) => patch(c.i, { from: e.target.value.toUpperCase() })} />
+          <span className="muted small" title="与指定颜色相差在该范围内都算匹配（0 = 完全一致）">近似</span>
+          <input className="input num" type="number" min="0" max="255" value={c.tol || 0} onChange={(e) => patch(c.i, { tol: Number(e.target.value) })} />
+        </>}
+      </div>
+    ) },
+    { key: 'to', label: '→ 转换后', nosort: true, render: (c) => <ColorEdit value={c.to} allowKeep onChange={(v) => patch(c.i, { to: v })} /> },
+    { key: 'note', label: '说明', nosort: true, render: (c) => <input className="input" value={c.note || ''} placeholder="如：红色强调字改深红" onChange={(e) => patch(c.i, { note: e.target.value })} /> },
+    { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (c) => <><button className="btn tiny" disabled={c.i === 0} onClick={() => move(c.i, -1)}>↑</button><button className="btn tiny" disabled={c.i === custom.length - 1} onClick={() => move(c.i, 1)}>↓</button><button className="btn tiny" onClick={() => setCustom(custom.filter((_, k) => k !== c.i))}>删除</button></> },
+  ];
   return (
     <div className="overlay" onClick={() => onClose(null)}>
       <div className="modal rules-modal" onClick={(e) => e.stopPropagation()}>
         <div className="detail-head"><div className="dh-title">⚙ 黑白底互转 · 转换规则设置</div><div className="spacer" /><button className="icon-btn" onClick={() => onClose(null)}>✕</button></div>
-        <div className="modal-body pad">
-          <p className="muted small">编辑下方规则后点击“保存规则脚本”，生成新的转换规则脚本（JSON，保存在数据目录 convert-rules.json），并应用到下一次转换。</p>
+        <div className="tabs attached rules-tabs">
+          <button className={tab === 'toLight' ? 'on' : ''} onClick={() => setTab('toLight')}>⬛ → ⬜ 黑底转白底{r.toLight.custom && r.toLight.custom.length ? `（自定义 ${r.toLight.custom.length}）` : ''}</button>
+          <button className={tab === 'toDark' ? 'on' : ''} onClick={() => setTab('toDark')}>⬜ → ⬛ 白底转黑底{r.toDark.custom && r.toDark.custom.length ? `（自定义 ${r.toDark.custom.length}）` : ''}</button>
+        </div>
+        <div className="modal-body pad rules-body">
+          <RulePreview dir={tab} rule={rule} options={r.options} />
+          <h4>基础规则 <span className="muted small">原页面中的元素 → 转换后的呈现</span></h4>
           <table className="grid rules-table">
-            <thead><tr><th>对象</th><th>黑底 → 白底</th><th>白底 → 黑底</th></tr></thead>
-            <tbody>{FIELDS.map(([k, label]) => <tr key={k}><td>{label}</td>{colorCell('toLight', k)}{colorCell('toDark', k)}</tr>)}</tbody>
+            <thead><tr><th>元素</th><th>原页面中</th><th>转换后</th><th>效果</th></tr></thead>
+            <tbody>{BASE_ROWS[tab].map(([k, label, desc]) => (
+              <tr key={k}>
+                <td><b>{label}</b></td>
+                <td className="muted small">{desc}</td>
+                <td><ColorEdit value={rule[k]} allowNone={k !== 'bg' && k !== 'text'} onChange={(v) => setC(k, v)} /></td>
+                <td className="nowrap">{swatch(SAMPLE[tab][{ accentText: 'accent', headerFill: 'tableFill' }[k] || k])}<span className="muted"> → </span>{k === 'logo' && !rule[k] ? <span className="muted small">不处理</span> : swatch(rule[k])}</td>
+              </tr>
+            ))}</tbody>
           </table>
+          <h4>自定义规则 <span className="muted small">按“元素 + 原颜色”精确或近似匹配，优先于基础规则；从上到下第一条匹配的生效</span></h4>
+          <DataTable id={`convRules-${tab}`} columns={columns} rows={rows} rowKey={(c) => c.i} empty="还没有自定义规则。点击下方“＋ 添加规则”，例如：把原红色文字改为深红、保持某种图形填充色不变。" />
+          <div className="row"><button className="btn small primary" onClick={addRule}>＋ 添加规则</button></div>
+          <h4>通用选项 <span className="muted small">两个方向共用</span></h4>
           <div className="rule-opts">
             <label className="chk"><input type="checkbox" checked={r.options.keepAccentText} onChange={(e) => setO('keepAccentText', e.target.checked)} />保留“彩色文字”的区分（使用“原彩色文字”颜色）</label>
             <label className="chk"><input type="checkbox" checked={r.options.removeFullBg} onChange={(e) => setO('removeFullBg', e.target.checked)} />移除铺满整页的背景图</label>
             <label>整页背景图判定（≥ 页面面积）<input className="input num" type="number" step="0.05" min="0.3" max="1" value={r.options.fullBgMinArea} onChange={(e) => setO('fullBgMinArea', Number(e.target.value))} /></label>
             <label>logo 判定（≤ 页面面积）<input className="input num" type="number" step="0.01" min="0" max="0.5" value={r.options.logoMaxArea} onChange={(e) => setO('logoMaxArea', Number(e.target.value))} /></label>
           </div>
-          <div className="rules-sum-box"><RulesSummary rules={r} /></div>
-          <div className="rule-nl">
-            <textarea className="input" rows={2} placeholder="用自然语言描述修改，例如：黑转白时文字改为深蓝色 1F3864，表格框线用中灰色（需要在设置中配置大模型）" value={nl} onChange={(e) => setNl(e.target.value)} />
-            <button className="btn" disabled={!nl.trim() || busy} onClick={async () => { setBusy(true); try { upd(await api.convertRulesFromText(nl)); app.toast('已根据描述生成新规则，请确认后保存'); } catch (e) { app.toast(e.message, 'error'); } finally { setBusy(false); } }}>{busy ? '生成中…' : '🤖 按描述生成规则'}</button>
+          <div className="rule-nl wip-box">
+            <div className="small"><b>🤖 用自然语言描述生成规则</b> <span className="wip">建设中</span></div>
+            <textarea className="input" rows={2} disabled placeholder="例如：黑转白时文字改为深蓝色 1F3864，表格框线用中灰色" />
+            <button className="btn" disabled>按描述生成规则</button>
           </div>
           <details className="rule-script"><summary>规则脚本（JSON，可直接编辑）</summary>
             <textarea className="pane-edit mono" rows={14} value={script} onChange={(e) => setScript(e.target.value)} />
@@ -208,10 +310,10 @@ function RulesDialog({ onClose }) {
           </details>
         </div>
         <div className="detail-head">
-          <button className="btn ghost" onClick={async () => { const d = await api.resetConvertRules(); upd(d); app.toast('已恢复默认规则'); }}>恢复默认</button>
+          <button className="btn ghost" onClick={async () => { if (!confirm('恢复默认规则？自定义规则会被清除。')) return; const d = await api.resetConvertRules(); upd(d); app.toast('已恢复默认规则'); }}>恢复默认</button>
           <div className="spacer" />
           <button className="btn" onClick={() => onClose(null)}>取消</button>
-          <button className="btn primary" onClick={async () => { try { const saved = await api.setConvertRules(r); app.toast('规则脚本已保存，将应用到下一次转换'); onClose(saved); } catch (e) { app.toast(e.message, 'error'); } }}>保存规则脚本</button>
+          <button className="btn primary" onClick={async () => { try { const saved = await api.setConvertRules(r); app.toast('转换规则已保存，将应用到下一次转换'); onClose(saved); } catch (e) { app.toast(e.message, 'error'); } }}>保存规则</button>
         </div>
       </div>
     </div>

@@ -22,6 +22,8 @@ const RULES = {
   toDark: { bg: '000000', text: 'FFFFFF', accentText: 'FFFFFF', shapeFill: null, shapeLine: 'FFFFFF', tableLine: 'FFFFFF', headerFill: null, logo: null },
   options: { logoMaxArea: 0.06, fullBgMinArea: 0.85, removeFullBg: true, keepAccentText: true },
 };
+// 自定义规则可作用的元素
+const CUSTOM_ELEMENTS = { text: '文字', shapeFill: '图形填充', shapeLine: '图形线条 / 连接线', tableLine: '表格框线', tableFill: '表格单元格填充' };
 const FILL_TAGS = new Set(['a:noFill', 'a:solidFill', 'a:gradFill', 'a:blipFill', 'a:pattFill', 'a:grpFill']);
 const SPPR_AFTER_FILL = ['a:ln', 'a:effectLst', 'a:effectDag', 'a:scene3d', 'a:sp3d', 'a:extLst'];
 const SPPR_AFTER_LN = ['a:effectLst', 'a:effectDag', 'a:scene3d', 'a:sp3d', 'a:extLst'];
@@ -77,8 +79,43 @@ function isColoredFill(fillParent, theme) {
   return false;
 }
 
+// ---------- 自定义规则：按“元素 + 原颜色”匹配，转换为指定颜色 / 保持原色（keep）/ 无（null，透明） ----------
+const PRESET = { black: '000000', white: 'FFFFFF', red: 'FF0000', green: '00FF00', blue: '0000FF', yellow: 'FFFF00', gray: '808080', grey: '808080', darkGray: 'A9A9A9', lightGray: 'D3D3D3' };
+/** 读出 fillParent 下 solidFill 的颜色（十六进制），主题色按主题解析；没有显式颜色时返回 null */
+function colorHex(fillParent, theme) {
+  const sf = fillParent && childEl(fillParent, 'a:solidFill');
+  const c = sf && elems(sf)[0];
+  if (!c) return null;
+  if (c.nodeName === 'a:srgbClr') return (c.getAttribute('val') || '').toUpperCase() || null;
+  if (c.nodeName === 'a:schemeClr') { const map = { tx1: 'dk1', tx2: 'dk2', bg1: 'lt1', bg2: 'lt2' }; const v = c.getAttribute('val'); return (theme[map[v] || v] || '').toUpperCase() || null; }
+  if (c.nodeName === 'a:sysClr') return (c.getAttribute('lastClr') || '').toUpperCase() || null;
+  if (c.nodeName === 'a:prstClr') return PRESET[c.getAttribute('val')] || null;
+  return null;
+}
+function hexDist(a, b) {
+  const x = parseInt(a, 16), y = parseInt(b, 16);
+  return Math.sqrt(((x >> 16) - (y >> 16)) ** 2 + (((x >> 8) & 255) - ((y >> 8) & 255)) ** 2 + ((x & 255) - (y & 255)) ** 2);
+}
+/** 第一条匹配的自定义规则（from 为 '*' 表示任意颜色，tol 为近似范围 0–255） */
+function matchCustom(rule, el, hex) {
+  for (const c of rule.custom || []) {
+    if (c.el !== el || c.enabled === false) continue;
+    if (c.from === '*' || (hex && /^[0-9A-F]{6}$/.test(c.from) && hexDist(hex, c.from) <= (c.tol || 0))) return c;
+  }
+  return null;
+}
+
 function setTextColor(rPr, rule, theme) {
   const doc = rPr.ownerDocument;
+  const cus = matchCustom(rule, 'text', colorHex(rPr, theme));
+  if (cus) {
+    if (cus.to === 'keep') return;
+    removeFills(rPr);
+    if (cus.to) insertBefore(rPr, solid(doc, cus.to), RPR_AFTER_FILL);
+    else insertBefore(rPr, make(doc, 'a:noFill'), RPR_AFTER_FILL);
+    rule.stats && (rule.stats.custom = (rule.stats.custom || 0) + 1);
+    return;
+  }
   const color = rule.keepAccent && isColoredFill(rPr, theme) ? rule.accentText : rule.text;
   removeFills(rPr);
   insertBefore(rPr, solid(doc, color), RPR_AFTER_FILL);
@@ -131,15 +168,27 @@ function transformTree(doc, rule, theme, slideArea, stats, options = RULES.optio
     const lnEl = childEl(spPr, 'a:ln');
     const lined = (lnEl && !childEl(lnEl, 'a:noFill')) || (!lnEl && styleRefIdx(sp, 'a:lnRef') > 0);
     if (!filled && !lined) continue;
-    removeFills(spPr);
-    insertBefore(spPr, rule.shapeFill && filled ? solid(doc, rule.shapeFill) : make(doc, 'a:noFill'), SPPR_AFTER_FILL);
-    if (lined || (filled && !rule.shapeFill)) setLine(spPr, rule.shapeLine, SPPR_AFTER_LN, 'a:ln', '12700');
+    const cf = filled && matchCustom(rule, 'shapeFill', colorHex(spPr, theme));
+    const cl = matchCustom(rule, 'shapeLine', lnEl ? colorHex(lnEl, theme) : null);
+    if (cf || cl) stats.custom = (stats.custom || 0) + 1;
+    if (!(cf && cf.to === 'keep')) {
+      removeFills(spPr);
+      const fillTo = cf ? cf.to : (filled ? rule.shapeFill : null);
+      insertBefore(spPr, fillTo ? solid(doc, fillTo) : make(doc, 'a:noFill'), SPPR_AFTER_FILL);
+    }
+    if (cl) { if (cl.to !== 'keep') setLine(spPr, cl.to, SPPR_AFTER_LN, 'a:ln', '12700'); }
+    else if (lined || (filled && !rule.shapeFill && !cf)) setLine(spPr, rule.shapeLine, SPPR_AFTER_LN, 'a:ln', '12700');
     stats.shapes++;
   }
   // 5) 连接线
   for (const cx of all(doc, 'p:cxnSp')) {
     const spPr = childEl(cx, 'p:spPr');
-    if (spPr) { setLine(spPr, rule.shapeLine, SPPR_AFTER_LN, 'a:ln', '12700'); stats.shapes++; }
+    if (spPr) {
+      const ln = childEl(spPr, 'a:ln');
+      const cl = matchCustom(rule, 'shapeLine', ln ? colorHex(ln, theme) : null);
+      if (!(cl && cl.to === 'keep')) setLine(spPr, cl ? cl.to : rule.shapeLine, SPPR_AFTER_LN, 'a:ln', '12700');
+      stats.shapes++;
+    }
   }
   // 6) 表格：框线与单元格填充
   for (const tbl of all(doc, 'a:tbl')) {
@@ -149,12 +198,21 @@ function transformTree(doc, rule, theme, slideArea, stats, options = RULES.optio
       for (const tc of elems(tr).filter((e) => e.nodeName === 'a:tc')) {
         let tcPr = childEl(tc, 'a:tcPr');
         if (!tcPr) { tcPr = make(doc, 'a:tcPr'); tc.appendChild(tcPr); }
-        for (const c of elems(tcPr)) if (/^a:ln[LRTB]$/.test(c.nodeName) || FILL_TAGS.has(c.nodeName)) tcPr.removeChild(c);
-        const borders = ['a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'].map((t) => make(doc, t, { w: '12700', cap: 'flat', cmpd: 'sng', algn: 'ctr' }, [solid(doc, rule.tableLine), make(doc, 'a:prstDash', { val: 'solid' })]));
-        const first = tcPr.firstChild;
-        for (const b of borders) tcPr.insertBefore(b, first);
-        const fill = firstRow && ri === 0 && rule.headerFill ? solid(doc, rule.headerFill) : make(doc, 'a:noFill');
-        insertBefore(tcPr, fill, ['a:headers', 'a:extLst']);
+        const oldLn = childEl(tcPr, 'a:lnL') || childEl(tcPr, 'a:lnT') || childEl(tcPr, 'a:lnB') || childEl(tcPr, 'a:lnR');
+        const cl = matchCustom(rule, 'tableLine', oldLn ? colorHex(oldLn, theme) : null);
+        const cf = matchCustom(rule, 'tableFill', colorHex(tcPr, theme));
+        if (cl || cf) stats.custom = (stats.custom || 0) + 1;
+        for (const c of elems(tcPr)) if ((/^a:ln[LRTB]$/.test(c.nodeName) && !(cl && cl.to === 'keep')) || (FILL_TAGS.has(c.nodeName) && !(cf && cf.to === 'keep'))) tcPr.removeChild(c);
+        if (!(cl && cl.to === 'keep')) {
+          const lineTo = cl ? cl.to : rule.tableLine;
+          const borders = ['a:lnL', 'a:lnR', 'a:lnT', 'a:lnB'].map((t) => make(doc, t, { w: '12700', cap: 'flat', cmpd: 'sng', algn: 'ctr' }, [lineTo ? solid(doc, lineTo) : make(doc, 'a:noFill'), make(doc, 'a:prstDash', { val: 'solid' })]));
+          const first = tcPr.firstChild;
+          for (const b of borders) tcPr.insertBefore(b, first);
+        }
+        if (!(cf && cf.to === 'keep')) {
+          const fillTo = cf ? cf.to : (firstRow && ri === 0 ? rule.headerFill : null);
+          insertBefore(tcPr, fillTo ? solid(doc, fillTo) : make(doc, 'a:noFill'), ['a:headers', 'a:extLst']);
+        }
       }
     });
     stats.tables++;
@@ -297,7 +355,7 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
       }
     }
     const themeOf = new Map();
-    const stats = { parts: 0, text: 0, shapes: 0, tables: 0, logos: 0, bgPictures: 0, charts: 0, diagrams: 0 };
+    const stats = { parts: 0, text: 0, shapes: 0, tables: 0, logos: 0, bgPictures: 0, charts: 0, diagrams: 0, custom: 0 };
     const out = new Map();
     // 先读主题原色（用于判断“彩色文字”），再改主题
     for (const [part, p] of plan) if (p.kind === 'theme') themeOf.set(part, themeColors(await parse(part)));
@@ -306,10 +364,10 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
     for (const [part, p] of plan) {
       const doc = await parse(part);
       if (p.kind === 'theme') transformTheme(doc);
-      else if (p.kind === 'chart') transformChart(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, stats);
-      else if (p.kind === 'diagram') transformDiagram(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, stats);
+      else if (p.kind === 'chart') transformChart(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText, stats }, anyTheme, stats);
+      else if (p.kind === 'diagram') transformDiagram(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText, stats }, anyTheme, stats);
       else {
-        transformTree(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, slideArea, stats, rules.options);
+        transformTree(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText, stats }, anyTheme, slideArea, stats, rules.options);
         if (p.kind === 'master') transformMaster(doc, p.dir);
       }
       out.set(part, new XMLSerializer().serializeToString(doc));
@@ -341,7 +399,19 @@ function normalizeRules(r) {
   const out = JSON.parse(JSON.stringify(RULES));
   if (!r || typeof r !== 'object') return out;
   const hex = (v, d) => (v === null ? null : typeof v === 'string' && /^#?[0-9a-f]{6}$/i.test(v) ? v.replace('#', '').toUpperCase() : d);
-  for (const dir of ['toLight', 'toDark']) for (const k of Object.keys(out[dir])) if (r[dir] && k in r[dir]) out[dir][k] = hex(r[dir][k], out[dir][k]);
+  for (const dir of ['toLight', 'toDark']) {
+    for (const k of Object.keys(out[dir])) if (k !== 'custom' && r[dir] && k in r[dir]) out[dir][k] = hex(r[dir][k], out[dir][k]);
+    // 自定义规则：[{ el, from: 'RRGGBB' | '*', tol, to: 'RRGGBB' | null | 'keep', note, enabled }]
+    const list = r[dir] && Array.isArray(r[dir].custom) ? r[dir].custom : [];
+    out[dir].custom = list.filter((c) => c && CUSTOM_ELEMENTS[c.el]).slice(0, 100).map((c) => ({
+      el: c.el,
+      from: c.from === '*' ? '*' : hex(c.from, '*') || '*',
+      tol: Math.max(0, Math.min(255, Number(c.tol) || 0)),
+      to: c.to === 'keep' ? 'keep' : c.to === null ? null : hex(c.to, 'keep'),
+      note: String(c.note || '').slice(0, 200),
+      enabled: c.enabled !== false,
+    }));
+  }
   const o = r.options || {};
   const num = (v, d, lo, hi) => (typeof v === 'number' && v >= lo && v <= hi ? v : d);
   out.options.logoMaxArea = num(o.logoMaxArea, out.options.logoMaxArea, 0, 0.5);
@@ -353,4 +423,4 @@ function normalizeRules(r) {
   return out;
 }
 
-module.exports = { convertTheme, RULES, normalizeRules };
+module.exports = { convertTheme, RULES, normalizeRules, CUSTOM_ELEMENTS };
