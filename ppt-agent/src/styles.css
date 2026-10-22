@@ -1336,3 +1336,19 @@ table.grid tbody tr:hover td { background: var(--hover2); }
 /* 搜索栏：宽度不够时（如展开了搜索任务面板）按钮换行，不被裁掉 */
 .search-bar { flex-wrap: wrap; row-gap: 6px; }
 .search-bar > .input.big { flex: 1 1 280px; min-width: 220px; }
+
+/* v3.1 侧栏：解析任务标题右侧“全部”按钮；任务超过 3 个时列表可滚动、底部拖动条调整高度 */
+.sb-head-btn { font-size: 11px; line-height: 1; padding: 4px 7px; border-radius: 6px; border: 1px solid rgba(var(--m-detail), .35); background: var(--bg2); color: rgb(var(--m-detail)); cursor: pointer; text-transform: none; white-space: nowrap; }
+.sb-head-btn:hover { background: rgba(var(--m-detail), .12); }
+.sb-head-btn.on { background: rgb(var(--m-detail)); border-color: rgb(var(--m-detail)); color: #fff; }
+.sb-mod.m-detail .sb-tasks.many { overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.sb-tasks-grip { height: 8px; margin: 0 10px 2px; cursor: ns-resize; border-radius: 4px; position: relative; }
+.sb-tasks-grip::after { content: ''; position: absolute; left: 50%; top: 3px; width: 32px; height: 2px; margin-left: -16px; border-radius: 2px; background: rgba(var(--m-detail), .45); }
+.sb-tasks-grip:hover { background: rgba(var(--m-detail), .1); }
+body.resizing-v, body.resizing-v * { cursor: ns-resize !important; user-select: none !important; }
+.vh-back { margin-right: 6px; }
+
+/* 帮助按钮：展开 / 收起两种状态宽度一致，不挤压左侧“PPT智能体 + 版本号”（两行显示） */
+.sb-helpbtn { min-width: 66px; white-space: nowrap; text-align: center; }
+.sb-head .logo { white-space: nowrap; flex: none; }
+.sb-head .logo .sb-ver { display: block; margin: 2px 0 0; line-height: 1; vertical-align: baseline; position: static; }

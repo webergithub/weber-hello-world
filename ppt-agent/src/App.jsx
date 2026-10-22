@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api, on, STATUS_LABEL, fmtSize } from './api';
 import { AppCtx } from './ctx';
 import TaskView from './components/TaskView';
@@ -66,9 +66,9 @@ export default function App() {
   // 侧栏分区（解析任务 / 功能 / 智能模块）可单独折叠，状态记忆
   const [folded, setFolded] = useState(() => { try { return JSON.parse(readLS('ppta.sbFolded', '{}')); } catch { return {}; } });
   const fold = (k) => setFolded((f) => { const n = { ...f, [k]: !f[k] }; try { localStorage.setItem('ppta.sbFolded', JSON.stringify(n)); } catch { /* ignore */ } return n; });
-  const secHead = (k, label, short) => (
+  const secHead = (k, label, short, extra = null) => (
     <div className={`sb-section fold ${folded[k] ? 'folded' : ''}`} onClick={() => fold(k)} title={folded[k] ? '展开' : '折叠'}>
-      {collapsed ? (folded[k] ? '▸' : short || '▾') : <><span className="caret">{folded[k] ? '▸' : '▾'}</span>{label}</>}
+      {collapsed ? (folded[k] ? '▸' : short || '▾') : <><span className="caret">{folded[k] ? '▸' : '▾'}</span>{label}{extra && <><span className="spacer" /><span onClick={(e) => e.stopPropagation()}>{extra}</span></>}</>}
     </div>
   );
   const [view, setViewState] = useState({ type: 'search' });
@@ -78,11 +78,31 @@ export default function App() {
   const [feedback, setFeedback] = useState(false);
   // 设置按钮：第一次点击打开设置，再次点击收起并还原打开前的界面
   const prevView = useRef(null);
+  // 解析任务标题右侧的按钮：在右侧打开 / 收起“全部任务与历史”（收起时回到原来的界面）
+  const toggleAllTasks = () => {
+    if (view.type === 'monitor') { setViewState(prevView.current && prevView.current.type !== 'monitor' ? prevView.current : { type: 'search' }); return; }
+    prevView.current = view; setViewState({ type: 'monitor', tab: 'queue' });
+  };
   const toggleSettings = () => {
     if (view.type === 'settings') { setViewState(prevView.current && prevView.current.type !== 'settings' ? prevView.current : { type: 'search' }); return; }
     prevView.current = view; setViewState({ type: 'settings' });
   };
   const [taskMenu, setTaskMenu] = useState(true); // 选中任务下方的“任务详情”菜单是否展开
+  // 侧栏任务列表：超过 3 个任务时只显示 3 个的高度，可滚动；底部拖动条可上下拖动调整高度（记住在 ppta.sbTasksH）
+  const tasksBox = useRef(null);
+  const [userTasksH, setUserTasksH] = useState(() => { try { return Number(localStorage.getItem('ppta.sbTasksH')) || null; } catch { return null; } });
+  const [autoTasksH, setAutoTasksH] = useState(null);
+  const tasksH = userTasksH || autoTasksH;
+  const saveTasksH = (h) => { setUserTasksH(h); try { if (h) localStorage.setItem('ppta.sbTasksH', String(h)); else localStorage.removeItem('ppta.sbTasksH'); } catch { /* ignore */ } };
+  const dragTasksH = (e) => {
+    e.preventDefault();
+    const box = tasksBox.current; if (!box) return;
+    const y0 = e.clientY, h0 = box.getBoundingClientRect().height;
+    const move = (ev) => saveTasksH(Math.round(Math.max(90, Math.min(window.innerHeight * 0.7, h0 + ev.clientY - y0))));
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.classList.remove('resizing-v'); };
+    document.body.classList.add('resizing-v');
+    window.addEventListener('mousemove', move); window.addEventListener('mouseup', up);
+  };
   const [version, setVersion] = useState('');
   useEffect(() => { api.appVersion().then(setVersion).catch(() => {}); }, []);
   // 当前选择的解析任务：“任务详情”模块下的菜单只显示该任务的内容
@@ -90,12 +110,23 @@ export default function App() {
   const setCurTask = (id) => { setCurTaskState(id); try { localStorage.setItem('ppta.curTask', String(id || '')); } catch { /* ignore */ } };
   // 兼容旧的跳转写法：{ type: 'monitor', taskId } 表示某个任务的解析过程
   const setView = (v) => {
-    if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live' }); return; }
-    if (v && v.type === 'task' && v.id) { setCurTask(v.id); setViewState({ type: 'task' }); return; }
+    // back: true 表示记住当前视图，目标页左上角显示“← 返回”回到这里（如从“全部任务与历史”查看某个任务）
+    const back = v && v.back === true ? view : v && v.back;
+    if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live', back }); return; }
+    if (v && v.type === 'task' && v.id) { setCurTask(v.id); setTaskMenu(true); setViewState({ type: 'task', back }); return; }
     if (v && v.type === 'library') { setViewState({ type: 'alllib' }); return; }
     setViewState(v);
   };
   const [tasks, setTasks] = useState([]);
+  // 默认高度 = 前 3 个任务（含展开在其下方的任务详情菜单）的高度
+  useLayoutEffect(() => {
+    const box = tasksBox.current;
+    if (!box || tasks.length <= 3) { setAutoTasksH(null); return; }
+    const rows = box.querySelectorAll(':scope > .sb-task');
+    if (rows.length > 3) setAutoTasksH(Math.round(rows[3].offsetTop - box.offsetTop + 2));
+  }, [tasks.length, curTask, taskMenu, folded.tasks, collapsed]);
+  // 选中的任务不在可见范围时滚动到它
+  useEffect(() => { const el = tasksBox.current && tasksBox.current.querySelector('.sb-task.active'); if (el) el.scrollIntoView({ block: 'nearest' }); }, [curTask]);
   const [liveTasks, setLiveTasks] = useState({});
   const [progress, setProgress] = useState({});
   const [taskTick, setTaskTick] = useState(0);
@@ -336,7 +367,7 @@ export default function App() {
         <aside className="sidebar">
           <div className="sb-head">
             {!collapsed && <div className="logo" title={version ? `PPT智能体 v${version}` : ''}>PPT<span>智能体</span>{version && <sup className="sb-ver">v{version}</sup>}</div>}
-            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title={view.type === 'help' ? '收起帮助指南，回到智能搜索' : '帮助指南：功能详解、快捷键、新手指引'} onClick={toggleHelp}>{view.type === 'help' ? '✕ 收起帮助' : '❓ 帮助'}</button>}
+            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title={view.type === 'help' ? '收起帮助指南，回到智能搜索' : '帮助指南：功能详解、快捷键、新手指引'} onClick={toggleHelp}>{view.type === 'help' ? '收起' : '❓ 帮助'}</button>}
             <div className="spacer" />
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
@@ -352,8 +383,9 @@ export default function App() {
           </div>
           {/* 解析任务（蓝）：任务列表，选中任务的下方挂载“任务详情”菜单（任务概览 / 解析过程） */}
           <div className={`sb-mod m-detail ${folded.tasks ? 'is-folded' : ''}`}>
-          {secHead('tasks', <>📂 解析任务{tasks.length ? <span className="sb-count">{tasks.length}</span> : null}</>, '📂')}
-          {!folded.tasks && <div className="sb-tasks" data-tour="tasks">
+          {secHead('tasks', <>📂 解析任务{tasks.length ? <span className="sb-count">{tasks.length}</span> : null}</>, '📂',
+            <button className={`sb-head-btn ${view.type === 'monitor' ? 'on' : ''}`} data-tour="all-tasks" title={view.type === 'monitor' ? '收起全部任务与历史，回到原来的界面' : '在右侧查看全部任务与历史'} onClick={toggleAllTasks}>🗂 全部</button>)}
+          {!folded.tasks && <div className={`sb-tasks ${tasks.length > 3 ? 'many' : ''}`} data-tour="tasks" ref={tasksBox} style={tasks.length > 3 && !collapsed ? { maxHeight: tasksH || undefined, height: tasksH || undefined } : undefined}>
             {!tasks.length && !collapsed && <div className="sb-empty">还没有任务，点击上方“添加目录”</div>}
             {tasks.map((t) => {
               const live = liveTasks[t.id];
@@ -392,6 +424,7 @@ export default function App() {
               );
             })}
           </div>}
+          {!folded.tasks && !collapsed && tasks.length > 3 && <div className="sb-tasks-grip" title="上下拖动调整任务列表高度（双击恢复默认）" onMouseDown={dragTasksH} onDoubleClick={() => saveTasksH(null)} />}
           </div>
           {/* 其余功能模块：各用一种主题色的卡片区分 */}
           <div className={`sb-mod m-over ${folded.over ? 'is-folded' : ''}`}>
@@ -419,8 +452,8 @@ export default function App() {
         </aside>
         <main className="main">
           <div className="page-help-fab"><PageHelp page={view.type} /></div>
-          {view.type === 'task' && (cur ? <TaskView taskId={cur.id} /> : <NoTask />)}
-          {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab })} /> : <NoTask />)}
+          {view.type === 'task' && (cur ? <TaskView taskId={cur.id} back={view.back} onBack={() => setViewState(view.back)} /> : <NoTask />)}
+          {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab, back: view.back })} back={view.back} onBack={() => setViewState(view.back)} /> : <NoTask />)}
           {view.type === 'search' && <SearchView defaultAll taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
           {view.type === 'groups' && <GroupsView />}
           {view.type === 'alllib' && <LibraryView key="alllib" title="🗂 所有资料库" mode={allLibMode} setMode={setAllLibMode} />}

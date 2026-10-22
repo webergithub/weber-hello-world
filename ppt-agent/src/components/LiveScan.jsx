@@ -102,7 +102,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
             {t.message && <div className="muted small">{t.message}</div>}
             <div className="row center">
               <button className="btn" onClick={() => app.go({ type: 'monitor', tab: 'history', taskId: t.id })}>查看解析历史</button>
-              <button className="btn" onClick={() => app.go({ type: 'task', id: t.id })}>任务概览</button>
+              <button className="btn" onClick={() => app.go({ type: 'task', id: t.id, back: lock ? undefined : true })}>任务概览</button>
               <button className="btn primary" onClick={() => app.startParse(t.id, ['paused', 'interrupted'].includes(t.status) ? 'resume' : 'start')}>{['paused', 'interrupted'].includes(t.status) ? '▶ 从断点继续' : '↻ 重新扫描'}</button>
             </div>
           </div>

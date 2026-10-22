@@ -13,7 +13,10 @@ import TagList from './TagList';
 // 每个任务上次所在的页签：从文件详情等页面返回时恢复
 const TAB_MEMO = new Map();
 
-export default function TaskView({ taskId }) {
+// “← 返回”提示回到哪里（back 为打开任务前的视图）
+const BACK_LABEL = { monitor: '全部任务与历史', alllib: '所有资料库', analytics: '总览分析', search: '智能搜索', notices: '通知管理', file: '文件详情', task: '任务概览', tmonitor: '解析过程' };
+
+export default function TaskView({ taskId, back, onBack }) {
   const app = useApp();
   const [tab, setTabState] = useState(() => TAB_MEMO.get(taskId) || 'slides');
   const setTab = (t) => { TAB_MEMO.set(taskId, t); setTabState(t); };
@@ -34,6 +37,7 @@ export default function TaskView({ taskId }) {
   return (
     <div className="view">
       <div className="view-head">
+        {back && <button className="btn vh-back" title={`返回${BACK_LABEL[back.type] || '上一个界面'}`} onClick={onBack}>← 返回</button>}
         <div>
           <div className="vh-title">📁 {task.name} <span className={`status s-${task.status}`}>{STATUS_LABEL[task.status] || task.status}</span></div>
           <div className="muted small">{task.dir} · 创建于 {fmtTime(task.created_at)}{task.message ? ' · ' + task.message : ''}</div>

@@ -36,7 +36,9 @@
 - 文件详情（`SlideWorkspace`）在不进入逐页浏览时也支持键盘翻页（keymap 的翻页与切换文件动作都用于翻页）和滚轮翻页；滚轮翻页 / Ctrl + 滚轮缩放由 `config.wheel` 控制，`ZoomStage` 的 `onWheelPage` 负责翻页。
 - 反馈：接收地址只在主进程 `service.js` 中（`FEEDBACK_TO`），不得传给界面或写进前端代码；发件邮箱 `config.mail` 由用户在设置中配置，未配置 / 失败时存 `dataDir/feedback/*.json`，配置后或启动后自动补发（`electron/core/mailer.js` 为无依赖 SMTP 客户端）。
 - 启动选择数据目录：`bootstrap.json` 中 `dataDirHistory`（最多 10 个）、`askDataDir`（记住选择 = false）、`skipAskOnce`（主动切换目录后的重启不再询问）；使用环境变量 `PPTA_DATA_DIR` 时不询问（测试用 `PPTA_ASK_DIR=1` 强制询问）。
-- 侧栏左下角按钮（帮助、设置）再次点击收起并还原打开前的界面。
+- 侧栏左下角按钮（帮助、设置）以及“解析任务”标题右侧的“🗂 全部”（全部任务与历史）再次点击收起并还原打开前的界面；帮助按钮打开后只显示“收起”，两种状态宽度一致。
+- 侧栏任务列表超过 3 个任务时默认只占 3 个的高度、可滚动，底部拖动条调整高度（`ppta.sbTasksH`）。
+- 需要“返回”的跳转用 `app.go({ ..., back: true })`：App 记住当前视图放进 `view.back`，目标页（任务概览、解析过程）左上角显示“← 返回”；从侧栏直接打开时没有 `back`。
 - 智能搜索范围用 `taskIds`（多选的已执行任务，空 = 所有资料库），前端记在 `ppta.searchScope`；`search_history.task_ids` 记录每次范围。
 - 转换规则设置的新增规则：已保存的自定义规则与“新增规则”草稿区分开；草稿区默认一条样例（`sampleRule`），`untouchedSample` 判断与样例完全相同的行，保存（“💾 保存新增的规则” / “保存规则”）时一律忽略；保存新增后草稿区重置为一条样例。
 - 黑白底互转每次转换写入 `convert_history`（含完整结果 JSON），转换页“🕘 转换历史”可重新查看。

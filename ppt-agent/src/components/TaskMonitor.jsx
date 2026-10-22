@@ -12,12 +12,13 @@ const SUB_TITLE = { queue: '任务队列', live: '解析动态（实时）', his
 
 // 解析任务：子视图（任务队列 / 解析动态 / 解析历史）由左侧子菜单切换；添加目录等入口统一在左侧
 // scoped：只显示所选任务（任务详情 → 解析过程）；否则为全部任务（总览分析 → 全部任务与历史）
-export default function TaskMonitor({ tab = 'queue', taskId, setTab, scoped = false }) {
+export default function TaskMonitor({ tab = 'queue', taskId, setTab, scoped = false, back, onBack }) {
   const app = useApp();
   const t = scoped && app.tasks.find((x) => x.id === taskId);
   return (
     <div className="view">
       <div className="view-head">
+        {back && <button className="btn vh-back" onClick={onBack}>← 返回</button>}
         <div className="vh-title">{scoped ? <>⚙️ 解析过程 <span className="crumb">› {t ? `#${t.id} ${t.name}` : ''} › {SUB_TITLE[tab]}</span></> : <>🗂 全部任务与历史 <span className="crumb">› {SUB_TITLE[tab]}</span></>}</div>
         <div className="spacer" />
         {tab === 'queue' && <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待解析的任务'); if (n) setTab('live'); }}>▶ 全部开始</button>}
@@ -31,11 +32,14 @@ export default function TaskMonitor({ tab = 'queue', taskId, setTab, scoped = fa
   );
 }
 
+const LAST_SEL = { id: null }; // 任务队列中上次选中的任务（从任务概览返回时恢复）
+
 function QueuePanel({ initial, onLive }) {
   const app = useApp();
   const { tasks } = app;
   const runningId = (tasks.find((t) => t.status === 'running') || {}).id;
-  const [sel, setSel] = useState(initial || null);
+  const [sel, setSelState] = useState(initial || LAST_SEL.id || null);
+  const setSel = (id) => { LAST_SEL.id = id; setSelState(id); };
   const cur = sel || runningId || (tasks[0] && tasks[0].id);
   const queued = tasks.filter((t) => t.queuePos > 0).sort((a, b) => a.queuePos - b.queuePos);
   const others = tasks.filter((t) => !(t.queuePos > 0));
@@ -46,7 +50,7 @@ function QueuePanel({ initial, onLive }) {
       <div key={t.id} className={`task-card ${cur === t.id ? 'active' : ''}`} onClick={() => setSel(t.id)}>
         <div className="tc-head">
           <span className={`dot s-${t.status}`} />
-          <b>#{t.id} {t.name}</b>
+          <b className="link" title="查看任务概览" onClick={(e) => { e.stopPropagation(); setSel(t.id); app.go({ type: 'task', id: t.id, back: true }); }}>#{t.id} {t.name}</b>
           <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status] || t.status}{t.queuePos > 0 ? ` · 第 ${t.queuePos} 位` : ''}</span>
         </div>
         <div className="muted small ellipsis" title={t.dir}>{t.dir}</div>
@@ -65,7 +69,7 @@ function QueuePanel({ initial, onLive }) {
           {(t.status === 'running' || t.status === 'pending') && <button className="btn tiny" onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>⏸ 暂停</button>}
           {t.status === 'running' && <button className="btn tiny" onClick={() => onLive(t.id)}>解析动态</button>}
           {t.queuePos > 0 && <><button className="btn tiny" onClick={() => api.moveTask(t.id, -1).then(app.refreshTasks)}>上移</button><button className="btn tiny" onClick={() => api.moveTask(t.id, 1).then(app.refreshTasks)}>下移</button></>}
-          <button className="btn tiny" onClick={() => app.go({ type: 'task', id: t.id })}>查看结果</button>
+          <button className="btn tiny" onClick={() => { setSel(t.id); app.go({ type: 'task', id: t.id, back: true }); }}>查看结果</button>
         </div>
       </div>
     );
@@ -248,10 +252,10 @@ function HistoryPanel({ taskId }) {
       </div>
       <DataTable id="history" sessionKey={skey} rows={all} onRowClick={(r) => setCur({ hid: r.hid, path: r.path })} rowKey={(r) => r.hid} selectable selected={sel} onSelect={setSel} selectableRow={(r) => !r.live} rowClass={(r) => (r.live ? 'row-live' : '')} defaultSort={{ k: 'at', d: -1 }} empty="还没有解析记录" columns={[
         { key: 'at', label: '时间', sort: (r) => r.at, className: 'small nowrap', render: (r) => fmtTime(r.at) },
-        { key: 'task', label: '任务', sort: (r) => r.task_id, className: 'small', render: (r) => `#${r.task_id} ${r.task_name || '（已删除）'}` },
+        { key: 'task', label: '任务', sort: (r) => r.task_id, className: 'small', render: (r) => (r.task_name && app.tasks.some((x) => x.id === r.task_id) ? <span className="link" title="查看任务概览" onClick={() => app.go({ type: 'task', id: r.task_id, back: true })}>#{r.task_id} {r.task_name}</span> : `#${r.task_id} ${r.task_name || '（已删除）'}`) },
         { key: 'action', label: '结果', sort: (r) => ACTION_LABEL[r.action] || r.action, render: (r) => (r.live ? <span className="status s-running live-pulse">⏳ 解析中</span> : <span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span>) },
         { key: 'kind', label: '类型', render: (r) => KIND_LABEL[r.kind] || '' },
-        { key: 'path', label: '文件', className: 'small', render: (r) => (r.live ? <span className="link" title="查看解析动态" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId: r.task_id })}>{r.path}</span> : <span className="link" title={r.path} onClick={() => r.file_id && app.openFile(r.file_id)}>{r.path}</span>) },
+        { key: 'path', label: '文件', className: 'small', render: (r) => (r.live ? <span className="link" title="查看解析动态" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId: r.task_id, back: true })}>{r.path}</span> : <span className="link" title={r.path} onClick={() => r.file_id && app.openFile(r.file_id)}>{r.path}</span>) },
         { key: 'slide_count', label: '页/节', sort: (r) => r.slide_count || 0, render: (r) => r.slide_count || '' },
         { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
         { key: 'author', label: '作者' },
