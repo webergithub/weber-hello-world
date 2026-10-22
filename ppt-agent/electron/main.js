@@ -193,6 +193,15 @@ app.whenReady().then(async () => {
     docTypes: () => service.docTypes(),
     convertSlides: (items, out) => service.convertSlides(items, out),
     convertHistory: () => service.convertHistory(),
+    listPptx: (paths) => service.listPptx(paths),
+    convertFile: (src, opts) => service.convertFile(src, opts),
+    selectFiles: async (title) => {
+      const r = await dialog.showOpenDialog(win, { title: title || '选择 PPT 文件', properties: ['openFile', 'multiSelections'], filters: [{ name: 'PowerPoint', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt'] }] });
+      return r.canceled ? [] : r.filePaths;
+    },
+    notesChanges: () => service.notesChanges(),
+    notesWritebackHistory: () => service.notesWritebackHistory(),
+    writeBackNotesBatch: (keys) => service.writeBackNotesBatch(keys),
     convertHistoryResult: (id) => service.convertHistoryResult(id),
     convertHistoryDelete: (ids) => service.convertHistoryDelete(ids),
     smartCandidates: (desc, opts) => service.smartCandidates(desc, opts),

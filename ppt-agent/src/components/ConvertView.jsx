@@ -6,6 +6,76 @@ import DataTable from './DataTable';
 import { fmtTime } from '../api';
 
 let SHOW_HIST = false; // 是否在看转换历史（会话内记住，从逐页浏览返回时保持）
+let CV_MODE = 'pages'; // pages：导出篮中的页面 | files：按文件 / 文件夹整份转换
+const DIRS = [['auto', '自动（黑↔白互换）'], ['toLight', '统一转为白底'], ['toDark', '统一转为黑底']];
+const readLS = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : JSON.parse(v); } catch { return d; } };
+const writeLS = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ignore */ } };
+
+/** 按文件 / 文件夹批量转换：选择一个或多个 PPT 文件或文件夹，指定转换方向；输出到原目录（加后缀）或统一的新目录；原文件不改动 */
+function FileConvert({ onDone }) {
+  const app = useApp();
+  const [files, setFiles] = useState([]);
+  const [sel, setSel] = useState(() => new Set());
+  const [direction, setDirection] = useState(() => readLS('ppta.cvf.dir', 'auto'));
+  const [outMode, setOutMode] = useState(() => readLS('ppta.cvf.outMode', 'suffix'));
+  const [outDir, setOutDir] = useState(() => readLS('ppta.cvf.outDir', ''));
+  const [busy, setBusy] = useState(false);
+  const [state, setState] = useState({}); // path → { status, out, error, converted, slides }
+  useEffect(() => { writeLS('ppta.cvf.dir', direction); writeLS('ppta.cvf.outMode', outMode); writeLS('ppta.cvf.outDir', outDir); }, [direction, outMode, outDir]);
+  const add = async (paths) => {
+    if (!paths || !paths.length) return;
+    const list = await api.listPptx(paths);
+    setFiles((cur) => { const m = new Map(cur.map((f) => [f.path, f])); for (const f of list) m.set(f.path, f); return [...m.values()]; });
+    setSel((cur) => new Set([...cur, ...list.filter((f) => !f.legacy).map((f) => f.path)]));
+    if (!list.length) app.toast('所选位置中没有 PPT 文件', 'error');
+  };
+  const picked = files.filter((f) => sel.has(f.path) && !f.legacy);
+  const start = async () => {
+    if (outMode === 'dir' && !outDir) { app.toast('请先选择输出目录', 'error'); return; }
+    setBusy(true);
+    let ok = 0, failed = 0;
+    for (const f of picked) {
+      setState((m) => ({ ...m, [f.path]: { status: 'running' } }));
+      try {
+        const r = await api.convertFile(f.path, { direction, outMode, outDir });
+        ok++; setState((m) => ({ ...m, [f.path]: { status: 'done', out: r.path, converted: r.converted, slides: r.slides } }));
+      } catch (e) { failed++; setState((m) => ({ ...m, [f.path]: { status: 'failed', error: e.message } })); }
+    }
+    setBusy(false); onDone();
+    app.toast(`批量转换完成：成功 ${ok} 个${failed ? `，失败 ${failed} 个` : ''}${outMode === 'dir' ? `，已输出到 ${outDir}` : '，已保存在各自原目录（文件名加后缀）'}`, failed ? 'error' : 'info', outMode === 'dir' ? { label: '打开目录', link: { type: 'open', path: outDir }, cat: '黑白底互转' } : { cat: '黑白底互转' });
+  };
+  const ST = { running: ['转换中', 'running'], done: ['已完成', 'done'], failed: ['失败', 'failed'] };
+  const cols = [
+    { key: 'name', label: '文件', render: (f) => <span title={f.path}>{f.name}{f.legacy && <span className="tag warn">旧版 .ppt 不支持</span>}</span> },
+    { key: 'dir', label: '所在目录', className: 'muted small ellipsis', render: (f) => <span title={f.dir}>{f.dir}</span> },
+    { key: 'size', label: '大小', type: 'number', sort: (f) => f.size, className: 'nowrap', render: (f) => fmtSize(f.size) },
+    { key: 'st', label: '状态', sort: (f) => (state[f.path] ? state[f.path].status : ''), render: (f) => { const x = state[f.path]; return x ? <span className={`status s-${ST[x.status][1]}`} title={x.error || ''}>{ST[x.status][0]}{x.status === 'done' ? ` · ${x.converted}/${x.slides} 页` : ''}</span> : <span className="muted small">待转换</span>; } },
+    { key: 'out', label: '输出文件', className: 'small', render: (f) => { const x = state[f.path]; return x && x.out ? <span className="link" title={x.out} onClick={() => api.openPath(x.out)}>{x.out.split(/[\\/]/).pop()}</span> : x && x.error ? <span className="danger-fg small">{x.error}</span> : ''; } },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (f) => { const x = state[f.path]; return <>{x && x.out && <button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(x.out)}>📂 位置</button>}<button className="btn tiny ghost" disabled={busy} onClick={() => { setFiles((l) => l.filter((y) => y.path !== f.path)); }}>移除</button></>; } },
+  ];
+  return (
+    <div className="cvf">
+      <div className="cvf-bar">
+        <button className="btn" disabled={busy} onClick={async () => add(await api.selectFiles('选择要转换的 PPT 文件（可多选）'))}>＋ 选择 PPT 文件…</button>
+        <button className="btn" disabled={busy} onClick={async () => add(await api.selectDir('选择包含 PPT 的文件夹（会包含子文件夹）'))}>＋ 选择文件夹…</button>
+        <span className="cvf-sep" />
+        <span className="muted">转换方向</span>
+        <div className="seg">{DIRS.map(([k, v]) => <button key={k} className={direction === k ? 'on' : ''} onClick={() => setDirection(k)}>{v}</button>)}</div>
+        <span className="cvf-sep" />
+        <span className="muted">输出到</span>
+        <div className="seg">
+          <button className={outMode === 'suffix' ? 'on' : ''} onClick={() => setOutMode('suffix')}>原目录（文件名加后缀）</button>
+          <button className={outMode === 'dir' ? 'on' : ''} onClick={() => setOutMode('dir')}>统一新目录</button>
+        </div>
+        {outMode === 'dir' && <><code className="cvf-dir ellipsis" title={outDir}>{outDir || '未选择'}</code><button className="btn small" onClick={async () => { const r = await api.selectDir('选择统一的输出目录', true); if (r && r[0]) setOutDir(r[0]); }}>选择…</button></>}
+        <div className="spacer" />
+        <button className="btn primary" disabled={!picked.length || busy} onClick={start}>{busy ? '转换中…' : `开始批量转换（${picked.length} 个文件）`}</button>
+      </div>
+      <DataTable id="convertFiles" columns={cols} rows={files} rowKey={(f) => f.path} selectable selected={sel} onSelect={setSel} selectableRow={(f) => !f.legacy} defaultSort={{ k: 'name', d: 1 }}
+        empty="点击“＋ 选择 PPT 文件…”或“＋ 选择文件夹…”添加要转换的 PPT；原文件不会被修改，转换结果另存为新文件" />
+    </div>
+  );
+}
 
 const DIR_LABEL = { auto: '自动（黑↔白）', toLight: '黑底 → 白底', toDark: '白底 → 黑底' };
 
@@ -20,6 +90,8 @@ export default function ConvertView() {
   const [result, setResult] = useState(null);
   const [rules, setRules] = useState(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [mode, setModeState] = useState(CV_MODE);
+  const setMode = (m) => { CV_MODE = m; setModeState(m); };
   const [showHist, setShowHistState] = useState(SHOW_HIST);
   const setShowHist = (v) => { SHOW_HIST = v; setShowHistState(v); };
   const [hist, setHist] = useState([]);
@@ -78,8 +150,12 @@ export default function ConvertView() {
         <div className="vh-title">🌓 PPT 黑白底互转 <button className="btn small rules-btn" onClick={() => setRulesOpen(true)}>⚙ 转换规则设置</button></div>
         <div className="spacer" />
         <button className={`btn ${showHist ? 'primary' : ''}`} onClick={() => { if (!showHist) loadHist(); setShowHist(!showHist); }}>{showHist ? '← 返回转换' : `🕘 转换历史（${hist.length}）`}</button>
-        <button className="btn ghost" disabled={!queue.length} onClick={() => setQueue([])}>清空序列</button>
-        <button className="btn primary" disabled={!queue.length || busy} onClick={run}>{busy ? '转换中…' : `开始转换并导出（${queue.length} 页）`}</button>
+        {!showHist && <div className="seg">
+          <button className={mode === 'pages' ? 'on' : ''} onClick={() => setMode('pages')}>📄 导出篮中的页面</button>
+          <button className={mode === 'files' ? 'on' : ''} onClick={() => setMode('files')}>🗂 按文件 / 文件夹</button>
+        </div>}
+        {!showHist && mode === 'pages' && <button className="btn ghost" disabled={!queue.length} onClick={() => setQueue([])}>清空序列</button>}
+        {!showHist && mode === 'pages' && <button className="btn primary" disabled={!queue.length || busy} onClick={run}>{busy ? '转换中…' : `开始转换并导出（${queue.length} 页）`}</button>}
       </div>
       {rules && (
         <div className="cv-rules-banner">
@@ -93,7 +169,8 @@ export default function ConvertView() {
             actions={<button className="btn small" disabled={!histSel.size} onClick={async () => { if (!confirm(`删除 ${histSel.size} 条转换记录？（只删除记录，不删除转换生成的文件）`)) return; await api.convertHistoryDelete([...histSel]); setHistSel(new Set()); loadHist(); }}>删除记录</button>} />
         </div>
       )}
-      {!showHist && <div className="convert">
+      {!showHist && mode === 'files' && <FileConvert onDone={loadHist} />}
+      {!showHist && mode === 'pages' && <div className="convert">
         <div className="cv-col">
           <div className="side-title">① 导出篮中的 PPT 页面（{pptSlides.length}）<div className="spacer" />
             <button className="btn tiny" onClick={() => setPick(new Set(pptSlides.filter((s) => !inQueue.has(s.id)).map((s) => s.id)))}>全选</button>

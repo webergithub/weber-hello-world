@@ -8,6 +8,7 @@ import LibraryView from './components/LibraryView';
 import SearchView from './components/SearchView';
 import { searchQueue } from './searchQueue';
 import NoticesView from './components/NoticesView';
+import NotesReviewView from './components/NotesReviewView';
 import DataDirDialog from './components/DataDirDialog';
 import FeedbackDialog from './components/FeedbackDialog';
 import GroupsView from './components/GroupsView';
@@ -288,6 +289,7 @@ export default function App() {
     { key: 'alllib', icon: '🗂', label: '所有资料库' },
     { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => t.status === 'running') ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
     { key: 'groups', icon: '🧩', label: '相似分组' },
+    { key: 'notesreview', icon: '✍', label: '完善讲解词' },
   ];
   const maintNav = [
     { key: 'recycle', icon: '🗑', label: '回收站' },
@@ -428,6 +430,7 @@ export default function App() {
           {view.type === 'analytics' && <AnalyticsView />}
           {view.type === 'recycle' && <RecycleView />}
           {view.type === 'notices' && <NoticesView />}
+          {view.type === 'notesreview' && <NotesReviewView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}

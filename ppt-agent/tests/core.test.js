@@ -452,3 +452,21 @@ test('反馈：未配置发件邮箱时保存在本机', async () => {
   await assert.rejects(() => svc.sendFeedback({ text: '  ' }));
   svc.close();
 });
+
+test('讲解词批量写回：同一文件多页一次写入（整段替换 + 追加译文段落），先备份', async () => {
+  const { writeNotesBatch } = require('../electron/core/noteswriter');
+  const { parsePptx } = require('../electron/core/pptx');
+  const src = path.join(__dirname, '..', 'test-ppts', '财务报告', '2026Q3经营分析.pptx');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppta-nw-'));
+  const file = path.join(dir, 'a.pptx');
+  fs.copyFileSync(src, file);
+  const r = await writeNotesBatch(file, [
+    { idx: 1, text: '第一行修正\n第二行修正', replace: true },
+    { idx: 2, heading: 'English', text: 'Revenue by business line', lang: 'en-US' },
+  ], { backupDir: path.join(dir, 'bk') });
+  assert.ok(fs.existsSync(r.backup));
+  assert.strictEqual(fs.readdirSync(path.join(dir, 'bk')).length, 1);
+  const p = await parsePptx(file, { mediaDir: path.join(dir, 'm'), mediaKey: 't' });
+  assert.strictEqual(p.slides[0].notes.replace(/\r/g, ''), '第一行修正\n第二行修正');
+  assert.ok(p.slides[1].notes.includes('【English】') && p.slides[1].notes.includes('Revenue by business line'));
+});

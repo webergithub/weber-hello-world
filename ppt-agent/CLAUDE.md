@@ -9,6 +9,7 @@
 3. 运行 `npm test`，并用 Playwright 驱动界面验证改动（`xvfb-run`）。
 4. 打包 Windows exe：`npx vite build && npx electron-builder --win portable --x64 --publish never`，把产物复制到 `download/`（删除旧版本 exe，保持只有一个）。同步更新 README 中的下载文件名。
 5. 提交并推送到 GitHub，然后在对话中发送 exe 与需求文档给用户下载。
+6. 新功能同步更新帮助：`PageHelp.jsx` 的页面操作指导、`Guide.jsx` 帮助指南对应章节；每个大版本（版本号前两位变化，或一次迭代新增多项功能）刷新帮助指南的“本版本新增”章节与新手指引 `TOUR_STEPS`（新菜单 / 新页面要有对应步骤）。
 
 ## 已确定的产品规则
 
@@ -39,6 +40,8 @@
 - 智能搜索范围用 `taskIds`（多选的已执行任务，空 = 所有资料库），前端记在 `ppta.searchScope`；`search_history.task_ids` 记录每次范围。
 - 黑白底互转每次转换写入 `convert_history`（含完整结果 JSON），转换页“🕘 转换历史”可重新查看。
 - 导出篮支持多选（Shift 连选），勾选时只导出所选页面。
+- 完善讲解词（总览分析）：应用内修改讲解词只写数据库（`notes_user`、`notes_kb`），默认不改原 PPT；`notesChanges` 列出待写回项，`writeBackNotesBatch` 按文件分组一次写回（`noteswriter.writeNotesBatch`，修正讲解词整段替换、译文追加【语言】段落，每个文件先备份），写回记录在 `notes_writeback`。
+- 智能生成统一底色：先用所选页面导出新 PPT，再调用 `convertSlides` 另存 `*_白底 / *_黑底`，原 PPT 与第一份输出都不改；每组相似页面可多选。
 - 列表项很多的页面（如相似分组）用“左侧列表 + 右侧详情”的主从布局，不要在一个滚动区里堆叠多个 DataTable。
 - 智能搜索：后端返回全部命中页（不截断），文件的“命中 N 页”= 该文件在结果中的页数；选中文件时页签数字只统计该文件，再次单击取消；结果过多时前端分批显示。
 - 浏览窗口从搜索结果打开时传 `results`（结果页顺序），左右键只在搜索结果之间翻页；点击相关推荐后必须显示醒目的“↩ 返回原来的页面”。

@@ -16,7 +16,7 @@ const { hashVector, mean, embedder } = require('./vectors');
 const { fileTerms, computeTags } = require('./tagger');
 const { computeGroups, computePairs, normSlideTitle } = require('./similarity');
 const { slideKeywords, pageTags, computeLinks } = require('./relations');
-const { writeNotes } = require('./noteswriter');
+const { writeNotes, writeNotesBatch } = require('./noteswriter');
 const { SearchEngine } = require('./search');
 const { exportPptx, exportMarkdown } = require('./exporter');
 const { convertTheme, RULES: DEFAULT_RULES, normalizeRules } = require('./converter');
@@ -1022,6 +1022,66 @@ class AgentService extends EventEmitter {
     return result;
   }
 
+  // ---------- 按文件 / 文件夹批量转换（整份 PPT）：原文件只读，结果另存 ----------
+  /** 列出若干文件 / 文件夹中的 PPT（递归，跳过 Office 临时文件与本工具数据目录） */
+  listPptx(paths) {
+    const exts = /\.(pptx|pptm|ppsx|potx|ppt)$/i;
+    const self = path.resolve(this.dataDir).toLowerCase();
+    const out = new Map();
+    const walk = (p, depth = 0) => {
+      let st; try { st = fs.statSync(p); } catch { return; }
+      if (st.isDirectory()) {
+        if (depth > 30 || path.resolve(p).toLowerCase().startsWith(self)) return;
+        let list = []; try { list = fs.readdirSync(p); } catch { return; }
+        for (const n of list.sort((a, b) => a.localeCompare(b, 'zh'))) if (!n.startsWith('.') && !n.startsWith('~$')) walk(path.join(p, n), depth + 1);
+      } else if (exts.test(p) && !path.basename(p).startsWith('~$')) {
+        out.set(path.resolve(p), { path: path.resolve(p), name: path.basename(p), dir: path.dirname(p), size: st.size, mtime: Math.round(st.mtimeMs), legacy: /\.ppt$/i.test(p) });
+      }
+    };
+    for (const p of paths || []) walk(p);
+    return [...out.values()];
+  }
+  /**
+   * 转换一份 PPT 的全部页面。direction：toLight（黑底页转白底）| toDark（白底页转黑底）| auto（每页黑白互换）
+   * outMode：suffix（原目录下，文件名加 _白底 / _黑底 / _黑白互转）| dir（统一输出到 outDir）；同名文件已存在时自动加序号，绝不覆盖原文件
+   */
+  async convertFile(src, { direction = 'auto', outMode = 'suffix', outDir = '' } = {}) {
+    const log = logger.child('convert');
+    const t0 = Date.now();
+    src = path.resolve(src);
+    if (!fs.existsSync(src)) throw new Error('文件不存在');
+    if (/\.ppt$/i.test(src)) throw new Error('旧版 .ppt 请先用 PowerPoint 另存为 .pptx 后再转换');
+    if (outMode === 'dir' && !outDir) throw new Error('请先选择输出目录');
+    // 每页的底色：资料库中已解析且未修改的直接使用，否则临时解析一次
+    let themes;
+    const f = this.store.fileByPath(src);
+    const st = fs.statSync(src);
+    if (f && f.status === 'parsed' && Math.abs((f.mtime || 0) - st.mtimeMs) < 2000) themes = this.store.slidesOf(f.id).map((s) => s.theme);
+    else {
+      const tmpMedia = path.join(this.cacheDir, 'convert', `probe-${Date.now()}`);
+      try { themes = (await parsePptx(src, { mediaDir: tmpMedia, mediaKey: 'probe', log })).slides.map((s) => s.theme); } finally { fs.rmSync(tmpMedia, { recursive: true, force: true }); }
+    }
+    const dirs = themes.map((t) => (direction === 'toLight' ? (t === 'dark' ? 'toLight' : null) : direction === 'toDark' ? (t === 'dark' ? null : 'toDark') : (t === 'dark' ? 'toLight' : 'toDark')));
+    const suffix = direction === 'toLight' ? '_白底' : direction === 'toDark' ? '_黑底' : '_黑白互转';
+    const base = path.basename(src).replace(/\.[^.]+$/, '');
+    const ext = path.extname(src).toLowerCase() === '.pptm' ? '.pptx' : path.extname(src);
+    const dir = outMode === 'dir' ? path.resolve(outDir) : path.dirname(src);
+    fs.mkdirSync(dir, { recursive: true });
+    let out = path.join(dir, `${base}${suffix}${ext}`);
+    for (let k = 2; fs.existsSync(out) || out === src; k++) out = path.join(dir, `${base}${suffix} (${k})${ext}`);
+    log.info(`批量转换：${src} → ${out}（${direction === 'toLight' ? '黑底转白底' : direction === 'toDark' ? '白底转黑底' : '黑白互换'}，${dirs.filter(Boolean).length}/${dirs.length} 页需要转换）`);
+    const r = await convertTheme(src, out, dirs, { log, rules: this.getConvertRules() });
+    const size = fs.statSync(out).size;
+    const srcNames = themes.map((t, i) => ({ file: path.basename(src), path: src, idx: i + 1, theme: t, dir: dirs[i] || 'keep' }));
+    const result = { ...r, path: out, src, size, slides: dirs.length, converted: dirs.filter(Boolean).length, toLight: dirs.filter((d) => d === 'toLight').length, toDark: dirs.filter((d) => d === 'toDark').length, sources: srcNames, preview: [], verify: { total: 0, ok: 0, failed: [] }, mode: 'file' };
+    try {
+      const info = this.store.db.prepare('INSERT INTO convert_history(at, ms, out_path, slides, to_light, to_dark, keep, sources, size, verify_ok, verify_total, file_id, result) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(Date.now(), Date.now() - t0, out, dirs.length, result.toLight, result.toDark, dirs.filter((d) => !d).length, JSON.stringify(srcNames), size, 0, 0, null, JSON.stringify(result));
+      result.historyId = Number(info.lastInsertRowid);
+    } catch (e) { log.warn('保存转换历史失败', e); }
+    return result;
+  }
+
   convertHistory() {
     return this.store.db.prepare('SELECT id, at, ms, out_path, slides, to_light, to_dark, keep, sources, size, verify_ok, verify_total, file_id FROM convert_history ORDER BY id DESC LIMIT 500').all()
       .map((h) => { const src = (() => { try { return JSON.parse(h.sources || '[]'); } catch { return []; } })(); return { ...h, sources: src, srcFiles: [...new Set(src.map((x) => x.file))], exists: fs.existsSync(h.out_path), inLibrary: !!(h.file_id && this.store.getFile(h.file_id)) }; });
@@ -1101,9 +1161,15 @@ class AgentService extends EventEmitter {
 
   /** 生成 PPT：可选统一底色（不一致的页按黑白底互转规则转换） */
   async generateDeck(slideIds, outPath, { unifyTheme = 'none' } = {}) {
-    if (unifyTheme !== 'light' && unifyTheme !== 'dark') return this.exportSlides(slideIds, outPath, { includeNotes: true });
-    const items = this.store.getSlides(slideIds).map((s) => ({ slideId: s.id, dir: unifyTheme === 'light' ? (s.theme === 'dark' ? 'toLight' : 'keep') : (s.theme === 'dark' ? 'keep' : 'toDark') }));
-    return this.convertSlides(items, outPath);
+    // 第一步：把选择的页面生成新 PPT（保持原样）
+    const base = await this.exportSlides(slideIds, outPath, { includeNotes: true });
+    if (unifyTheme !== 'light' && unifyTheme !== 'dark') return base;
+    // 第二步：调用黑白底互转，再生成统一为白底 / 黑底的 PPT 文件（另存为 *_白底 / *_黑底，原 PPT 与第一步的文件都不改动）
+    const byId = new Map(this.store.getSlides(slideIds).map((s) => [s.id, s]));
+    const items = slideIds.map((id) => byId.get(id)).filter(Boolean).map((s) => ({ slideId: s.id, dir: unifyTheme === 'light' ? (s.theme === 'dark' ? 'toLight' : 'keep') : (s.theme === 'dark' ? 'keep' : 'toDark') }));
+    const convPath = outPath.replace(/(\.pptx)?$/i, unifyTheme === 'light' ? '_白底.pptx' : '_黑底.pptx');
+    const conv = await this.convertSlides(items, convPath);
+    return { ...base, converted: { path: convPath, slides: conv.slides, size: conv.size, verify: conv.verify, fileId: conv.fileId, historyId: conv.historyId } };
   }
 
   // ================= 回收站 =================
@@ -1307,6 +1373,52 @@ class AgentService extends EventEmitter {
     logger.child('agent').info(`译文已写回 PPT 备注：${f.path} 第 ${s.idx} 页【${name}】（原文件已备份到 ${r.backup}）`);
     return { writtenBack: true, backup: r.backup };
   }
+  // ================= 完善讲解词：应用内修改过的讲解词（默认不改原 PPT），确认后批量写回 PPT 备注 =================
+  /** 待写回的讲解词：修正讲解词（与 PPT 中的原备注不同）+ 尚未写回的译文 */
+  notesChanges() {
+    const writable = (f) => (f.kind || 'ppt') === 'ppt' && /\.(pptx|pptm|potx|ppsx)$/i.test(f.path) && fs.existsSync(f.path);
+    const out = [];
+    const rows = this.store.db.prepare(`SELECT s.id, s.file_id, s.idx, s.title, s.notes, s.notes_user, s.notes_user_at, f.name, f.path, f.kind, f.status FROM slides s JOIN files f ON f.id = s.file_id
+      WHERE s.notes_user IS NOT NULL AND s.notes_user != COALESCE(s.notes, '') AND f.status IN ('parsed', 'duplicate')`).all();
+    for (const r of rows) out.push({ key: `final:${r.id}`, type: 'final', slideId: r.id, fileId: r.file_id, fileName: r.name, path: r.path, idx: r.idx, title: r.title, before: r.notes || '', after: r.notes_user, at: r.notes_user_at || null, writable: writable(r) });
+    const kb = this.store.db.prepare(`SELECT k.*, s.id AS sid, s.title, s.notes, s.notes_user, f.id AS fid, f.name, f.kind FROM notes_kb k JOIN files f ON f.path = k.path JOIN slides s ON s.file_id = f.id AND s.idx = k.idx
+      WHERE COALESCE(k.written_back, 0) = 0 AND f.status IN ('parsed', 'duplicate')`).all();
+    for (const k of kb) out.push({ key: `tr:${k.sid}:${k.variant}:${k.lang}`, type: 'translation', slideId: k.sid, fileId: k.fid, fileName: k.name, path: k.path, idx: k.idx, title: k.title, lang: k.lang, langName: LANG_NAMES[k.lang] || k.lang, variant: k.variant, before: (k.notes_user != null ? k.notes_user : k.notes) || '', after: k.text, at: k.at || null, writable: writable({ kind: k.kind, path: k.path }) });
+    return out.sort((a, b) => (b.at || 0) - (a.at || 0));
+  }
+  notesWritebackHistory() { return this.store.db.prepare('SELECT * FROM notes_writeback ORDER BY id DESC LIMIT 1000').all(); }
+  /** 批量写回：按文件分组，每个文件只备份一次、只重写一次；某个文件失败不影响其他文件 */
+  async writeBackNotesBatch(keys) {
+    const log = logger.child('agent');
+    const want = new Set(keys || []);
+    const items = this.notesChanges().filter((c) => want.has(c.key));
+    const byFile = new Map();
+    for (const c of items) { if (!byFile.has(c.path)) byFile.set(c.path, []); byFile.get(c.path).push(c); }
+    const done = [], errors = [];
+    for (const [file, list] of byFile) {
+      if (!list[0].writable) { errors.push({ path: file, error: (list[0].path || '').match(/\.ppt$/i) ? '旧版 .ppt 不支持写回' : /\.docx?$/i.test(file) ? 'Word 文档不支持写回' : '原文件不存在或不可写' }); continue; }
+      // 同一页同时有修正讲解词与译文时，先替换正文再追加译文段落
+      const entries = list.slice().sort((a, b) => a.idx - b.idx || (a.type === 'final' ? -1 : 1)).map((c) => (c.type === 'final'
+        ? { idx: c.idx, text: c.after, replace: true, lang: 'zh-CN' }
+        : { idx: c.idx, heading: LANG_NAMES[c.lang] || c.lang, text: c.after, lang: LANG_TAGS[c.lang] || c.lang }));
+      try {
+        const r = await writeNotesBatch(file, entries, { backupDir: path.join(this.dataDir, 'backup') });
+        const f = this.store.getFile(list[0].fileId);
+        const st = fs.statSync(file);
+        if (f) this.store.updateFile(f.id, { size: st.size, mtime: Math.round(st.mtimeMs), fingerprint: this.fingerprint(f.name, st.size, st.mtimeMs, f.author) });
+        const ins = this.store.db.prepare('INSERT INTO notes_writeback(at, path, file_name, idx, title, kind, lang, before, after, backup) VALUES (?,?,?,?,?,?,?,?,?,?)');
+        for (const c of list) {
+          if (c.type === 'final') this.store.db.prepare('UPDATE slides SET notes = ?, notes_user = NULL, notes_user_at = NULL WHERE id = ?').run(c.after, c.slideId);
+          else this.store.kbMarkWritten(c.path, c.idx, c.variant, c.lang);
+          ins.run(Date.now(), file, c.fileName, c.idx, c.title, c.type, c.lang || null, c.before, c.after, r.backup);
+          done.push(c.key);
+        }
+        log.info(`讲解词已写回 PPT 备注：${file}（${list.length} 处；原文件已备份到 ${r.backup}）`);
+      } catch (e) { log.warn(`讲解词写回失败：${file}`, e); errors.push({ path: file, error: e.message }); }
+    }
+    return { ok: done.length, files: byFile.size - errors.length, errors };
+  }
+
   async testLlm(cfg) {
     const client = llm.client({ ...this.config.llm, ...(cfg || {}), enabled: true });
     if (!client) throw new Error('请填写模型名称');

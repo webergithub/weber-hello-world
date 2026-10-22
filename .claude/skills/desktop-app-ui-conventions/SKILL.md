@@ -88,6 +88,9 @@ Each table must support:
 
 ## 6. Safety and data
 
+- **Edits stay in the app until confirmed**: changes the user makes to content that lives in their original files (e.g. speaker notes) are stored in the app only; a dedicated review page lists every pending change with a side-by-side diff, lets the user multi-select and write back in one batch (one backup per file, grouped writes), and keeps a write-back log with backup locations.
+- Derived outputs never overwrite inputs: a "unified theme" export first writes the plain new file, then runs the converter into a separate *_白底 / *_黑底 file.
+
 - Deletes go to an in-app recycle bin first (restore / permanently delete with a second confirmation).
 - **Never modify the user's original files during processing** (open read-only, write outputs to the app's data folder). Writing back into an original file only happens on an explicit manual click, with a confirmation dialog and an automatic backup first. Destructive defaults (e.g. moving the original file) must not be preselected.
 - Save dialogs remember the last folder per purpose; default file names are meaningful (source name + suffix).
@@ -99,6 +102,8 @@ Each table must support:
 - A guided tour of at most 8 steps: each step switches to the right view, spotlights the target area, and says "👉 做什么" and "👀 能看到什么", with 上一步 / 下一步 / 跳过 and keyboard ← → Esc.
 - A "❓ 帮助指南" button at the bottom left opens the detailed help (table of contents, one section per feature, current shortcuts, replay tour).
 - **Every page has a "?" help icon**, pinned to the **bottom-left corner** of the page and of each viewer / compare window, never in the title bar where it crowds close buttons (the app-level help button next to the app title stays where it is). Clicking it opens a popover with that page's operation guide (what you can do, step by step), the current keyboard shortcuts for viewers, and links to the matching help-guide section and to shortcut settings. Do not keep permanent shortcut hint bars on screen; fold them into this icon. Esc closes the popover without closing the underlying window.
+
+- Refresh help with every feature: the page "?" guides and the help-guide chapters; on every major version add a "本版本新增" chapter and extend the onboarding tour with a step for each new menu / page.
 
 ## 8. Every iteration
 

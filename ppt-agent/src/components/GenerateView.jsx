@@ -20,7 +20,7 @@ export default function GenerateView({ state, setState }) {
     setBusy(true);
     try {
       const d = await api.smartCandidates(text.trim(), { threshold: th, theme: th2 });
-      set({ desc: text.trim(), data: d, rows: d.rows.map((r) => ({ ...r, on: true })) });
+      set({ desc: text.trim(), data: d, rows: d.rows.map((r) => ({ ...r, on: true, picks: [r.pick] })) });
     } catch (e) { app.toast('匹配失败：' + e.message, 'error'); } finally { setBusy(false); }
   };
   // 调整相似阈值 / 底色偏好后自动重新分组
@@ -32,8 +32,14 @@ export default function GenerateView({ state, setState }) {
   const onTheme = (v) => { set({ theme: v }); if (desc) run(desc, threshold, v); };
   useEffect(() => () => clearTimeout(timer.current), []);
 
-  const list = rows || [];
-  const chosen = list.filter((r) => r.on).map((r) => r.pick);
+  // 每组可多选（相似度高的页面也可以同时加入），按组顺序、组内按页面顺序生成
+  const list = (rows || []).map((r) => (r.picks ? r : { ...r, picks: r.pick ? [r.pick] : [] }));
+  const chosen = list.filter((r) => r.on).flatMap((r) => r.items.filter((it) => r.picks.includes(it.id)).map((it) => it.id));
+  const togglePick = (i, id) => {
+    const r = list[i];
+    const picks = r.picks.includes(id) ? r.picks.filter((x) => x !== id) : [...r.picks, id];
+    patchRow(i, { picks, pick: picks[0] || null, on: picks.length > 0 });
+  };
   const patchRow = (i, p) => set({ rows: list.map((r, k) => (k === i ? { ...r, ...p } : r)) });
   const move = (i, d) => { const n = [...list]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; set({ rows: n }); };
   const make = async () => {
@@ -43,7 +49,8 @@ export default function GenerateView({ state, setState }) {
     setMaking(true);
     try {
       const r = await api.generateDeck(chosen, out, { unifyTheme: unify });
-      app.toast(`已生成 PPT：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}`, 'info', { label: '打开', run: () => api.openPath(out) });
+      app.toast(`已生成 PPT：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}`, 'info', { label: '打开', link: { type: 'open', path: out }, cat: '智能生成' });
+      if (r.converted) app.toast(`已调用黑白底互转生成${unify === 'light' ? '白底' : '黑底'}版本：${r.converted.path}${r.converted.verify && r.converted.verify.total ? `（校验 ${r.converted.verify.ok}/${r.converted.verify.total}）` : ''}`, 'info', { label: '打开', link: { type: 'open', path: r.converted.path }, cat: '智能生成' });
     } catch (e) { app.toast('生成失败：' + e.message, 'error'); } finally { setMaking(false); }
   };
 
@@ -88,18 +95,19 @@ export default function GenerateView({ state, setState }) {
                 <div className="gr-head">
                   <label className="chk"><input type="checkbox" checked={r.on} onChange={() => patchRow(i, { on: !r.on })} /> <b>{i + 1}</b></label>
                   <div className="gr-title" title={r.title}>{r.title}</div>
-                  <div className="gr-meta">{r.formats.map((f) => <span key={f} className="tag accent">{f}</span>)}<span className="muted small">相似页 {r.total}</span></div>
+                  <div className="gr-meta">{r.formats.map((f) => <span key={f} className="tag accent">{f}</span>)}<span className="muted small">相似页 {r.total}{r.picks.length > 1 ? ` · 已选 ${r.picks.length} 页` : ''}</span></div>
+                  <div className="gr-ops"><button className="btn tiny" onClick={() => patchRow(i, { picks: r.items.map((it) => it.id), on: true })}>本组全选</button><button className="btn tiny ghost" disabled={r.picks.length <= 1} onClick={() => patchRow(i, { picks: [r.items[0].id], pick: r.items[0].id })}>只留代表页</button></div>
                   <div className="gr-ops"><button className="btn tiny" disabled={i === 0} onClick={() => move(i, -1)}>↑</button><button className="btn tiny" disabled={i === list.length - 1} onClick={() => move(i, 1)}>↓</button></div>
                 </div>
                 <div className="gr-items">
                   {r.items.map((it, k) => (
-                    <div key={it.id} className={`gen-card ${r.pick === it.id ? 'picked' : ''}`} onClick={() => patchRow(i, { pick: it.id, on: true })} onDoubleClick={() => app.openSlide(it.id, [...new Set(list.flatMap((x) => x.items.map((y) => y.file_id)))])}>
+                    <div key={it.id} className={`gen-card ${r.picks.includes(it.id) ? 'picked' : ''}`} onClick={() => togglePick(i, it.id)} onDoubleClick={() => app.openSlide(it.id, [...new Set(list.flatMap((x) => x.items.map((y) => y.file_id)))])}>
                       <SlidePreview slide={it} />
                       <div className="gc-info">
                         <div className="small ellipsis" title={it.filePath}>{it.fileName} · 第 {it.idx} 页</div>
                         <div className="small"><span className={`tag theme-${it.theme}`}>{THEME_LABEL[it.theme]}</span>{k === 0 ? <span className="tag hit">代表页</span> : <span className="muted">相似 {Math.round(it.sim * 100)}%</span>}{it.notes ? <span className="muted"> · 有讲解词</span> : ''}</div>
                       </div>
-                      {r.pick === it.id && <span className="gc-check">✓ 已选</span>}
+                      {r.picks.includes(it.id) && <span className="gc-check">✓ 已选{r.picks.length > 1 ? ` ${r.picks.indexOf(it.id) + 1}` : ''}</span>}
                       <button className="gc-zoom" title="逐页浏览" onClick={(e) => { e.stopPropagation(); app.openSlide(it.id, [...new Set(list.flatMap((x) => x.items.map((y) => y.file_id)))]); }}>⛶</button>
                     </div>
                   ))}
@@ -110,9 +118,9 @@ export default function GenerateView({ state, setState }) {
           <div className="gen-foot">
             <span className="badge">将生成 {chosen.length} 页</span>
             <span className="muted">底色：</span>
-            <div className="seg small">{[['none', '保持原样'], ['light', '统一为白底'], ['dark', '统一为黑底']].map(([k, v]) => <button key={k} className={unify === k ? 'on' : ''} onClick={() => set({ unify: k })}>{v}</button>)}</div>
+            <div className="seg small" title="统一底色只作用于生成的新 PPT，原 PPT 文件不会被修改">{[['none', '保持原样'], ['light', '统一为白底'], ['dark', '统一为黑底']].map(([k, v]) => <button key={k} className={unify === k ? 'on' : ''} onClick={() => set({ unify: k })}>{v}</button>)}</div>
             <div className="spacer" />
-            <button className="btn" onClick={() => set({ rows: list.map((r) => ({ ...r, on: true })) })}>全部选上</button>
+            <button className="btn" onClick={() => set({ rows: list.map((r) => ({ ...r, on: true, picks: r.picks.length ? r.picks : [r.items[0].id] })) })}>每组都选上</button>
             <button className="btn" disabled={!chosen.length} onClick={() => app.basket.add(chosen)}>＋ 加入导出篮</button>
             <button className="btn primary" disabled={!chosen.length || making} onClick={make}>{making ? '生成中…' : '📄 生成 PPT 并导出'}</button>
           </div>

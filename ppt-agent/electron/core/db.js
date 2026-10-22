@@ -61,6 +61,9 @@ CREATE TABLE IF NOT EXISTS convert_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, ms INTEGER, out_path TEXT, slides INTEGER, to_light INTEGER, to_dark INTEGER, keep INTEGER,
   sources TEXT, size INTEGER, verify_ok INTEGER, verify_total INTEGER, file_id INTEGER, result TEXT
 );
+CREATE TABLE IF NOT EXISTS notes_writeback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, path TEXT, file_name TEXT, idx INTEGER, title TEXT, kind TEXT, lang TEXT, before TEXT, after TEXT, backup TEXT
+);
 CREATE TABLE IF NOT EXISTS recycle (
   id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, name TEXT, orig_path TEXT, bin_path TEXT, moved INTEGER,
   prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER
@@ -98,6 +101,7 @@ class Store {
     if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
     if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');
     if (!sl.has('notes_ai')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_ai TEXT');
+    if (!sl.has('notes_user_at')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user_at INTEGER');
     if (!sl.has('kw')) this.db.exec('ALTER TABLE slides ADD COLUMN kw TEXT');
     if (!sl.has('tags')) this.db.exec('ALTER TABLE slides ADD COLUMN tags TEXT');
   }
@@ -266,6 +270,7 @@ class Store {
   setSlideUser(id, f) {
     const sets = [], vals = [];
     for (const k of ['notes_user', 'md_user', 'notes_ai']) if (k in f) { sets.push(`${k} = ?`); vals.push(f[k]); }
+    if ('notes_user' in f) { sets.push('notes_user_at = ?'); vals.push(f.notes_user == null ? null : Date.now()); }
     if (sets.length) this.q(`UPDATE slides SET ${sets.join(', ')} WHERE id = ?`).run(...vals, id);
   }
   updateFts(id, fts) {
