@@ -113,7 +113,7 @@ export default function GenerateView({ state, setState }) {
             <div className="seg small">{[['none', '保持原样'], ['light', '统一为白底'], ['dark', '统一为黑底']].map(([k, v]) => <button key={k} className={unify === k ? 'on' : ''} onClick={() => set({ unify: k })}>{v}</button>)}</div>
             <div className="spacer" />
             <button className="btn" onClick={() => set({ rows: list.map((r) => ({ ...r, on: true })) })}>全部选上</button>
-            <button className="btn" disabled={!chosen.length} onClick={() => app.basket.add(chosen)}>加入导出篮</button>
+            <button className="btn" disabled={!chosen.length} onClick={() => app.basket.add(chosen)}>＋ 加入导出篮</button>
             <button className="btn primary" disabled={!chosen.length || making} onClick={make}>{making ? '生成中…' : '📄 生成 PPT 并导出'}</button>
           </div>
         </>

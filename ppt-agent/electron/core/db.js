@@ -53,6 +53,10 @@ CREATE TABLE IF NOT EXISTS notes_kb (path TEXT, idx INTEGER, variant TEXT, lang 
 CREATE TABLE IF NOT EXISTS slide_links (slide_id INTEGER, other_id INTEGER, score REAL, kind TEXT, reasons TEXT, PRIMARY KEY (slide_id, other_id));
 CREATE TABLE IF NOT EXISTS file_views (file_id INTEGER, kind TEXT, at INTEGER);
 CREATE INDEX IF NOT EXISTS idx_views_file ON file_views(file_id);
+CREATE TABLE IF NOT EXISTS search_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, q TEXT, task_id INTEGER, use_llm INTEGER, at INTEGER, ms INTEGER,
+  files INTEGER, light INTEGER, dark INTEGER, word INTEGER, status TEXT, error TEXT
+);
 CREATE TABLE IF NOT EXISTS recycle (
   id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, name TEXT, orig_path TEXT, bin_path TEXT, moved INTEGER,
   prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER

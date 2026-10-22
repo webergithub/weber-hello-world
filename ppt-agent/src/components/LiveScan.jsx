@@ -34,10 +34,16 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
   const t = app.tasks.find((x) => x.id === id);
   const p = (id && app.progress[id]) || {};
   const scans = p.scans || [];
-  const [cursor, setCursor] = useState(0); // 正在展示的 scans 下标
+  // 按事件序号（seq）记录正在展示的页面：scans 只保留最近若干条，按下标记录会在数组滚动时错位（反复刷新 / 跳页）
+  const [showSeq, setShowSeq] = useState(null);
+  const shownAt = useRef(0);
   const lastSeq = useRef(0);
-  useEffect(() => { setCursor(Math.max(0, scans.length - 1)); }, [id]);
-  const cur = scans[Math.min(cursor, scans.length - 1)];
+  useEffect(() => { setShowSeq(scans.length ? scans[scans.length - 1].seq : null); shownAt.current = Date.now(); }, [id]);
+  let cursor = scans.findIndex((x) => x.seq === showSeq);
+  if (cursor < 0) { cursor = scans.findIndex((x) => x.seq > (showSeq || 0)); if (cursor < 0) cursor = scans.length - 1; }
+  cursor = Math.max(0, cursor);
+  const cur = scans[cursor];
+  const newest = scans.length ? scans[scans.length - 1].seq : 0;
   // 当前页的图片全部加载完成（或超时）后才算“就绪”，避免页面显示不完整就切到下一页
   const [ready, setReady] = useState(true);
   useEffect(() => {
@@ -48,17 +54,21 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
     const t0 = setTimeout(() => { if (!off) setReady(true); }, MAX_WAIT_MS);
     preload(urls).then(() => { if (!off) setReady(true); });
     // 预取下一页的图片
-    const next = scans[Math.min(cursor + 1, scans.length - 1)];
-    if (next && next !== cur) preload(imagesOf(next));
+    const next = scans[cursor + 1];
+    if (next) preload(imagesOf(next));
     return () => { off = true; clearTimeout(t0); };
   }, [cur && cur.seq]);
-  // 展示队列：当前页就绪后逐页推进；积压太多时跳到最近几页
+  // 展示队列：每页至少停留一段时间（从该页显示时起算，新事件到来不会重置计时）；积压多时逐步缩短停留时间平滑追赶，不整段跳过
   useEffect(() => {
-    if (cursor >= scans.length - 1 || !ready) return undefined;
+    if (!ready || !cur) return undefined;
+    const next = scans[cursor + 1];
+    if (!next) return undefined;
     const backlog = scans.length - 1 - cursor;
-    const timer = setTimeout(() => setCursor((c) => (backlog > 8 ? scans.length - 8 : c + 1)), backlog > 8 ? 60 : MIN_SHOW_MS);
+    const minShow = backlog > 40 ? 120 : backlog > 20 ? 220 : backlog > 8 ? 380 : MIN_SHOW_MS;
+    const wait = Math.max(0, minShow - (Date.now() - shownAt.current));
+    const timer = setTimeout(() => { shownAt.current = Date.now(); setShowSeq(next.seq); }, wait);
     return () => clearTimeout(timer);
-  }, [cursor, scans.length, ready]);
+  }, [cur && cur.seq, newest, ready]);
   useEffect(() => { if (cur) lastSeq.current = cur.seq; }, [cur]);
   const tags = (p.tagFeed || []).slice(-12).reverse();
   const recent = scans.slice(Math.max(0, cursor - 9), cursor + 1).reverse();
@@ -75,11 +85,28 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
         <div className="ls-prog"><div className="progress big"><div style={{ width: `${t.status === 'done' ? 100 : filePct}%` }} /></div></div>
         <span className="small num-link" onClick={() => drillTask(app, t, '已处理文档')}>文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
         {t.status === 'running' && <button className="btn small" disabled={!!(app.liveTasks[t.id] && app.liveTasks[t.id].pausing)} onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>{app.liveTasks[t.id] && app.liveTasks[t.id].pausing ? '正在暂停…' : '⏸ 暂停'}</button>}
-        {['paused', 'interrupted'].includes(t.status) && <button className="btn small primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 继续</button>}
-        {t.status === 'draft' && <button className="btn small primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button>}
+        {['paused', 'interrupted'].includes(t.status) && <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 继续</button>}
+        {t.status === 'draft' && <button className="btn small primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button>}
       </div>
       {!cur ? (
-        <div className="empty-tip">{t.status === 'running' ? (p.stage === 'scanning' && p.scan ? `正在扫描目录：已检查 ${p.scan.dirs} 个目录，发现 ${p.scan.found} 个文档…` : '等待解析开始…') : '开始解析后，这里会以动画实时展示每一页的扫描读取过程、生成的 Markdown 与标签标注结果。'}</div>
+        t.status === 'running' || t.status === 'pending' || t.status === 'draft' ? (
+          <div className="empty-tip">{t.status === 'running' ? (p.stage === 'scanning' && p.scan ? `正在扫描目录：已检查 ${p.scan.dirs} 个目录，发现 ${p.scan.found} 个文档…` : '等待解析开始…') : t.status === 'pending' ? `排队中：第 ${t.queuePos || '?'} 位，前面的任务完成后自动开始。` : '开始解析后，这里会以动画实时展示每一页的扫描读取过程、生成的 Markdown 与标签标注结果。'}</div>
+        ) : (
+          <div className="ls-summary">
+            <div className="lss-title"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span> <b>#{t.id} {t.name}</b></div>
+            <div className="lss-cards">
+              {[['文档总数', t.total, null], ['已解析', t.parsed, ['parsed']], ['已解析过', t.skipped, ['skipped']], ['重复', t.duplicate, ['duplicate']], ['失败', t.failed, ['failed']]].map(([k, v, acts]) => (
+                <div key={k} className="card drill" onClick={() => drillTask(app, t, k, acts)}><div className="card-v">{v || 0}</div><div className="card-k">{k}</div></div>
+              ))}
+            </div>
+            {t.message && <div className="muted small">{t.message}</div>}
+            <div className="row center">
+              <button className="btn" onClick={() => app.go({ type: 'monitor', tab: 'history', taskId: t.id })}>查看解析历史</button>
+              <button className="btn" onClick={() => app.go({ type: 'task', id: t.id })}>任务概览</button>
+              <button className="btn primary" onClick={() => app.startParse(t.id, ['paused', 'interrupted'].includes(t.status) ? 'resume' : 'start')}>{['paused', 'interrupted'].includes(t.status) ? '▶ 从断点继续' : '↻ 重新扫描'}</button>
+            </div>
+          </div>
+        )
       ) : (
         <div className="ls-body">
           <div className="ls-left">
@@ -87,7 +114,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
               {cur.detail && cur.kind !== 'word' && <span className={`tag theme-${cur.detail.theme}`}>{THEME_LABEL[cur.detail.theme]}</span>}
               <span className="spacer" /><button className="btn tiny" title={cur.file} onClick={() => api.showItem(cur.file)}>📂 在资源管理器中显示</button></div>
             <div className="ls-stage" style={{ '--ratio': cur.detail && cur.detail.layout ? cur.detail.layout.w / cur.detail.layout.h : 16 / 9 }}>
-              <div key={cur.seq} className={`ls-slide ${cur.kind === 'word' ? 'doc' : ''}`}>
+              <div key={cur.seq} data-seq={cur.seq} className={`ls-slide ${cur.kind === 'word' ? 'doc' : ''}`}>
                 {cur.detail && cur.detail.thumb ? <img className="ls-shot" src={assetUrl('thumb', cur.detail.thumb)} alt={cur.title} draggable={false} />
                   : cur.detail && cur.detail.layout ? <HtmlSlide layout={cur.detail.layout} />
                   : <div className="ls-doc"><div className="ls-doc-title">{cur.title}</div>{String((cur.detail && cur.detail.text) || '').split('\n').slice(0, 14).map((l, i) => <div key={i}>{l}</div>)}</div>}

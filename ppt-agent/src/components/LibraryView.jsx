@@ -7,6 +7,9 @@ import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
 import { StatCards } from './DrillDialog';
+import TagList from './TagList';
+
+const SIDE_W = 240;
 
 const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
@@ -169,16 +172,29 @@ function GalleryMode({ files }) {
   const list = useMemo(() => files.filter((f) => f.status === 'parsed' && f.slide_count > 0 && (!kind || (f.kind || 'ppt') === kind)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files, kind]);
   const [cur, setCur] = useState(null);
   const [shown, setShown] = useState(null);
+  // 左侧文件名一栏可拖动调整宽度（记住）
+  const [sideW, setSideWState] = useState(() => { try { return Number(localStorage.getItem('ppta.gallerySide')) || SIDE_W; } catch { return SIDE_W; } });
+  const setSideW = (w) => { setSideWState(w); try { localStorage.setItem('ppta.gallerySide', String(w)); } catch { /* ignore */ } };
+  const startSide = (e) => {
+    e.preventDefault();
+    const x0 = e.clientX, w0 = sideW;
+    document.body.classList.add('col-resizing');
+    const move = (ev) => setSideW(Math.max(160, Math.min(window.innerWidth * 0.6, Math.round(w0 + ev.clientX - x0))));
+    const up = () => { document.body.classList.remove('col-resizing'); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
   const ids = list.map((f) => f.id);
   const start = cur && ids.includes(cur) ? cur : ids[0];
   useEffect(() => { const el = document.querySelector(`.gallery-side [data-gid="${shown}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }, [shown]);
   return (
-    <div className="gallery">
+    <div className="gallery" style={{ gridTemplateColumns: `${sideW}px 6px 1fr` }}>
       <div className="gallery-side">
         <div className="col-head"><span>文档（{list.length}）</span>
           <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option></select></div>
         {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{f.kind === 'word' ? '📄' : '🖼'} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
       </div>
+      <div className="v-split" title="拖动调整宽度，双击恢复" onMouseDown={startSide} onDoubleClick={() => setSideW(SIDE_W)} />
       <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active={!app.modalOpen} compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
     </div>
   );
@@ -222,7 +238,7 @@ function OverviewMode({ scopeTask }) {
     { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.light_slides || 0 : '-') },
     { key: 'theme', label: '底色', render: (r) => ((r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'category', label: '主题分类' },
-    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
+    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} /> },
     { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },

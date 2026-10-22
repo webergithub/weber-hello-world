@@ -108,7 +108,7 @@ export default function ConvertView() {
           <div className="cv-result">
             <div className="side-title">③ 转换结果：{result.path}（{fmtSize(result.size)}；文字 {result.stats.text} 处、图形 {result.stats.shapes} 个、表格 {result.stats.tables} 个、图表 {result.stats.charts || 0} 个、SmartArt {result.stats.diagrams || 0} 个、logo {result.stats.logos} 个）
               {result.fileId && <button className="btn tiny primary" onClick={() => app.openSlide(result.slideIds[0], [result.fileId])}>⛶ 逐页浏览转换结果</button>}
-              <button className="btn tiny" onClick={() => api.openPath(result.path)}>用 PowerPoint 打开</button><button className="btn tiny" onClick={() => api.showItem(result.path)}>位置</button></div>
+              <button className="btn tiny" onClick={() => api.openPath(result.path)}>用 PowerPoint 打开</button><button className="btn tiny" onClick={() => api.showItem(result.path)}>📂 位置</button></div>
             {result.verify && result.verify.total > 0 && (
               <div className={`notice ${result.verify.failed.length ? 'danger' : 'ok'}`} style={{ margin: '0 0 8px' }}>
                 {result.verify.failed.length

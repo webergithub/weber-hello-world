@@ -67,12 +67,12 @@ export default function AnalyticsView() {
     { key: 'size', label: '大小', type: 'number', sort: (r) => r.size || 0, filterValue: (r) => Math.round(((r.size || 0) / 1048576) * 100) / 100, className: 'nowrap', render: (r) => fmtSize(r.size) },
     { key: 'author', label: '作者' },
     { key: 'category', label: '主题分类', hidden: true },
-    { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => <><button className="btn tiny" disabled={!r.exists} onClick={() => api.openPath(r.path)} title={`用 ${r.kind === 'word' ? 'Word' : 'PowerPoint'} 打开`}>打开文件</button><button className="btn tiny" disabled={!r.exists} onClick={() => api.showItem(r.path)} title="在资源管理器中显示并选中该文件">在资源管理器中显示</button></> },
+    { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => <><button className="btn tiny" disabled={!r.exists} onClick={() => api.openPath(r.path)} title={`用 ${r.kind === 'word' ? 'Word' : 'PowerPoint'} 打开`}>打开原文件</button><button className="btn tiny" disabled={!r.exists} onClick={() => api.showItem(r.path)} title="在资源管理器中显示并选中该文件">📂 在资源管理器中显示</button></> },
   ];
   const list = (id, rows, opts = {}) => (
     <DataTable id={id} sessionKey={drill && id === 'analytics-drill' ? `${id}-${drill.title}` : id} columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={opts.sort || { k: 'lastOpen', d: -1 }} empty={opts.empty || '没有文档'}
       toolbar={opts.toolbar}
-      actions={<><button className="btn small" disabled={sel.size !== 1} onClick={() => { const r = rows.find((x) => sel.has(x.id)); if (r) api.showItem(r.path); }}>在资源管理器中显示</button><CompareButton ids={[...sel]} /><RecycleButton ids={[...sel]} done={() => { setSel(new Set()); load(true); }} /></>} />
+      actions={<><button className="btn small" disabled={sel.size !== 1} onClick={() => { const r = rows.find((x) => sel.has(x.id)); if (r) api.showItem(r.path); }}>📂 在资源管理器中显示</button><CompareButton ids={[...sel]} /><RecycleButton ids={[...sel]} done={() => { setSel(new Set()); load(true); }} /></>} />
   );
   return (
     <div className="view">

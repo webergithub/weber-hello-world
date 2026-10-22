@@ -20,7 +20,7 @@ export default function TaskMonitor({ tab = 'queue', taskId, setTab, scoped = fa
       <div className="view-head">
         <div className="vh-title">{scoped ? <>⚙️ 解析过程 <span className="crumb">› {t ? `#${t.id} ${t.name}` : ''} › {SUB_TITLE[tab]}</span></> : <>🗂 全部任务与历史 <span className="crumb">› {SUB_TITLE[tab]}</span></>}</div>
         <div className="spacer" />
-        {tab === 'queue' && <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待解析的任务'); }}>▶ 全部开始</button>}
+        {tab === 'queue' && <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待解析的任务'); if (n) setTab('live'); }}>▶ 全部开始</button>}
       </div>
       <div className="tab-body">
         {tab === 'queue' && <QueuePanel initial={taskId} onLive={(id) => setTab('live', id)} />}
@@ -59,9 +59,9 @@ function QueuePanel({ initial, onLive }) {
         {t.status !== 'draft' && t.status !== 'pending' && <div className="small muted">
           <Num onClick={() => drillTask(app, t, '本次解析', ['parsed'])}>解析 {t.parsed}</Num> · <Num onClick={() => drillTask(app, t, '已解析过', ['skipped'])}>已解析过 {t.skipped}</Num> · <Num onClick={() => drillTask(app, t, '重复', ['duplicate'])}>重复 {t.duplicate}</Num> · <Num onClick={() => drillTask(app, t, '失败', ['failed'])}>失败 {t.failed}</Num></div>}
         <div className="tc-ops" onClick={(e) => e.stopPropagation()}>
-          {t.status === 'draft' && <button className="btn tiny primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button>}
-          {['paused', 'interrupted'].includes(t.status) && <button className="btn tiny primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 继续</button>}
-          {['done', 'cancelled', 'interrupted', 'paused', 'failed'].includes(t.status) && <button className="btn tiny" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>↻ 重新扫描</button>}
+          {t.status === 'draft' && <button className="btn tiny primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button>}
+          {['paused', 'interrupted'].includes(t.status) && <button className="btn tiny primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 继续</button>}
+          {['done', 'cancelled', 'interrupted', 'paused', 'failed'].includes(t.status) && <button className="btn tiny" onClick={() => app.startParse(t.id)}>↻ 重新扫描</button>}
           {(t.status === 'running' || t.status === 'pending') && <button className="btn tiny" onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>⏸ 暂停</button>}
           {t.status === 'running' && <button className="btn tiny" onClick={() => onLive(t.id)}>解析动态</button>}
           {t.queuePos > 0 && <><button className="btn tiny" onClick={() => api.moveTask(t.id, -1).then(app.refreshTasks)}>上移</button><button className="btn tiny" onClick={() => api.moveTask(t.id, 1).then(app.refreshTasks)}>下移</button></>}
@@ -104,8 +104,8 @@ function LivePanel({ taskId }) {
         <div className="vh-title">#{t.id} {t.name} <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span></div>
         <div className="muted small">{t.dir}</div>
       </div>
-      {t.status === 'draft' && <div className="notice">任务已添加，尚未开始。点击 <button className="btn small primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button> 加入解析队列。</div>}
-      {['paused', 'interrupted'].includes(t.status) && <div className="notice">{t.message || '任务已暂停'} <button className="btn small primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 从断点继续</button></div>}
+      {t.status === 'draft' && <div className="notice">任务已添加，尚未开始。点击 <button className="btn small primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button> 加入解析队列。</div>}
+      {['paused', 'interrupted'].includes(t.status) && <div className="notice">{t.message || '任务已暂停'} <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 从断点继续</button></div>}
       {t.status === 'pending' && <div className="notice">排队中：第 {t.queuePos} 位，前面的任务完成后自动开始。</div>}
       <div className="live-stats">
         <div className="card drill" onClick={() => drillTask(app, t, '已处理文档')}><div className="card-v">{t.total || (p.scan ? p.scan.found : 0)}</div><div className="card-k">{t.status === 'running' && !t.total ? '已发现文档' : '文档总数'}</div></div>
@@ -180,7 +180,7 @@ export function ReparseDialog({ files, onClose }) {
           ]} />
         </div>
         <div className="detail-head"><div className="spacer" /><button className="btn" onClick={onClose}>不重新解析</button>
-          <button className="btn primary" disabled={!sel.size} onClick={async () => { try { await api.reparseFiles([...sel]); app.refreshTasks(); app.toast(`已创建重新解析任务：${sel.size} 个文件`); onClose(); } catch (e) { app.toast(e.message, 'error'); } }}>重新解析所选（{sel.size}）</button></div>
+          <button className="btn primary" disabled={!sel.size} onClick={async () => { try { const id = await api.reparseFiles([...sel]); app.refreshTasks(); app.toast(`已创建重新解析任务：${sel.size} 个文件`); onClose(); if (id) app.go({ type: 'monitor', tab: 'live', taskId: id }); } catch (e) { app.toast(e.message, 'error'); } }}>重新解析所选（{sel.size}）</button></div>
       </div>
     </div>
   );

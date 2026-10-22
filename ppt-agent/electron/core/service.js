@@ -325,7 +325,8 @@ class AgentService extends EventEmitter {
   emitTask(id, extra = {}) { this.emit('task', { ...(this.store.getTask(id) || { id }), ...extra }); }
 
   /** 异步扫描（不阻塞界面），按目录名顺序深度优先；跳过系统目录、符号链接、本工具数据目录 */
-  async scan(roots, log, { onProgress, isCancelled, fullDisk = false } = {}) {
+  async scan(roots, log, { onProgress, isCancelled, fullDisk = false, tag = '' } = {}) {
+    const pre = tag ? `${tag} ` : ''; // 带上任务标记，便于在任务详情的运行日志中只看本任务
     const exts = this.enabledExts();
     const out = [];
     const self = path.resolve(this.dataDir).toLowerCase();
@@ -337,7 +338,7 @@ class AgentService extends EventEmitter {
       if (depth > 40 || path.resolve(d).toLowerCase() === self) continue;
       if (fullDisk && SKIP_ROOT_PATHS.some((p) => d === p || d.startsWith(p + '/'))) continue;
       let list;
-      try { list = await fs.promises.readdir(d, { withFileTypes: true }); } catch (e) { if (!fullDisk) log.warn(`无法读取目录 ${d}：${e.code || e.message}`); continue; }
+      try { list = await fs.promises.readdir(d, { withFileTypes: true }); } catch (e) { if (!fullDisk) log.warn(`${pre}无法读取目录 ${d}：${e.code || e.message}`); continue; }
       dirs++;
       list.sort((a, b) => a.name.localeCompare(b.name, 'zh'));
       const sub = [];
@@ -349,7 +350,7 @@ class AgentService extends EventEmitter {
         } else if (ent.isFile()) {
           const ext = path.extname(ent.name).toLowerCase();
           if (!exts.has(ext)) continue;
-          if (ent.name.startsWith('~$') || ent.name.startsWith('._')) { log.info(`忽略 Office 临时锁文件：${p}`); continue; }
+          if (ent.name.startsWith('~$') || ent.name.startsWith('._')) { log.info(`${pre}忽略 Office 临时锁文件：${p}`); continue; }
           out.push(p);
         }
       }
@@ -384,7 +385,7 @@ class AgentService extends EventEmitter {
       log.info(`${tag} 从断点继续：沿用上次扫描清单 ${files.length} 个文档`);
     } else {
       log.info(`${tag} ${incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
-      files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, {
+      files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, { tag,
         fullDisk, isCancelled: () => this.cancelled.has(id),
         onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
       });
@@ -836,10 +837,47 @@ class AgentService extends EventEmitter {
   async searchQuery(q, opts = {}) {
     const useLlm = opts.useLlm !== false && this.config.llm.enabled && this.config.llm.useForQuery;
     const fileIds = opts.taskId ? [...this.taskFileIds(opts.taskId)] : null;
-    const r = await this.search.search(q, { ...opts, useLlm, fileIds });
+    const t0 = Date.now();
+    let r;
+    try { r = await this.search.search(q, { ...opts, useLlm, fileIds }); } catch (e) {
+      if (opts.record !== false) this.store.db.prepare('INSERT INTO search_history(q, task_id, use_llm, at, ms, status, error) VALUES (?,?,?,?,?,?,?)').run(q, opts.taskId || null, useLlm ? 1 : 0, Date.now(), Date.now() - t0, 'failed', String(e.message || e));
+      throw e;
+    }
     logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
+    if (opts.record !== false) r.historyId = this.recordSearch(q, opts, useLlm, r);
     return r;
   }
+
+  // ---------- 智能搜索历史：每次检索记录一条，结果保存在数据目录 cache/search/<id>.json，可随时重新查看 ----------
+  searchDir() { const d = path.join(this.cacheDir, 'search'); fs.mkdirSync(d, { recursive: true }); return d; }
+  recordSearch(q, opts, useLlm, r) {
+    const info = this.store.db.prepare('INSERT INTO search_history(q, task_id, use_llm, at, ms, files, light, dark, word, status) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(q, opts.taskId || null, useLlm ? 1 : 0, Date.now(), r.timing.total || 0, r.files.length, r.slides.light.length, r.slides.dark.length, r.slides.word.length, 'done');
+    const id = Number(info.lastInsertRowid);
+    try { fs.writeFileSync(path.join(this.searchDir(), `${id}.json`), JSON.stringify(r)); } catch (e) { this.log.warn('保存搜索结果失败', e); }
+    // 只保留最近 300 条历史的结果文件
+    const old = this.store.db.prepare('SELECT id FROM search_history ORDER BY id DESC LIMIT -1 OFFSET 300').all();
+    if (old.length) this.searchHistoryDelete(old.map((x) => x.id));
+    return id;
+  }
+  searchHistory({ limit = 300 } = {}) {
+    const tasks = new Map(this.store.listTasks().map((t) => [t.id, t.name]));
+    return this.store.db.prepare('SELECT * FROM search_history ORDER BY id DESC LIMIT ?').all(limit)
+      .map((h) => ({ ...h, task_name: h.task_id ? tasks.get(h.task_id) || '（已删除的任务）' : null, hasResult: fs.existsSync(path.join(this.searchDir(), `${h.id}.json`)) }));
+  }
+  searchHistoryResult(id) {
+    const h = this.store.db.prepare('SELECT * FROM search_history WHERE id = ?').get(id);
+    if (!h) throw new Error('搜索记录不存在');
+    try { const r = JSON.parse(fs.readFileSync(path.join(this.searchDir(), `${id}.json`), 'utf8')); r.historyId = id; r.historyAt = h.at; return r; } catch { throw new Error('该次搜索的结果已不存在，请重新搜索'); }
+  }
+  searchHistoryDelete(ids) {
+    for (const id of ids || []) {
+      this.store.db.prepare('DELETE FROM search_history WHERE id = ?').run(id);
+      try { fs.unlinkSync(path.join(this.searchDir(), `${id}.json`)); } catch { /* ignore */ }
+    }
+    return true;
+  }
+  searchHistoryClear() { return this.searchHistoryDelete(this.store.db.prepare('SELECT id FROM search_history').all().map((x) => x.id)); }
 
   async ragAnswer(q, ids) { return this.search.answer(q, ids); }
 
@@ -946,7 +984,7 @@ class AgentService extends EventEmitter {
     const pool = new Map();
     let analysis = null;
     if (intent.topic || !intent.formats.length) {
-      const r = await this.searchQuery(intent.topic || desc, { useLlm: opts.useLlm, slideLimit: 300 });
+      const r = await this.searchQuery(intent.topic || desc, { useLlm: opts.useLlm, slideLimit: 300, record: false });
       analysis = r.analysis;
       for (const x of [...r.slides.light, ...r.slides.dark]) pool.set(x.id, x.score);
     }

@@ -26,7 +26,7 @@ export function clearFileCache() { fileCache.clear(); }
  */
 const first0 = (b) => (b[0] ? b[0].label : '');
 
-export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], results = null, onClose, active = true, compact = false, onFileChange }) {
+export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], results = null, startMax = false, onClose, active = true, compact = false, onFileChange }) {
   const app = useApp();
   const keys = useKeymap();
   // 点击推荐跳转到列表外的文件时，临时加入可切换的文件顺序（排在当前文件之后）
@@ -49,7 +49,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   const pendingLast = useRef(false);
   const strip = useRef(null);
   const root = useRef(null);
-  const [maxed, setMaxed] = useState(() => { try { return localStorage.getItem('ppta.viewerMax') === '1'; } catch { return false; } });
+  const [maxed, setMaxed] = useState(() => { if (compact) return false; if (startMax) return true; try { return localStorage.getItem('ppta.viewerMax') === '1'; } catch { return false; } });
   const [panes, setPanes] = useState(true);
   const [layout, setLayout] = useStoredLayout('ppta.viewerLayout');
   const [notesTab, setNotesTab] = useState('orig');
@@ -58,7 +58,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
   useEffect(() => onSlideUpdated((s2) => setSlide((cur) => (cur && cur.id === s2.id ? s2 : cur))), []);
   const [osd, setOsd] = useState(null);
   const osdTimer = useRef(null);
-  const toggleMax = useCallback(() => setMaxed((m) => { try { localStorage.setItem('ppta.viewerMax', m ? '0' : '1'); } catch { /* ignore */ } return !m; }), []);
+  const toggleMax = useCallback(() => setMaxed((m) => { if (!compact) { try { localStorage.setItem('ppta.viewerMax', m ? '0' : '1'); } catch { /* ignore */ } } return !m; }), [compact]);
   const toggleFull = useCallback(() => {
     if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
     else if (root.current && root.current.requestFullscreen) root.current.requestFullscreen().catch(() => {});
@@ -109,7 +109,11 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     else if (slides.length) setSlideId(slides[Math.max(0, Math.min(slides.length - 1, j))].id);
   }, [pos, slides, goFile]);
   // 搜索结果模式：左右键按结果页的顺序在搜索结果之间翻页（可跨文件），不再按文件内页码翻页
-  const resMode = !!(results && results.length);
+  // 从搜索结果打开时可切换两种翻页方式：按搜索结果翻页 / 按文件内页面翻页（原逻辑），选择会记住
+  const [resNav, setResNavState] = useState(() => { try { return localStorage.getItem('ppta.resNav') !== 'file'; } catch { return true; } });
+  const setResNav = (v) => { setResNavState(v); try { localStorage.setItem('ppta.resNav', v ? 'results' : 'file'); } catch { /* ignore */ } };
+  const hasResults = !!(results && results.length);
+  const resMode = hasResults && resNav;
   const rIdx = resMode ? results.findIndex((h) => h.id === slideId) : -1;
   const lastR = useRef(0);
   if (rIdx >= 0) lastR.current = rIdx;
@@ -169,7 +173,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         case 'layout': setLayout((l) => ({ ...l, mode: l.mode === 'tb' ? 'lr' : 'tb' })); break;
         case 'close':
           if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-          else if (maxed) toggleMax();
+          else if (maxed && !startMax) toggleMax();
           else if (onClose) onClose();
           else handled = false;
           break;
@@ -204,6 +208,12 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
       {osd && <div className="viewer-osd">{osd}</div>}
       {!compact && <div className="corner-help"><PageHelp page={resMode ? 'viewerResults' : 'viewer'} onBeforeNav={onClose} /></div>}
       <div className="viewer-bar">
+        {hasResults && (
+          <div className="seg small nav-mode" title="翻页方式">
+            <button className={resNav ? 'on' : ''} onClick={() => setResNav(true)}>按搜索结果翻页</button>
+            <button className={!resNav ? 'on' : ''} onClick={() => setResNav(false)}>按文件页面翻页</button>
+          </div>
+        )}
         {!resMode && <>
           <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title={`上一个文件（${keysLabel(keys.map, 'prevFile')}）`}>▲ 上个文件</button>
           <button className="btn small" disabled={fpos < 0 || fpos >= ids.length - 1} onClick={() => goFile(1)} title={`下一个文件（${keysLabel(keys.map, 'nextFile')}）`}>▼ 下个文件</button>

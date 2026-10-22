@@ -15,8 +15,8 @@ export default function BasketView() {
         <div className="vh-title">🧺 导出篮 <span className="muted small">{items.length} 页 · 可调整顺序后导出</span></div>
         <div className="spacer" />
         <button className="btn ghost" disabled={!items.length} onClick={() => confirm('清空导出篮？') && clear()}>清空</button>
-        <button className="btn" disabled={!items.length} onClick={() => app.exportSlides(items, 'md')}>导出 Markdown</button>
-        <button className="btn primary" disabled={!items.length} onClick={() => app.exportSlides(items, 'pptx')}>导出为新 PPT</button>
+        <button className="btn" disabled={!items.length} onClick={() => app.exportSlides(items, 'md')}>⇩ 导出 Markdown</button>
+        <button className="btn primary" disabled={!items.length} onClick={() => app.exportSlides(items, 'pptx')}>⇩ 导出为新 PPT</button>
       </div>
       <div className="tab-body scroll pad">
         {!items.length && <div className="empty-tip">导出篮为空。在页面视图或搜索结果中多选页面后点击“加入导出篮”。</div>}
@@ -24,7 +24,7 @@ export default function BasketView() {
           {slides.map((s, i) => (
             <div key={s.id} className="basket-item">
               <div className="bi-no">{i + 1}</div>
-              <div className="bi-thumb" onClick={() => app.openSlide(s.id)}><SlidePreview slide={s} file={s.file} /></div>
+              <div className="bi-thumb" data-noopen onClick={() => app.openSlide(s.id)}><SlidePreview slide={s} file={s.file} /></div>
               <div className="bi-info">
                 <div className="si-title">{s.title || `第 ${s.idx} 页`}</div>
                 <div className="muted small">{s.file && s.file.name} · 第 {s.idx} 页 · <span className={`tag theme-${s.theme}`}>{THEME_LABEL[s.theme]}</span>{s.notes ? ' · 含讲解词' : ''}</div>

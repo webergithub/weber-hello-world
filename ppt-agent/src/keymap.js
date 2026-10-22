@@ -181,7 +181,8 @@ export function viewerHintItems(map, { compare = false, results = false } = {}) 
 
 
 /** 输入框中、或打开了帮助 / 筛选弹框、新手指引时，不响应浏览快捷键 */
-export const isTyping = (t) => !!(t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) || !!document.querySelector('.page-help-pop, .dt-filter, .tour');
+// 勾选框 / 单选框获得焦点时不算输入，浏览快捷键照常生效
+export const isTyping = (t) => !!(t && ((t.tagName === 'INPUT' && !['checkbox', 'radio', 'button', 'range'].includes(t.type)) || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable)) || !!document.querySelector('.page-help-pop, .dt-filter, .tour');
 
 /** 当前生效的按键设置：{ map: 动作→组合[], lut: 组合→动作 } */
 export function useKeymap() {

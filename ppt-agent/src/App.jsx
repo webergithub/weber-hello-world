@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, on, STATUS_LABEL, fmtSize } from './api';
 import { AppCtx } from './ctx';
 import TaskView from './components/TaskView';
@@ -6,6 +6,8 @@ import TaskMonitor from './components/TaskMonitor';
 import DrillDialog from './components/DrillDialog';
 import LibraryView from './components/LibraryView';
 import SearchView from './components/SearchView';
+import { searchQueue } from './searchQueue';
+import NoticesView from './components/NoticesView';
 import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
@@ -22,6 +24,9 @@ import { clearRelatedCache } from './components/RelatedRail';
 import { Tour, WelcomeDialog, HelpView } from './components/Guide';
 import PageHelp from './components/PageHelp';
 
+const NOTICE_KEY = 'ppta.notices';
+const NOTICE_CATS = [[/任务|解析|扫描/, '解析任务'], [/搜索|检索/, '智能搜索'], [/导出/, '导出'], [/转换|黑底|白底/, '黑白底互转'], [/回收站|删除|还原/, '回收站'], [/设置|快捷键|主题|接口/, '设置']];
+const noticeCat = (msg) => (NOTICE_CATS.find(([re]) => re.test(msg)) || [null, '其他'])[1];
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
 const readLS = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
@@ -38,7 +43,7 @@ function reduceProgress(prev, e) {
     case 'file': Object.assign(cur, { stage: 'file', index: e.index, total: e.total, file: e.file, slide: 0, slideTotal: 0, slideTitle: '' }); feed(`${t} 📄 [${e.index}/${e.total}] ${base(e.file)}`); break;
     case 'parse': case 'thumb': case 'store': cur.stage = e.stage; if (e.stage === 'thumb') feed(`${t}    🖼 生成页面截图…`); break;
     case 'slide': Object.assign(cur, { stage: 'slide', slide: e.slide, slideTotal: e.slideTotal, slideTitle: e.slideTitle, unit: e.unit });
-      cur.scans = [...(cur.scans || []).slice(-80), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, index: cur.index, total: cur.total, slide: e.slide, slideTotal: e.slideTotal, title: e.slideTitle, unit: e.unit, kind: e.kind, detail: e.detail }];
+      cur.scans = [...(cur.scans || []).slice(-200), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, index: cur.index, total: cur.total, slide: e.slide, slideTotal: e.slideTotal, title: e.slideTitle, unit: e.unit, kind: e.kind, detail: e.detail }];
       feed(`${t}    第 ${e.slide}/${e.slideTotal} ${e.unit || '页'}：${e.slideTitle || '（无标题）'}`); break;
     case 'parsed': cur.stage = 'parsed'; cur.files = [...cur.files, { file: e.file, kind: e.kind, slides: e.slides, unit: e.unit, dark: e.dark, notes: e.notes, videos: e.videos, ms: e.ms, titles: e.titles, action: 'parsed' }];
       feed(`${t}    ✅ 解析完成：${e.slides} ${e.unit || '页'}，${e.ms}ms`); break;
@@ -103,10 +108,17 @@ export default function App() {
   useEffect(() => { document.documentElement.dataset.theme = theme; }, [theme]);
   const setTheme = (m) => { setThemeMode(m); try { localStorage.setItem('ppta.theme', m); } catch { /* ignore */ } api.setUiTheme(m).then(setConfig).catch(() => {}); };
 
+  // 通知：每条提示都记入“维护 → 通知管理”（本机保存最近 500 条）；action.link 为可序列化的跳转目标，点击通知可再次跳转
+  const [notices, setNotices] = useState(() => { try { return JSON.parse(localStorage.getItem(NOTICE_KEY) || '[]'); } catch { return []; } });
+  useEffect(() => { try { localStorage.setItem(NOTICE_KEY, JSON.stringify(notices.slice(0, 500))); } catch { /* ignore */ } }, [notices]);
+  const linkRef = useRef(null);
   const toast = useCallback((msg, kind = 'info', action) => {
     const id = Math.random();
-    setToasts((t) => [...t, { id, msg, kind, action }]);
+    const link = (action && action.link) || null;
+    const run = action && (action.run || (link ? () => linkRef.current && linkRef.current(link) : null));
+    setToasts((t) => [...t, { id, msg, kind, action: run ? { label: action.label || '查看', run } : null }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 8000 : 5000);
+    setNotices((n) => [{ id: `${Date.now()}-${Math.round(id * 1e6)}`, at: Date.now(), msg, kind, link, label: action && action.label, cat: (action && action.cat) || noticeCat(msg), read: false }, ...n].slice(0, 500));
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
   useEffect(() => { if (tasks.length && !tasks.some((t) => t.id === curTask)) setCurTask(tasks[0].id); if (!tasks.length && curTask) setCurTask(null); }, [tasks]);
@@ -127,7 +139,7 @@ export default function App() {
       if (['done', 'failed', 'cancelled'].includes(t.status) && t.finished_at && !t.quiet) {
         bump();
         const repeat = /增量扫描|补扫/.test(t.message || '') ? 0 : (t.skipped || 0) + (t.duplicate || 0);
-        toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}${repeat ? `（${repeat} 个文件已解析过，可在“解析任务”中选择是否重新解析）` : ''}`, t.status === 'failed' ? 'error' : 'info');
+        toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}${repeat ? `（${repeat} 个文件已解析过，可在“解析任务”中选择是否重新解析）` : ''}`, t.status === 'failed' ? 'error' : 'info', { label: '查看任务', link: { type: 'task', id: t.id }, cat: '解析任务' });
       }
     });
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
@@ -141,7 +153,7 @@ export default function App() {
     const dirs = await api.selectDir();
     let last = null;
     for (const d of dirs) {
-      try { last = await api.addTask(d); toast(`已添加任务：${d}（点击“开始解析”后执行）`); } catch (e) { toast(e.message, 'error'); }
+      try { last = await api.addTask(d); toast(`已添加任务：${d}（点击“开始解析”后执行）`, 'info', { label: '查看任务', link: { type: 'task', id: last }, cat: '解析任务' }); } catch (e) { toast(e.message, 'error'); }
     }
     if (last) { await refreshTasks(); setCurTask(last); setViewState({ type: 'task' }); }
   };
@@ -158,7 +170,7 @@ export default function App() {
       const nid = await api.addAllLocalTask({ watch: r.watch, time: r.time });
       setConfig(await api.getConfig());
       await refreshTasks(); setCurTask(nid); setViewState({ type: 'task' });
-      toast(`已添加“本机全部文档”任务，点击“开始解析”后执行${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`);
+      toast(`已添加“本机全部文档”任务，点击“开始解析”后执行${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`, 'info', { label: '查看任务', link: { type: 'task', id: nid }, cat: '解析任务' });
     } catch (e) { toast(e.message, 'error'); }
   };
 
@@ -170,7 +182,7 @@ export default function App() {
     setExporting({ n: ids.length });
     try {
       const r = await api.exportSlides(ids, out, { includeNotes: true });
-      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}${r.skippedWord ? `；${r.skippedWord} 个 Word 章节不能放入 PPT，已跳过（可导出 Markdown）` : ''}`, 'info', { label: '打开', run: () => api.openPath(out) });
+      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}${r.skippedWord ? `；${r.skippedWord} 个 Word 章节不能放入 PPT，已跳过（可导出 Markdown）` : ''}`, 'info', { label: '打开', link: { type: 'open', path: out }, cat: '导出' });
     } catch (e) { toast('导出失败：' + e.message, 'error'); } finally { setExporting(null); }
   };
 
@@ -183,10 +195,51 @@ export default function App() {
   }), [basket]);
 
   // results：从搜索结果打开时的结果页面顺序（左右键在搜索结果之间翻页）
-  const openSlide = async (id, fileIds, terms, matched, results) => {
+  const openSlide = async (id, fileIds, terms, matched, results, opts = {}) => {
     const s = await loadSlide(id);
-    if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [], results: results || null });
+    if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [], results: results || null, max: !!opts.max });
   };
+  // 搜索队列中的搜索完成：提示并可直接查看结果
+  useEffect(() => {
+    searchQueue.setOnDone((it) => toast(`搜索完成：「${it.q}」文件 ${it.files} · 页面 ${it.light + it.dark + it.word}`, 'info', { label: '查看结果', link: { type: 'search', historyId: it.historyId, q: it.q }, cat: '智能搜索' }));
+    return () => searchQueue.setOnDone(null);
+  }, [toast]);
+  // 通知跳转目标
+  const openLink = (link) => {
+    if (!link) return;
+    if (link.type === 'task') { setCurTask(link.id); setViewState({ type: 'task' }); }
+    else if (link.type === 'tmonitor') { setCurTask(link.id); setViewState({ type: 'tmonitor', tab: link.tab || 'live' }); }
+    else if (link.type === 'search') api.searchHistoryResult(link.historyId).then((r) => { setViewState({ type: 'search' }); setSearchState({ q: link.q || r.analysis.raw, result: r, tab: r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : 'word' }); }).catch((e) => toast(e.message, 'error'));
+    else if (link.type === 'open') api.openPath(link.path).catch((e) => toast(e.message, 'error'));
+    else if (link.type === 'reveal') api.showItem(link.path);
+    else if (link.type === 'view') setViewState(link.view);
+  };
+  linkRef.current = openLink;
+  // 开始 / 继续解析后自动跳转到该任务的“解析动态”
+  const startParse = async (id, how = 'start') => {
+    try {
+      const r = await (how === 'resume' ? api.resumeTask(id) : how === 'watch' ? api.runWatch([id]) : api.startTask(id));
+      refreshTasks();
+      setCurTask(id); setModal(null); setDrill(null); setCompare(null);
+      setViewState({ type: 'tmonitor', tab: 'live' });
+      return r;
+    } catch (e) { toast(e.message, 'error'); return null; }
+  };
+  // 双击任何 PPT 原版页面（缩略图 / 原始页）直接进入逐页浏览；浏览 / 对比窗口内的双击保留为最大化
+  const openRef = useRef(openSlide);
+  openRef.current = openSlide;
+  useEffect(() => {
+    const dbl = (e) => {
+      const el = e.target.closest && e.target.closest('[data-sid]');
+      if (!el || !el.dataset.sid || e.target.closest('.viewer, .compare, [data-noopen], input, textarea, button, [contenteditable="true"]')) return;
+      const scope = el.closest('[data-open-files]');
+      const fileIds = scope ? scope.dataset.openFiles.split(',').map(Number).filter(Boolean) : undefined;
+      e.preventDefault();
+      openRef.current(Number(el.dataset.sid), fileIds);
+    };
+    document.addEventListener('dblclick', dbl);
+    return () => document.removeEventListener('dblclick', dbl);
+  }, []);
   // 对比窗口：2–4 个文档；starts 为 { fileId: 起始页 id }
   const openCompare = (fileIds, starts = {}) => {
     const ids = [...new Set(fileIds)];
@@ -206,7 +259,7 @@ export default function App() {
   };
   const ctx = {
     tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
-    exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal,
+    exportSlides, openSlide, openCompare, startParse, notices, setNotices, openLink, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal,
   };
 
   const cur = tasks.find((t) => t.id === curTask) || null;
@@ -226,6 +279,7 @@ export default function App() {
   const maintNav = [
     { key: 'recycle', icon: '🗑', label: '回收站' },
     { key: 'logs', icon: '📜', label: '运行日志' },
+    { key: 'notices', icon: '🔔', label: '通知管理', badge: notices.filter((n) => !n.read).length || '' },
   ];
   const smartNav = [
     { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
@@ -298,7 +352,7 @@ export default function App() {
                   )}
                   {!collapsed && <div className="sbt-ops">
                     {['draft', 'interrupted', 'paused', 'cancelled'].includes(t.status) && (
-                      <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); setCurTask(t.id); (t.status === 'draft' ? api.startTask(t.id) : api.resumeTask(t.id)).then(refreshTasks); setViewState({ type: 'tmonitor', tab: 'live' }); }}>▶</button>
+                      <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); startParse(t.id, t.status === 'draft' ? 'start' : 'resume'); }}>▶</button>
                     )}
                     {t.status === 'running' && (
                       <button className="icon-btn tiny pause" title="暂停（可从断点继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
@@ -325,7 +379,7 @@ export default function App() {
             {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}
           </div>
           <div className={`sb-mod m-smart ${folded.smart ? 'is-folded' : ''}`}>
-            {secHead('smart', <>🤖 智能模块<span className="wip">建设中</span></>, '🤖')}
+            {secHead('smart', <>🤖 智能模块</>, '🤖')}
             {!folded.smart && <div className="sb-group">{smartNav.map((n) => navItem(n))}</div>}
           </div>
           <div className={`sb-mod m-maint ${folded.maint ? 'is-folded' : ''}`}>
@@ -354,6 +408,7 @@ export default function App() {
           {view.type === 'convert' && <ConvertView />}
           {view.type === 'analytics' && <AnalyticsView />}
           {view.type === 'recycle' && <RecycleView />}
+          {view.type === 'notices' && <NoticesView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}
@@ -363,7 +418,7 @@ export default function App() {
         {modal && (
           <div className="overlay" onClick={() => setModal(null)}>
             <div className="modal viewer-modal" onClick={(e) => e.stopPropagation()}>
-              <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} results={modal.results} onClose={() => setModal(null)} />
+              <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} results={modal.results} startMax={modal.max} onClose={() => setModal(null)} />
             </div>
           </div>
         )}

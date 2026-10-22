@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useApp } from '../ctx';
 
-// 运行日志：全局唯一的一份日志文件，可按任务 / 级别 / 关键字过滤
+// 运行日志：全局唯一的一份日志文件，可按任务 / 级别 / 关键字过滤；任务详情中默认只显示本任务的日志
 export default function LogView({ taskId }) {
   const { logLines, reloadLogs } = useApp();
   const [onlyTask, setOnlyTask] = useState(!!taskId);
@@ -17,7 +17,12 @@ export default function LogView({ taskId }) {
   return (
     <div className="logview">
       <div className="ws-toolbar">
-        {taskId ? <label className="chk"><input type="checkbox" checked={onlyTask} onChange={(e) => setOnlyTask(e.target.checked)} /> 仅显示本任务</label> : null}
+        {taskId ? (
+          <div className="seg small" title="日志范围">
+            <button className={onlyTask ? 'on' : ''} onClick={() => setOnlyTask(true)}>本任务 #{taskId}</button>
+            <button className={!onlyTask ? 'on' : ''} onClick={() => setOnlyTask(false)}>全部日志</button>
+          </div>
+        ) : null}
         <select className="input" value={level} onChange={(e) => setLevel(e.target.value)}>
           <option value="">全部级别</option><option value="INFO">INFO</option><option value="WARN">WARN</option><option value="ERROR">ERROR</option>
         </select>

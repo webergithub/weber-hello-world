@@ -56,6 +56,10 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
   const [pos, setPos] = useState(() => ids.map(() => 0));
   const [focus, setFocus] = useState(0);
   const [linked, setLinked] = useState(() => readLS('ppta.cmpLinked', true));
+  // 同步翻页的窗格：每个窗格可勾选是否参与“一起翻页”（默认全部勾选）；未勾选任何窗格时只翻选中的窗格
+  const [sync, setSync] = useState(() => ids.map(() => true));
+  const toggleSync = (i) => setSync((v) => v.map((x, k) => (k === i ? !x : x)));
+  const moves = (i) => (linked && sync.some(Boolean) ? !!sync[i] : i === focus);
   const [notes, setNotes] = useState(() => readLS('ppta.cmpNotes', false));
   const [strip, setStrip] = useState(() => readLS('ppta.cmpStrip', true));
   const [maxed, setMaxed] = useState(() => readLS('ppta.cmpMax', false));
@@ -87,8 +91,8 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
   };
   const update = useCallback((fn) => setPos((cur) => { const next = cur.map((p, i) => clamp(i, fn(p, i))); flash(next); return next; }), [lens.join(',')]);
   // 翻动：linked 时所有窗格一起，否则只动当前窗格；only 指定只动某一个窗格
-  const step = useCallback((d, only = null) => update((p, i) => ((only === null ? (linked || i === focus) : i === only) ? p + d : p)), [update, linked, focus]);
-  const jump = useCallback((where, only = null) => update((p, i) => ((only === null ? (linked || i === focus) : i === only) ? (where === 'first' ? 0 : lens[i] - 1) : p)), [update, linked, focus, lens.join(',')]);
+  const step = useCallback((d, only = null) => update((p, i) => ((only === null ? moves(i) : i === only) ? p + d : p)), [update, linked, focus, sync.join(',')]);
+  const jump = useCallback((where, only = null) => update((p, i) => ((only === null ? moves(i) : i === only) ? (where === 'first' ? 0 : lens[i] - 1) : p)), [update, linked, focus, sync.join(','), lens.join(',')]);
   const setOne = (i, p) => update((q, k) => (k === i ? p : q));
   const alignByIndex = () => update(() => pos[focus]);
   // 按标题（及正文）对齐：其他窗格跳到与当前窗格这一页最相近的页面
@@ -178,7 +182,7 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
       <div className="viewer-bar">
         <b>⧉ 对比窗口</b><span className="muted small">{n} 个文档</span>
         <div className="spacer" />
-        <span className="muted small">{linked ? '一起翻页' : `只翻 ${NUM[focus]}`}</span>
+        <span className="muted small">{linked && sync.some(Boolean) ? `一起翻页：${sync.map((x, i) => (x ? NUM[i] : '')).join('')}` : `只翻 ${NUM[focus]}`}</span>
         <button className="btn small" disabled={allStart} onClick={() => jump('first')} title={`首页（${keysLabel(keys.map, 'first')}）`}>⏮</button>
         <button className="btn small" disabled={allStart} onClick={() => step(-1)} title={`上一页（${keysLabel(keys.map, 'prev')}）`}>◀ 上一页</button>
         <button className="btn small primary" disabled={allEnd} onClick={() => step(1)} title={`下一页（${keysLabel(keys.map, 'next')}）`}>下一页 ▶</button>
@@ -209,6 +213,7 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
             <div key={id} className={`cmp-pane ${focus === i ? 'focus' : ''}`} onMouseDown={() => setFocus(i)}>
               <div className="cmp-head">
                 <span className="cmp-num">{NUM[i]}</span>
+                <label className={`chk cmp-sync ${linked ? '' : 'off'}`} title="勾选的窗格在“一起翻页”时同时翻动" onMouseDown={(e) => e.stopPropagation()}><input type="checkbox" checked={!!sync[i]} onChange={() => toggleSync(i)} /> 同步翻页</label>
                 <b className="ellipsis" title={d ? d.file.path : ''}>{d ? d.file.name : '加载中…'}</b>
                 <div className="spacer" />
                 {sim !== null && <span className={`tag ${sim >= 0.8 ? 'ok' : sim >= 0.4 ? 'accent' : ''}`} title="与 ① 当前页的文字相似度">与①相似 {Math.round(sim * 100)}%</span>}

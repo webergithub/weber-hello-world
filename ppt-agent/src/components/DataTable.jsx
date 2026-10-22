@@ -158,13 +158,44 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
   const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(storeKey) || '{}'); } catch { return {}; } }, [storeKey]);
   const [hidden, setHidden] = useState(() => new Set(saved.hidden || columns.filter((c) => c.hidden).map((c) => c.key)));
   const [sort, setSort] = useState(saved.sort !== undefined ? saved.sort : defaultSort);
+  // 列宽：拖动表头右侧边缘调整（双击恢复自动）；一旦调整过，表格切换为固定布局并记住每列宽度
+  const [widths, setWidths] = useState(saved.widths || null);
+  const tableRef = useRef(null);
   const [menu, setMenu] = useState(false);
   const [filters, setFilters] = useState(sess.filters || {});
   const [kw, setKw] = useState(sess.kw || '');
   useEffect(() => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), filters, kw }); }, [filters, kw, sk]);
   const [pop, setPop] = useState(null);
   const menuRef = useRef(null);
-  useEffect(() => { try { localStorage.setItem(storeKey, JSON.stringify({ hidden: [...hidden], sort })); } catch { /* ignore */ } }, [hidden, sort, storeKey]);
+  useEffect(() => { try { localStorage.setItem(storeKey, JSON.stringify({ hidden: [...hidden], sort, widths })); } catch { /* ignore */ } }, [hidden, sort, widths, storeKey]);
+  const startResize = (e, key) => {
+    e.preventDefault(); e.stopPropagation();
+    const ths = tableRef.current ? [...tableRef.current.querySelectorAll('thead th[data-ck]')] : [];
+    const base = {};
+    for (const th of ths) base[th.dataset.ck] = Math.round(th.getBoundingClientRect().width);
+    const start = { ...base, ...(widths || {}) };
+    const x0 = e.clientX, w0 = start[key] || 120;
+    document.body.classList.add('col-resizing');
+    const move = (ev) => setWidths({ ...start, [key]: Math.max(40, Math.round(w0 + ev.clientX - x0)) });
+    const up = () => { document.body.classList.remove('col-resizing'); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  // 双击分隔条：按内容自动适配该列宽度（临时切回自动布局测量）
+  const autoWidth = (e, key) => {
+    e.preventDefault(); e.stopPropagation();
+    const t = tableRef.current;
+    if (!t || !widths) return;
+    const ths = [...t.querySelectorAll('thead th[data-ck]')];
+    const prev = { table: t.style.width, cols: ths.map((th) => th.style.width) };
+    t.classList.remove('fixed'); t.style.width = '';
+    ths.forEach((th) => { th.style.width = ''; });
+    const th = ths.find((x) => x.dataset.ck === key);
+    const nat = th ? Math.round(th.getBoundingClientRect().width) : 120;
+    t.classList.add('fixed'); t.style.width = prev.table;
+    ths.forEach((x, i) => { x.style.width = prev.cols[i]; });
+    setWidths((w) => ({ ...(w || {}), [key]: Math.max(40, nat) }));
+  };
   useEffect(() => {
     if (!menu) return undefined;
     const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false); };
@@ -277,6 +308,7 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
               <div className="dt-menu-ops">
                 <button className="btn tiny" onClick={() => setHidden(new Set())}>全部显示</button>
                 <button className="btn tiny" onClick={() => setHidden(new Set(columns.filter((c) => c.hidden).map((c) => c.key)))}>恢复默认</button>
+                <button className="btn tiny" disabled={!widths} onClick={() => setWidths(null)}>重置列宽</button>
               </div>
             </div>
           )}
@@ -289,12 +321,13 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
         </div>
       )}
       <div className="table-wrap" ref={wrapRef} style={maxHeight ? { maxHeight } : undefined} onScroll={(e) => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), scroll: e.currentTarget.scrollTop }); }}>
-        <table className="grid">
+        <table ref={tableRef} className={`grid ${widths ? 'fixed' : ''}`} style={widths ? { width: (selectable ? 34 : 0) + visible.reduce((a, c) => a + (widths[c.key] || 120), 0) } : undefined}>
           <thead>
             <tr>{selectable && <th className="sel-col"><input type="checkbox" checked={allOn} onChange={() => onSelect(allOn ? new Set() : new Set(keys))} title="全选" /></th>}{visible.map((c) => (
-              <th key={c.key} className={`${c.nosort ? '' : 'sortable'} ${sort && sort.k === c.key ? 'sorted' : ''} ${filterActive(filters[c.key]) ? 'filtered' : ''} ${c.className || ''}`} onClick={() => clickHead(c)} title={c.nosort ? '' : '点击排序'}>
+              <th key={c.key} data-ck={c.key} style={widths ? { width: widths[c.key] || 120 } : undefined} className={`${c.nosort ? '' : 'sortable'} ${sort && sort.k === c.key ? 'sorted' : ''} ${filterActive(filters[c.key]) ? 'filtered' : ''} ${c.className || ''}`} onClick={() => clickHead(c)} title={c.nosort ? '' : '点击排序'}>
                 <span className="th-in">{c.label}{sort && sort.k === c.key ? (sort.d > 0 ? ' ▲' : ' ▼') : ''}
                   {!c.nosort && !c.nofilter && <button className={`th-filter ${filterActive(filters[c.key]) ? 'on' : ''}`} title={filterActive(filters[c.key]) ? describe(filters[c.key], c) : '筛选'} onClick={(e) => openFilter(c, e)}>{filterActive(filters[c.key]) ? '⧩' : '▾'}</button>}</span>
+                <span className="col-resizer" title="拖动调整列宽，双击恢复" onMouseDown={(e) => startResize(e, c.key)} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => autoWidth(e, c.key)} />
               </th>
             ))}</tr>
           </thead>

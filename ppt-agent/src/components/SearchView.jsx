@@ -1,9 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, fmtSize, THEME_LABEL } from '../api';
+import { api, fmtSize, fmtTime, THEME_LABEL } from '../api';
 import { useApp } from '../ctx';
 import { highlight } from '../md';
 import SlidePreview from './SlidePreview';
 import SlideViewer from './SlideViewer';
+import SearchTasks from './SearchTasks';
+import { searchQueue, useSearchQueue } from '../searchQueue';
+
+let TASKS_OPEN = false; // 搜索任务与历史面板是否展开（会话内记住）
+const firstTab = (r) => (r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : 'light');
 
 const PAGE = 120;
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -46,15 +51,27 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   ) : null;
 
   useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
-  const run = async (text = input) => {
-    if (!text.trim()) return;
-    setBusy(true); setAnswer(null); setFileFilter(null);
-    try {
-      const r = await api.search(text.trim(), { useLlm: llmOn && useLlm, taskId: taskId && !scopeAll ? taskId : undefined });
-      setState({ q: text.trim(), result: r, tab: state.tab === 'viewer' ? 'viewer' : r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : 'light' });
-      setSel(new Set()); setCmpSel(new Set());
-    } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
+  const qs = useSearchQueue();
+  const [tasksOpen, setTasksOpenState] = useState(TASKS_OPEN);
+  const setTasksOpen = (v) => { TASKS_OPEN = v; setTasksOpenState(v); };
+  const [recent, setRecent] = useState([]);
+  useEffect(() => { if (!result) api.searchHistory({ limit: 30 }).then((h) => { const seen = new Set(); setRecent(h.filter((x) => x.status === 'done' && !seen.has(x.q) && seen.add(x.q)).slice(0, 8)); }).catch(() => {}); }, [result, qs.items.length]);
+  const curScope = () => ({ useLlm: llmOn && useLlm, taskId: taskId && !scopeAll ? taskId : undefined, taskName: taskId && !scopeAll ? taskName : undefined });
+  const show = (q, r) => {
+    setState({ q, result: r, tab: state.tab === 'viewer' ? 'viewer' : firstTab(r) });
+    setInput(q); setAnswer(null); setFileFilter(null); setSel(new Set()); setCmpSel(new Set());
   };
+  const run = async (text = input, scope = curScope()) => {
+    if (!text.trim()) return;
+    setBusy(true);
+    try { show(text.trim(), await api.search(text.trim(), { useLlm: scope.useLlm, taskId: scope.taskId })); } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
+  };
+  const enqueue = () => { if (!input.trim()) return; searchQueue.add(input, curScope()); app.toast(`已加入搜索队列：${input.trim()}`); setTasksOpen(true); };
+  // 查看历史 / 队列中某次搜索的结果
+  const viewHistory = async (id) => { try { const r = await api.searchHistoryResult(id); show(r.analysis.raw || input, r); } catch (e) { app.toast(e.message, 'error'); } };
+  const rerun = (h) => run(h.q, { useLlm: !!h.use_llm, taskId: h.task_id || undefined });
+  const busyQ = qs.items.filter((x) => x.status === 'queued' || x.status === 'running').length;
+  const tasksBtn = <button className={`btn ${tasksOpen ? 'primary' : ''}`} onClick={() => setTasksOpen(!tasksOpen)}>🗂 搜索任务与历史{busyQ ? `（${busyQ}）` : ''}</button>;
   const terms = result ? [...result.analysis.zh, ...result.analysis.en] : [];
   const slidesAll = result && result.slides[tab] ? result.slides[tab] : [];
   const allHits = result ? [...result.slides.light, ...result.slides.dark, ...(result.slides.word || [])] : [];
@@ -105,7 +122,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const toggleCmp = (id) => { const n = new Set(cmpSel); if (n.has(id)) n.delete(id); else n.add(id); setCmpSel(n); };
 
   return (
-    <div className="view">
+    <div className={`view search-view ${tasksOpen ? 'with-tasks' : ''}`}>
       {/* 未搜索时：搜索框在页面中央（类似搜索引擎首页）；有结果后收到顶部 */}
       {!result ? (
         <div className="search-landing">
@@ -117,8 +134,10 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             <input ref={inputRef} className="input sl-input" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
               onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
             <button className="btn primary sl-btn" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '搜索'}</button>
+            <button className="btn sl-btn2" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>
           </div>
-          {scopeSeg}
+          <div className="row center">{scopeSeg}{tasksBtn}</div>
+          {recent.length > 0 && <div className="chips sl-recent"><span className="muted small">最近搜索：</span>{recent.map((h) => <span key={h.id} className="chip link" title={`${fmtTime(h.at)} · 文件 ${h.files}`} onClick={() => viewHistory(h.id)}>🕘 {h.q}</span>)}</div>}
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
           <div className="chips sl-chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
           {stats && <div className="sl-stats"><span><b>{stats.files}</b> 个文档</span><span><b>{stats.slides}</b> 页 / 节</span><span>本地 RAG · 不上传数据</span></div>}
@@ -129,6 +148,8 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           <input ref={inputRef} className="input big" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
             onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
           <button className="btn primary big" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '🔍 智能搜索'}</button>
+          <button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>
+          {tasksBtn}
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
           {scopeSeg}
           <button className="btn ghost" title="清空结果，回到搜索首页" onClick={() => { setState({}); setInput(''); }}>✕ 清空</button>
@@ -147,6 +168,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
             {result.analysis.intent && <span className="muted">意图：{result.analysis.intent}</span>}
             {result.analysis.llmError && <span className="tag warn" title={result.analysis.llmError}>大模型不可用，已使用内置词表</span>}
             <span className="muted small">召回 {result.retrievers.join(' · ')} · {result.timing.total}ms</span>
+            {result.historyAt && <span className="tag warn" title="这是搜索历史中保存的结果，资料库变化后可重新搜索">历史结果 · {fmtTime(result.historyAt)} <span className="link" onClick={() => run(q)}>↻ 重新搜索</span></span>}
           </div>
           <div className="sr-body">
             <div className="sr-files">
@@ -161,7 +183,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     <span>{f.file.slide_count} 页</span><span>{fmtSize(f.file.size)}</span>{f.hits ? <span>命中 {f.hits} 页</span> : null}
                   </div>
                   <div className="fi-tags">{(f.file.tags || []).slice(0, 8).map((t) => <span key={t} className={`tag ${terms.some((k) => t.toLowerCase().includes(k.toLowerCase())) ? 'hit' : ''}`}>{t}</span>)}</div>
-                  <div className="fi-actions"><button className="btn tiny" onClick={(e) => { e.stopPropagation(); app.openFile(f.file.id); }}>查看全部页</button><button className="btn tiny" onClick={(e) => { e.stopPropagation(); api.openPath(f.file.path); }}>打开 PPT</button></div>
+                  <div className="fi-actions"><button className="btn tiny" onClick={(e) => { e.stopPropagation(); app.openFile(f.file.id); }}>查看全部页</button><button className="btn tiny" onClick={(e) => { e.stopPropagation(); api.openPath(f.file.path); }}>打开原文件</button></div>
                 </div>
               ))}
             </div>
@@ -174,8 +196,8 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                 <div className="spacer" />
                 <span className="badge">已选 {sel.size}</span>
                 <button className="btn small" onClick={() => setSel(new Set([...sel, ...slidesFiltered.map((s) => s.id)]))}>全选本页签</button>
-                <button className="btn small" disabled={!sel.size} onClick={() => { app.basket.add([...sel]); setSel(new Set()); }}>加入导出篮</button>
-                <button className="btn small primary" disabled={!sel.size} onClick={() => app.exportSlides([...sel], 'pptx')}>导出新 PPT</button>
+                <button className="btn small" disabled={!sel.size} onClick={() => { app.basket.add([...sel]); setSel(new Set()); }}>＋ 加入导出篮</button>
+                <button className="btn small primary" disabled={!sel.size} onClick={() => app.exportSlides([...sel], 'pptx')}>⇩ 导出为新 PPT</button>
                 {selFiles.length >= 2 && <button className="btn small" disabled={selFiles.length > 4} title="所选页面来自 2–4 个文件时，可并排对比这些文件（从所选页开始）" onClick={() => app.openCompare(selFiles, Object.fromEntries(selFiles.map((f) => [f, allHits.find((h) => h.file_id === f && sel.has(h.id)).id])))}>⧉ 对比所选页所在文件（{selFiles.length}）</button>}
                 {llmOn && <button className="btn small" onClick={ask}>🤖 RAG 回答</button>}
               </div>
@@ -200,7 +222,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
               {tab !== 'viewer' && <div className="card-grid">
                 {slides.map((s) => (
                   <div key={s.id} data-rid={s.id} className={`slide-card ${sel.has(s.id) ? 'sel' : ''} ${flash === s.id ? 'flash' : ''}`}>
-                    <div className="sc-preview" onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slidesFiltered)}>
+                    <div className="sc-preview" data-noopen onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slidesFiltered, { max: true })}>
                       <SlidePreview slide={s} highlight={terms} />
                       <label className="sc-check" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(s.id)} onChange={() => toggle(s.id)} /></label>
                       <span className="sc-score">{Math.round(s.score * 100)}</span>
@@ -229,6 +251,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           </div>
         </div>
       )}
+      {tasksOpen && <SearchTasks currentId={result && result.historyId} onView={viewHistory} onRerun={rerun} onClose={() => setTasksOpen(false)} />}
     </div>
   );
 }

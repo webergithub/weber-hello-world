@@ -3,6 +3,7 @@ import { api, fmtSize, fmtTime, ACTION_LABEL, KIND_LABEL, THEME_LABEL, unitOf } 
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
 import { CompareButton } from './CompareView';
+import TagList from './TagList';
 
 const base = (p) => String(p || '').split(/[\\/]/).pop();
 const pathOf = (r) => r.path || r.link_path || '';
@@ -46,7 +47,7 @@ export default function DrillDialog({ spec, onClose }) {
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', type: 'date', sort: (r) => r.mtime || 0, filterValue: (r) => r.mtime, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },
     { key: 'category', label: '主题分类', hidden: true },
-    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', hidden: true, render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
+    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', hidden: true, render: (r) => <TagList tags={r.tags} /> },
     { key: 'message', label: '说明', sort: (r) => r.error || r.message || '', className: 'small muted', render: (r) => r.error || r.message || '' },
     { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (r) => (pathOf(r) ? <><button className="btn tiny" onClick={() => api.openPath(pathOf(r))}>打开</button><button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(pathOf(r))}>📂 位置</button></> : null) },
   ];

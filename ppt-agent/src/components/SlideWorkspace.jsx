@@ -112,15 +112,15 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
   const isWord = unit === '节';
 
   return (
-    <div className="workspace">
+    <div className="workspace" data-open-files={files.map((f) => f.id).join(',')}>
       <div className="ws-toolbar">
         <input className="input" placeholder="筛选文件 / 目录 / 标签" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 220 }} />
         <span className="muted">共 {visible.length} 个文件</span>
         <div className="spacer" />
         <span className="badge">已选 {selected.size} 页</span>
-        <button className="btn" disabled={!selected.size} onClick={() => { app.basket.add(selIds); setSelected(new Set()); }}>加入导出篮</button>
-        <button className="btn primary" disabled={!selected.size} onClick={() => app.exportSlides(selIds, 'pptx')}>导出为新 PPT</button>
-        <button className="btn" disabled={!selected.size} onClick={() => app.exportSlides(selIds, 'md')}>导出 Markdown</button>
+        <button className="btn" disabled={!selected.size} onClick={() => { app.basket.add(selIds); setSelected(new Set()); }}>＋ 加入导出篮</button>
+        <button className="btn primary" disabled={!selected.size} onClick={() => app.exportSlides(selIds, 'pptx')}>⇩ 导出为新 PPT</button>
+        <button className="btn" disabled={!selected.size} onClick={() => app.exportSlides(selIds, 'md')}>⇩ 导出 Markdown</button>
         <button className="btn ghost" disabled={!selected.size} onClick={() => setSelected(new Set())}>清空选择</button>
         <button className="btn ghost" title="折叠 / 展开文件列与页面列，最大化显示原始内容" onClick={() => { const v = maximized; setCols({ files: v, slides: v }); try { localStorage.setItem('ppta.cols', JSON.stringify({ files: v, slides: v })); } catch { /* ignore */ } }}>{maximized ? '⇤ 还原列' : '⛶ 最大化内容'}</button>
       </div>
@@ -182,7 +182,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 {back.length > 0 && <button className="btn small back-origin" title={back[back.length - 1].label} onClick={goBack}>↩ 返回原来的页面</button>}
                 <div className="spacer" />
                 <label className="chk"><input type="checkbox" checked={selected.has(slide.id)} onChange={() => toggle(slide)} /> 选择此页</label>
-                <button className="btn small" onClick={() => app.basket.add([slide.id])}>加入导出篮</button>
+                <button className="btn small" onClick={() => app.basket.add([slide.id])}>＋ 加入导出篮</button>
                 <button className="btn small" onClick={() => app.openSlide(slide.id, files.map((f) => f.id))}>⛶ 逐页浏览</button>
                 {slide.file && <button className="btn small ghost" onClick={() => api.openPath(slide.file.path)}>打开原文件</button>}
               </div>

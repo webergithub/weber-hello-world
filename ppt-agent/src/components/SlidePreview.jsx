@@ -4,25 +4,25 @@ import { renderMarkdown } from '../md';
 
 // 预览优先级：真实截图（PowerPoint/LibreOffice）→ PDF 页（pdf.js）→ 内置版式渲染（HTML）→ 简易卡片
 export default function SlidePreview({ slide, file, full = false, className = '', highlight = [] }) {
-  if (!slide) return <div className={`slide-box empty ${className}`} />;
+  if (!slide) return <div data-sid={slide && slide.id} className={`slide-box empty ${className}`} />;
   if (slide.kind === 'word' || (file && file.kind === 'word')) return <DocPage slide={slide} full={full} className={className} highlight={highlight} />;
   const ratio = slide.layout ? slide.layout.w / slide.layout.h : (file && file.meta && file.meta.slideSize ? file.meta.slideSize.cx / file.meta.slideSize.cy : 16 / 9);
   const style = { aspectRatio: String(ratio), ...(full ? { width: `min(100%, calc(52vh * ${ratio}))` } : {}) };
   if (slide.thumb) {
-    return <div className={`slide-box ${className}`} style={style}><img src={assetUrl('thumb', slide.thumb)} alt={slide.title} loading="lazy" draggable={false} /></div>;
+    return <div data-sid={slide && slide.id} className={`slide-box ${className}`} style={style}><img src={assetUrl('thumb', slide.thumb)} alt={slide.title} loading="lazy" draggable={false} /></div>;
   }
   const pdf = file && file.preview && file.preview.engine === 'pdf' ? file.preview.pdf : null;
-  if (pdf && full) return <div className={`slide-box ${className}`} style={style}><PdfPage url={assetUrl('thumb', pdf)} page={slide.idx} /></div>;
-  if (slide.layout && full) return <div className={`slide-box ${className}`} style={style}><HtmlSlide layout={slide.layout} /></div>;
+  if (pdf && full) return <div data-sid={slide && slide.id} className={`slide-box ${className}`} style={style}><PdfPage url={assetUrl('thumb', pdf)} page={slide.idx} /></div>;
+  if (slide.layout && full) return <div data-sid={slide && slide.id} className={`slide-box ${className}`} style={style}><HtmlSlide layout={slide.layout} /></div>;
   return <MiniCard slide={slide} style={style} className={className} />;
 }
 
 // Word 章节：以“纸张”样式展示
 function DocPage({ slide, full, className, highlight }) {
-  if (full) return <div className={`doc-page ${className}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(slide.md || `## ${slide.title}\n\n${slide.text || ''}`, highlight) }} />;
+  if (full) return <div data-sid={slide && slide.id} className={`doc-page ${className}`} dangerouslySetInnerHTML={{ __html: renderMarkdown(slide.md || `## ${slide.title}\n\n${slide.text || ''}`, highlight) }} />;
   const lines = String(slide.text || '').split('\n').filter(Boolean).slice(0, 6);
   return (
-    <div className={`slide-box mini doc ${className}`} style={{ aspectRatio: '1 / 1.1' }}>
+    <div data-sid={slide && slide.id} className={`slide-box mini doc ${className}`} style={{ aspectRatio: '1 / 1.1' }}>
       <div className="mini-inner">
         <div className="mini-badge">W</div>
         <div className="mini-title">{slide.title || `第 ${slide.idx} 节`}</div>
@@ -38,7 +38,7 @@ function MiniCard({ slide, style, className }) {
   const img = slide.bg && slide.bg.image;
   const lines = String(slide.text || '').split('\n').filter(Boolean).slice(0, 5);
   return (
-    <div className={`slide-box mini ${className}`} style={{ ...style, background: img ? `center/cover url("${assetUrl('media', img)}")` : bg, color: fg }}>
+    <div data-sid={slide && slide.id} className={`slide-box mini ${className}`} style={{ ...style, background: img ? `center/cover url("${assetUrl('media', img)}")` : bg, color: fg }}>
       <div className="mini-inner">
         <div className="mini-title">{slide.title || `第 ${slide.idx} 页`}</div>
         {lines.map((l, i) => <div key={i} className="mini-line">{l}</div>)}

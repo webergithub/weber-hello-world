@@ -21,7 +21,8 @@ Each table must support:
   - Infer the column type automatically, allow overriding it. Multi-value cells (tags) filter by any value.
 - **Keyword search across the whole list** in the toolbar; show "x / total 条" while filtered, active filters as removable chips, a "✕ 清除筛选" button, and an empty state with "清除筛选".
 - **Multi-select with checkboxes**: select all, Shift+click range, "已选 N" badge, and bulk actions next to the selection (export, compare, move to recycle bin, …).
-- **Remember per-table settings** (sort, hidden columns) in local storage under a per-table id.
+- **Resizable columns**: drag the right edge of any header to resize (switch the table to fixed layout once resized), double-click to fit the content, "重置列宽" in the column menu; remember widths per table. Side panels with lists (e.g. a file-name column) get a draggable splitter, remembered too.
+- **Remember per-table settings** (sort, hidden columns, widths) in local storage under a per-table id.
 - **Many items → master / detail**: when a page would show many groups or sections each with its own list, use a list of groups on the left and the selected group's table filling the right; never stack several tables in one scroll area (they collapse).
 - **Counts must match what is shown**: a per-item count ("命中 13 页") must equal what appears when that item is selected; never cap the underlying result set silently — page the rendering instead ("显示更多 / 全部显示"). Selecting an item to filter updates every dependent count (tab badges); clicking it again clears the filter.
 - **Fill the available height**: the list stretches to the bottom of the window and scrolls inside; never stop half-way down the page.
@@ -60,10 +61,17 @@ Each table must support:
 - Page / image previews support stepless zoom: Ctrl + wheel around the cursor, a small zoom bar (－ / slider / ＋ / percentage / "⤢ 适配窗口"), drag to pan when zoomed, keys = / - / 0; keep the zoom level when paging.
 - Rule editors (e.g. colour conversion) use one tab per direction, a before/after preview, a base-rule table "element · original · after · effect swatch", and a custom-rule list "element + original value (any / exact + tolerance) → result (value / keep / none)" with enable, reorder and delete; first matching custom rule wins.
 - A "related items" side rail: clicking an item replaces the current view in place and shows a prominent "↩ 返回原来的页面" button (highlighted colour, Backspace too); after several jumps also offer "⤒ 回到最初".
+- Double-clicking any page / item preview opens it in the full viewer directly; inside the viewer double-click toggles maximise.
+- Comparison windows: each pane has a "同步翻页" checkbox so the user picks which 1..n panes page together.
 - A viewer opened from a search result pages through the **search results** (same order as the result page, across files) with ← → only; hide file / page navigation, show "搜索结果 i / N" and a strip of the results.
 - Settings that drive a page's behaviour (e.g. current conversion rules) are summarised in a small block directly under the page title, with a "查看 / 修改" link.
 
 ## 5. Long-running tasks
+
+- Starting / resuming a job navigates straight to its live progress view.
+- Live animations are driven by event sequence numbers, never by indexes into a capped buffer; each frame has a minimum dwell measured from when it was shown, and backlogs speed up gradually instead of skipping.
+- **Notification center**: every toast is also stored (time, category, level, message, serializable jump target) in a "通知管理" page under maintenance, with an unread badge; clicking a notification jumps to the related screen (finished task → task detail, finished search → its results).
+- **Search history and queue**: every search is recorded with its result; users can queue several searches (reorder / remove / pause), and reopen any past search's result.
 
 - Adding work never starts it automatically; the user presses start. Tasks queue and run one by one.
 - Pause takes effect immediately, even mid-item; resume continues from the checkpoint, also after a crash or close.
