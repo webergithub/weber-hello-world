@@ -199,8 +199,12 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
   useEffect(() => {
     if (!menu) return undefined;
     const close = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenu(false); };
+    // 菜单按视口定位：外层滚动或窗口大小变化时收起，避免与按钮错位
+    const off = () => setMenu(false);
     window.addEventListener('mousedown', close);
-    return () => window.removeEventListener('mousedown', close);
+    window.addEventListener('scroll', close, true);
+    window.addEventListener('resize', off);
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('scroll', close, true); window.removeEventListener('resize', off); };
   }, [menu]);
 
   const visible = columns.filter((c) => !hidden.has(c.key));
@@ -301,9 +305,15 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
         {nFilters > 0 && <button className="btn small" title="清除所有筛选条件" onClick={() => { setFilters({}); setKw(''); }}>✕ 清除筛选（{nFilters}）</button>}
         <span className="muted small">{nFilters ? `${sorted.length} / ${rows.length}` : rows.length} 条{sort ? ` · 按“${(columns.find((c) => c.key === sort.k) || {}).label}”${sort.d > 0 ? '升序' : '降序'}` : ''}</span>
         <div className="dt-menu-wrap" ref={menuRef}>
-          <button className="btn small" onClick={() => setMenu(!menu)} title="显示 / 隐藏列">☰ 列设置（{visible.length}/{columns.length}）</button>
+          <button className="btn small" onClick={(e) => {
+            if (menu) { setMenu(false); return; }
+            // 按视口定位（不受抽屉、面板等容器 overflow 裁切）：默认在按钮下方右对齐，下方空间不够时向上展开
+            const r = e.currentTarget.getBoundingClientRect(), vw = window.innerWidth, vh = window.innerHeight;
+            const below = vh - r.bottom - 12, above = r.top - 12, up = below < 260 && above > below;
+            setMenu({ right: Math.max(8, vw - r.right), ...(up ? { bottom: vh - r.top + 4 } : { top: r.bottom + 4 }), maxHeight: Math.max(160, Math.min(up ? above : below, vh * 0.7)), maxWidth: vw - 16 });
+          }} title="显示 / 隐藏列">☰ 列设置（{visible.length}/{columns.length}）</button>
           {menu && (
-            <div className="dt-menu">
+            <div className="dt-menu" style={typeof menu === 'object' ? menu : undefined}>
               {columns.map((c) => <label key={c.key} className="chk"><input type="checkbox" checked={!hidden.has(c.key)} onChange={() => toggle(c.key)} />{c.label || c.key}</label>)}
               <div className="dt-menu-ops">
                 <button className="btn tiny" onClick={() => setHidden(new Set())}>全部显示</button>

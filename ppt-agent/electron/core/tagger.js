@@ -34,7 +34,8 @@ function attributeTags(file, slides) {
   const dark = slides.filter((s) => s.theme === 'dark').length;
   const word = file.kind === 'word';
   if (word) tags.push('Word文档');
-  else if (slides.length) tags.push(dark === 0 ? '白底' : dark === slides.length ? '黑底' : '黑白混合');
+  else if (file.kind === 'pdf') tags.push('PDF文档');
+  if (word) { /* Word 不区分黑白底 */ } else if (slides.length) tags.push(dark === 0 ? '白底' : dark === slides.length ? '黑底' : '黑白混合');
   if (slides.some((s) => (s.media || []).some((m) => m.type === 'video'))) tags.push('含视频');
   if (slides.some((s) => (s.media || []).some((m) => (m.subtitles || []).length))) tags.push('含字幕');
   if (slides.some((s) => (s.blocks || []).some((b) => b.kind === 'table') || /\|/.test(s.md || ''))) tags.push('含表格');

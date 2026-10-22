@@ -29,7 +29,7 @@ function mediaMd(m) {
 function slideToMd(s, kind = 'ppt') {
   const lines = [];
   const word = kind === 'word';
-  const flags = word ? ['Word 文档', s.section === '续' ? '续节' : ''].filter(Boolean).join(' · ') : [s.hidden ? '隐藏页' : '', s.theme === 'dark' ? '黑底' : '白底', s.section ? `分节：${s.section}` : ''].filter(Boolean).join(' · ');
+  const flags = kind === 'pdf' ? ['PDF 文档', s.theme === 'dark' ? '黑底' : ''].filter(Boolean).join(' · ') : word ? ['Word 文档', s.section === '续' ? '续节' : ''].filter(Boolean).join(' · ') : [s.hidden ? '隐藏页' : '', s.theme === 'dark' ? '黑底' : '白底', s.section ? `分节：${s.section}` : ''].filter(Boolean).join(' · ');
   lines.push(`## 第 ${s.index} ${word ? '节' : '页'}${s.title ? '：' + s.title.replace(/\n/g, ' ') : ''}`);
   lines.push(`<sub>${flags}</sub>`);
   lines.push('');

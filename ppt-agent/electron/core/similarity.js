@@ -117,7 +117,7 @@ function computeGroups(files, vecs, slideTitles, { threshold = 0.82 } = {}) {
 
 /** 黑底/白底页面对应：同组或同标题的异底色页面，标题相同 + 内容相似 */
 function computePairs(allSlides, fileGroups) {
-  const slides = allSlides.filter((s) => s.kind !== 'word');
+  const slides = allSlides.filter((s) => (s.kind || 'ppt') === 'ppt');
   const pairs = [];
   const byFile = new Map();
   for (const s of slides) { if (!byFile.has(s.file_id)) byFile.set(s.file_id, []); byFile.get(s.file_id).push(s); }

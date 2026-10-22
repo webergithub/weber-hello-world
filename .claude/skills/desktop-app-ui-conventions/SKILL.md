@@ -75,6 +75,7 @@ Each table must support:
 - **Status colours**: in progress = light blue background + black text, done = green, waiting = light orange background. Make sure text stays readable on its colour.
 - Support light / dark / follow-system themes with CSS variables.
 - Never let buttons or tabs wrap one character per line: tabs and buttons `white-space: nowrap`, toolbars `flex-wrap: wrap`.
+- **Popovers never get clipped**: column-settings menus, filter popovers, scope pickers and similar dropdowns are positioned against the viewport (`position: fixed`, computed from the trigger's rect, clamped to the window, opening upwards when there is no room below, scrollable with a max height), so drawers, side panels and `overflow: hidden` containers cannot cut them off; close them on outside click, outer scroll and window resize. Test every list inside a drawer / narrow panel too.
 - Avoid explanatory sentences in headers and tooltips unless the owner asked for them. Keep the UI clean; put explanations in the help guide instead. When unsure, ask before adding hint text.
 
 ## 3. Navigation

@@ -1,7 +1,7 @@
 {
   "name": "ppt-agent",
   "productName": "PPT智能体",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "PPT 智能解析、归档、搜索与编排工具（Electron）",
   "author": "weber",
   "license": "MIT",
@@ -20,6 +20,7 @@
     "fast-xml-parser": "5.11.2",
     "jieba-wasm": "2.4.0",
     "jpeg-js": "0.4.4",
+    "pdfjs-dist": "6.4.299",
     "pngjs": "7.0.0",
     "yauzl": "3.2.0"
   },
@@ -27,7 +28,6 @@
     "@vitejs/plugin-react": "6.1.1",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
-    "pdfjs-dist": "6.4.299",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "vite": "8.3.2"
@@ -45,7 +45,11 @@
       "dist/**/*",
       "electron/**/*",
       "package.json",
-      "!**/*.map"
+      "!**/*.map",
+      "!node_modules/pdfjs-dist/{legacy,web,types,image_decoders}/**",
+      "!node_modules/pdfjs-dist/build/*.min.mjs",
+      "!node_modules/pdfjs-dist/build/*sandbox*",
+      "!node_modules/@napi-rs/**"
     ],
     "asarUnpack": [
       "node_modules/jieba-wasm/pkg/nodejs/**"

@@ -1,8 +1,8 @@
 # PPT智能体（PPT Agent）
 
-把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
+把电脑上的 PPT（以及 Word、PDF 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-3.0.0-win-x64-portable.exe`](download/PPT-Agent-3.0.0-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-3.1.0-win-x64-portable.exe`](download/PPT-Agent-3.1.0-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
 
 ## v1.6 新增
@@ -52,6 +52,7 @@
 完整需求清单与版本记录见 [`docs/需求文档.md`](docs/需求文档.md)（Word 版：[`docs/需求文档.docx`](docs/需求文档.docx)）。
 
 - **Word 文档**解析与检索（按标题分节、批注作为备注），设置第一项可多选启用 PPT / Word
+- **PDF 文档**解析与检索（v3.1）：逐页提取文字与标题、识别黑底 / 白底，页面直接用内置 pdf.js 只读渲染原文件；智能搜索单独的“📕 PDF”页签；原 PDF 不修改
 - **解析任务**菜单：添加目录后手动开始、排队与调整顺序、实时显示第几个文件 / 逐页扫描 / 标签标注；**扫描本机所有文档**
 - **全部解析历史**；重复文件提示并可选择重新解析
 - **资料库总览**页签；目录 / 文件 / 页数三列可折叠
@@ -116,7 +117,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-3.0.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-3.1.0-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。

@@ -32,5 +32,8 @@ export const fmtDur = (s) => {
 export const THEME_LABEL = { dark: '黑底', light: '白底', mixed: '黑白混合' };
 export const ACTION_LABEL = { parsed: '已解析', skipped: '已解析过·跳过', duplicate: '重复文件', failed: '失败', removed: '原文件已删除·移出', running: '解析中' };
 export const STATUS_LABEL = { draft: '待解析', pending: '排队中', paused: '已暂停', running: '解析中', done: '已完成', failed: '失败', cancelled: '已取消', interrupted: '已中断' };
-export const KIND_LABEL = { ppt: 'PPT', word: 'Word' };
+export const KIND_LABEL = { ppt: 'PPT', word: 'Word', pdf: 'PDF' };
+/** 页面宽高比：版式 → 文档页面尺寸（PDF 等）→ 16:9 */
+export const slideRatio = (s, f) => (s && s.layout ? s.layout.w / s.layout.h : f && f.meta && f.meta.slideSize && f.meta.slideSize.cy ? f.meta.slideSize.cx / f.meta.slideSize.cy : 16 / 9);
+export const KIND_ICON = { ppt: '🖼', word: '📄', pdf: '📕' };
 export const unitOf = (f) => (f && f.kind === 'word' ? '节' : '页');

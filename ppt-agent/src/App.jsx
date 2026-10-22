@@ -53,7 +53,7 @@ function reduceProgress(prev, e) {
     case 'result': cur.files = [...cur.files, { file: e.file, action: e.action }]; feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
     case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f));
       cur.tagFeed = [...(cur.tagFeed || []).slice(-60), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, tags: e.tags, category: e.category }]; feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
-    case 'relate': cur.relate = e; feed(`${t} 🔗 页面关联：${e.pages} 页已打页面标签，${e.linked} 页有相似推荐（相似 PPT 页 ${e.ppt} 条${e.withWord ? `，Word ↔ PPT ${e.word} 条` : ''}）`); break;
+    case 'relate': cur.relate = e; feed(`${t} 🔗 页面关联：${e.pages} 页已打页面标签，${e.linked} 页有相似推荐（相似 PPT 页 ${e.ppt} 条${e.withWord ? `，文档（Word / PDF）↔ PPT ${e.word} 条` : ''}）`); break;
     case 'done': cur.stage = 'done'; cur.message = e.message; feed(`${t} 🏁 任务结束：${e.message}`); break;
     default: break;
   }
@@ -196,7 +196,7 @@ export default function App() {
     setExporting({ n: ids.length });
     try {
       const r = await api.exportSlides(ids, out, { includeNotes: true });
-      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}${r.skippedWord ? `；${r.skippedWord} 个 Word 章节不能放入 PPT，已跳过（可导出 Markdown）` : ''}`, 'info', { label: '打开', link: { type: 'open', path: out }, cat: '导出' });
+      toast(`导出完成：${r.slides} 页 → ${out}${r.size ? '（' + fmtSize(r.size) + '）' : ''}${r.skippedWord ? `；${r.skippedWord} 个 Word / PDF 页面不能放入 PPT，已跳过（可导出 Markdown）` : ''}`, 'info', { label: '打开', link: { type: 'open', path: out }, cat: '导出' });
     } catch (e) { toast('导出失败：' + e.message, 'error'); } finally { setExporting(null); }
   };
 
@@ -215,7 +215,7 @@ export default function App() {
   };
   // 搜索队列中的搜索完成：提示并可直接查看结果
   useEffect(() => {
-    searchQueue.setOnDone((it) => toast(`搜索完成：「${it.q}」文件 ${it.files} · 页面 ${it.light + it.dark + it.word}`, 'info', { label: '查看结果', link: { type: 'search', historyId: it.historyId, q: it.q }, cat: '智能搜索' }));
+    searchQueue.setOnDone((it) => toast(`搜索完成：「${it.q}」文件 ${it.files} · 页面 ${it.light + it.dark + it.word + (it.pdf || 0)}`, 'info', { label: '查看结果', link: { type: 'search', historyId: it.historyId, q: it.q }, cat: '智能搜索' }));
     return () => searchQueue.setOnDone(null);
   }, [toast]);
   // 通知跳转目标
@@ -346,7 +346,7 @@ export default function App() {
             {addMenu && (
               <div className="add-menu" onMouseLeave={() => setAddMenu(false)}>
                 <div onClick={addDir}>📁 添加目录…</div>
-                <div onClick={addAllLocal}>🖥 添加所有本地文档（按盘符顺序扫描本机全部 PPT / Word）</div>
+                <div onClick={addAllLocal}>🖥 添加所有本地文档（按盘符顺序扫描本机全部 PPT / Word / PDF）</div>
               </div>
             )}
           </div>

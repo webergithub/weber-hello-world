@@ -95,7 +95,7 @@ export function FilesStats({ files, stats, onOpen, title = '' }) {
   const cards = [
     ['文件总数', stats.files, () => true], ['本次解析', stats.parsed || 0, byAct('parsed')], ['已解析过·跳过', stats.skipped || 0, byAct('skipped')], ['重复文件', stats.duplicate || 0, byAct('duplicate')], ['失败', stats.failed || 0, byAct('failed')],
     ['页面总数', stats.slides, ok, ['slide_count']], ['含备注页', stats.notes, (r) => ok(r) && r.notes_count > 0, ['notes_count']], ['视频', stats.videos, (r) => ok(r) && r.video_count > 0, ['video_count']], ['含字幕页', stats.subtitles, (r) => ok(r) && r.subtitle_count > 0, ['subtitle_count']],
-    ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`, (r) => ok(r) && (r.kind || 'ppt') === 'ppt', ['dark_slides', 'light_slides']], ['隐藏页', stats.hidden, (r) => ok(r) && r.hidden_count > 0, ['hidden_count']], ['文件总大小', fmtSize(stats.size), () => true],
+    ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`, (r) => ok(r) && r.kind !== 'word', ['dark_slides', 'light_slides']], ['隐藏页', stats.hidden, (r) => ok(r) && r.hidden_count > 0, ['hidden_count']], ['文件总大小', fmtSize(stats.size), () => true],
   ];
   const drill = (k, pick, show) => app.drill({ key: `task-${title}-${k}`, title: `${title ? `${title} · ` : ''}${k}`, rows: files.filter(pick), show, sort: k === '文件总大小' ? { k: 'size', d: -1 } : show ? { k: show[0], d: -1 } : undefined });
   const columns = [
@@ -107,7 +107,7 @@ export function FilesStats({ files, stats, onOpen, title = '' }) {
     { key: 'size', label: '大小', sort: (r) => r.size || 0, render: (r) => fmtSize(r.size), className: 'nowrap' },
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, render: (r) => fmtTime(r.mtime), className: 'small nowrap' },
-    { key: 'theme', label: '底色', render: (r) => (r.theme && (r.kind || 'ppt') === 'ppt' ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
+    { key: 'theme', label: '底色', render: (r) => (r.theme && r.kind !== 'word' ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'dark_slides', label: '黑底页', sort: (r) => r.dark_slides || 0, hidden: true },
     { key: 'notes_count', label: '含备注页', sort: (r) => r.notes_count || 0, hidden: true },
     { key: 'video_count', label: '视频', sort: (r) => r.video_count || 0, render: (r) => r.video_count || '' },

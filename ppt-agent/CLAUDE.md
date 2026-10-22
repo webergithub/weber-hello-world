@@ -38,6 +38,7 @@
 - 启动选择数据目录：`bootstrap.json` 中 `dataDirHistory`（最多 10 个）、`askDataDir`（记住选择 = false）、`skipAskOnce`（主动切换目录后的重启不再询问）；使用环境变量 `PPTA_DATA_DIR` 时不询问（测试用 `PPTA_ASK_DIR=1` 强制询问）。
 - 侧栏左下角按钮（帮助、设置）再次点击收起并还原打开前的界面。
 - 智能搜索范围用 `taskIds`（多选的已执行任务，空 = 所有资料库），前端记在 `ppta.searchScope`；`search_history.task_ids` 记录每次范围。
+- 转换规则设置的新增规则：已保存的自定义规则与“新增规则”草稿区分开；草稿区默认一条样例（`sampleRule`），`untouchedSample` 判断与样例完全相同的行，保存（“💾 保存新增的规则” / “保存规则”）时一律忽略；保存新增后草稿区重置为一条样例。
 - 黑白底互转每次转换写入 `convert_history`（含完整结果 JSON），转换页“🕘 转换历史”可重新查看。
 - 导出篮支持多选（Shift 连选），勾选时只导出所选页面。
 - 完善讲解词（总览分析）：应用内修改讲解词只写数据库（`notes_user`、`notes_kb`），默认不改原 PPT；`notesChanges` 列出待写回项，`writeBackNotesBatch` 按文件分组一次写回（`noteswriter.writeNotesBatch`，修正讲解词整段替换、译文追加【语言】段落，每个文件先备份），写回记录在 `notes_writeback`。
@@ -48,18 +49,19 @@
 - 每个页面（含逐页浏览 / 对比窗口）左下角固定有“?”帮助图标，不放在标题栏、不挤占关闭等按钮；侧栏标题旁的“❓ 帮助”按钮保持原位（`src/components/PageHelp.jsx` 的 `PAGES`），新增页面或功能时同步补充该页的操作指导；不要在界面上常驻快捷键提示条。
 - 3.0 设计系统在 `src/styles.css` 末尾“v3.0 设计系统”段：颜色只用变量（`--bg/--bg2/--bg3/--bg4/--line/--fg*/--accent*/--ok/--warn/--danger`、模块色 `--m-detail/--m-over/--m-smart/--m-maint`、阴影 `--sh-sm/md/lg`、圆角 `--radius/--radius-lg`），浅色 / 深色两套都要定义；新组件不要写死颜色，主操作用 `.btn.primary`，次要用 `.btn`，弱操作用 `.btn.ghost`。
 - 黑白底互转“按文件 / 文件夹”：`listPptx` 递归列出 PPT，`convertFile(src, { direction, outMode: 'suffix'|'dir', outDir })` 只读原文件、另存（同名加序号），记入 `convert_history`。
+- PDF（v3.1）：`electron/core/pdf.js` 用 pdf.js 标准版（`pdfjs-dist/build/pdf.mjs`，legacy 版在 Electron 的 Node 中会崩溃）只读提取每页文字与底色；不生成截图，界面用 `ppta://src/<文件 id>` 直接渲染原 PDF（主进程只提供 `kind = 'pdf'` 的资料库文件），cMap / 标准字体经 `ppta://pdfjs/...` 提供。PDF 与 Word 一样属于“文档”：搜索单独 `slides.pdf` 页签、关联归入“相关文档内容”、不导出为 PPT 页 / 不参与黑白底互转与相似分组 / 讲解词不写回。新增文档类型时按 `DOC_TYPES`、`KIND_LABEL / KIND_ICON`、搜索分组、`relations.isDoc` 依次补齐。
 - 通用 UI / 列表规范见仓库根目录 `.claude/skills/desktop-app-ui-conventions/SKILL.md`。
 - 文档删除一律先进回收站（可还原），彻底删除需二次确认，且只删除移入回收站的那份文件。
 - 任务状态颜色：解析中浅蓝底黑字、已完成绿色、待解析浅橙底。
 - 保存对话框按用途记住上次目录（`saveFile(name, kind, key)`）。
 - 浏览类窗口的键盘操作一律走 `src/keymap.js`（动作 → 按键，用户可在设置中自定义），不要在组件里写死按键；新增动作要加到 `ACTIONS` 与 `DEFAULT_KEYMAP`。
 - 定时监测更新只对 `tasks.watch = 1` 且已手动完成过首次解析的任务做增量扫描；增量扫描中原文件已删除的文档以“仅移出资料库”方式进回收站；在回收站中的文档重新扫描时不自动加回。
-- 页面标签与页面关联在 `electron/core/relations.js`，由 `afterLibraryChange → computeRelations` 全量重算（表 `slide_links`）；是否关联 Word 取决于设置中是否同时选择 PPT 与 Word。浏览类视图右侧都带 `RelatedRail` 推荐栏，点击推荐在当前位置替换查看并可返回。
+- 页面标签与页面关联在 `electron/core/relations.js`，由 `afterLibraryChange → computeRelations` 全量重算（表 `slide_links`）；是否关联 Word / PDF 取决于设置中是否同时选择 PPT 与 Word 或 PDF。浏览类视图右侧都带 `RelatedRail` 推荐栏，点击推荐在当前位置替换查看并可返回。
 - 对比窗口最多 4 个文档（`COMPARE_MAX`），文档多选的列表旁同时提供“⧉ 对比查看”。
 - 测试数据在 `test-ppts/`，由 `scripts/make_test_ppts.py` 生成；不要无谓地整体重生成已提交的大文件（会重复提交 25MB 视频）。
 
 ## 结构
 
-- `electron/core/`：解析（pptx.js、docx.js）、检索（search.js）、导出（exporter.js）、黑白底互转（converter.js）、服务编排（service.js）、数据库（db.js）。
+- `electron/core/`：解析（pptx.js、docx.js、pdf.js）、检索（search.js）、导出（exporter.js）、黑白底互转（converter.js）、服务编排（service.js）、数据库（db.js）。
 - `src/`：React 界面；`SlideViewer.jsx` 是逐页浏览（弹窗与搜索页签共用）；`CompareView.jsx` 是多文档对比窗口；`keymap.js` 是快捷键定义。
 - 单元测试 `tests/core.test.js` 用 Electron 内置 Node 运行（需要 node:sqlite）。

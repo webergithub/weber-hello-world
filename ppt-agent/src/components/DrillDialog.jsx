@@ -42,7 +42,7 @@ export default function DrillDialog({ spec, onClose }) {
     { key: 'kind', label: '类型', sort: (r) => r.kind || 'ppt', render: (r) => KIND_LABEL[r.kind || 'ppt'] },
     { key: 'dir', label: '目录', sort: (r) => r.dir || pathOf(r), className: 'muted small ellipsis', render: (r) => <span title={pathOf(r)}>{r.dir || pathOf(r).replace(/[\\/][^\\/]*$/, '')}</span> },
     ...Object.keys(NUM_COLS).filter((k) => !show.includes(k)).map((k) => ({ key: k, label: NUM_COLS[k][0], type: 'number', sort: (r) => r[k] || 0, filterValue: (r) => r[k] || 0, render: NUM_COLS[k][1], hidden: k !== 'slide_count' })),
-    { key: 'theme', label: '底色', render: (r) => ((r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
+    { key: 'theme', label: '底色', render: (r) => (r.kind !== 'word' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'size', label: '大小', type: 'number', sort: (r) => r.size || 0, filterValue: (r) => Math.round(((r.size || 0) / 1048576) * 100) / 100, className: 'nowrap', render: (r) => fmtSize(r.size) },
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', type: 'date', sort: (r) => r.mtime || 0, filterValue: (r) => r.mtime, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },

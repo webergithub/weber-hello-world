@@ -8,7 +8,7 @@ import SearchTasks from './SearchTasks';
 import { searchQueue, useSearchQueue } from '../searchQueue';
 
 let TASKS_OPEN = false; // 搜索任务与历史面板是否展开（会话内记住）
-const firstTab = (r) => (r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : 'light');
+const firstTab = (r) => (r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : (r.slides.pdf || []).length ? 'pdf' : 'light');
 
 const PAGE = 120;
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -76,13 +76,13 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const tasksBtn = <button className={`btn ${tasksOpen ? 'primary' : ''}`} onClick={() => setTasksOpen(!tasksOpen)}>🗂 搜索任务与历史{busyQ ? `（${busyQ}）` : ''}</button>;
   const terms = result ? [...result.analysis.zh, ...result.analysis.en] : [];
   const slidesAll = result && result.slides[tab] ? result.slides[tab] : [];
-  const allHits = result ? [...result.slides.light, ...result.slides.dark, ...(result.slides.word || [])] : [];
+  const allHits = result ? [...result.slides.light, ...result.slides.dark, ...(result.slides.word || []), ...(result.slides.pdf || [])] : [];
   const topHit = allHits.slice().sort((a, b) => b.score - a.score)[0];
   const viewerFiles = result ? result.files.map((f) => f.file.id) : [];
   const [viewerStart, setViewerStart] = useState(null);
   // 选中左侧某个文件时，页签数字与页面都只统计该文件的搜索结果；再次单击取消选择回到全部结果
   const ofFile = (arr) => (fileFilter ? (arr || []).filter((s) => s.file_id === fileFilter) : arr || []);
-  const counts = result ? { light: ofFile(result.slides.light).length, dark: ofFile(result.slides.dark).length, word: ofFile(result.slides.word).length } : {};
+  const counts = result ? { light: ofFile(result.slides.light).length, dark: ofFile(result.slides.dark).length, word: ofFile(result.slides.word).length, pdf: ofFile(result.slides.pdf).length } : {};
   const slidesFiltered = ofFile(slidesAll);
   // 全部结果较多时分批显示，避免一次渲染上千张页面
   const [shown, setShown] = useState(PAGE);
@@ -93,7 +93,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
     setFileFilter(next);
     // 当前页签没有该文件的结果时，自动切到有结果的页签
     if (next && result && tab !== 'viewer' && !(result.slides[tab] || []).some((x) => x.file_id === next)) {
-      const t = ['light', 'dark', 'word'].find((k) => (result.slides[k] || []).some((x) => x.file_id === next));
+      const t = ['light', 'dark', 'word', 'pdf'].find((k) => (result.slides[k] || []).some((x) => x.file_id === next));
       if (t) setState({ ...state, tab: t });
     }
   };
@@ -130,7 +130,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
         <div className="search-landing">
           <div className="sl-hero">
             <div className="sl-logo">🔍 智能搜索</div>
-            <div className="sl-sub">在本机的 PPT 与 Word 中按文件名、标签与内容检索，中英文混合均可</div>
+            <div className="sl-sub">在本机的 PPT、Word 与 PDF 中按文件名、标签与内容检索，中英文混合均可</div>
           </div>
           <div className="sl-box">
             <input ref={inputRef} className="input sl-input" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
@@ -142,7 +142,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
           <div className="chips sl-chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
           {stats && <div className="sl-stats"><span><b>{stats.files}</b> 个文档</span><span><b>{stats.slides}</b> 页 / 节</span><span>本地 RAG · 不上传数据</span></div>}
-          <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word 分开推荐页面</div>
+          <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word / PDF 分开推荐页面</div>
         </div>
       ) : (
         <div className="search-bar">
@@ -193,6 +193,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                 <button className={tab === 'light' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'light' })}>⬜ 白底（{counts.light}）</button>
                 <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底（{counts.dark}）</button>
                 <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word（{counts.word}）</button>
+                <button className={tab === 'pdf' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'pdf' })}>📕 PDF（{counts.pdf}）</button>
                 <button className={tab === 'viewer' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'viewer' })}>⛶ 逐页浏览</button>
                 <div className="spacer" />
                 <span className="badge">已选 {sel.size}</span>
@@ -219,7 +220,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     initialSlideId={(viewerStart && viewerStart.slideId) || (!fileFilter && topHit ? topHit.id : null)} />
                 </div>
               )}
-              {tab !== 'viewer' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : '没有匹配的白底页面'}{counts[tab === 'dark' ? 'light' : 'dark'] ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
+              {tab !== 'viewer' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : tab === 'pdf' ? '没有匹配的 PDF 页面' : '没有匹配的白底页面'}{counts[tab === 'dark' ? 'light' : 'dark'] ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
               {tab !== 'viewer' && <div className="card-grid">
                 {slides.map((s) => (
                   <div key={s.id} data-rid={s.id} className={`slide-card ${sel.has(s.id) ? 'sel' : ''} ${flash === s.id ? 'flash' : ''}`}>
@@ -235,6 +236,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                       <div className="sc-snippet" dangerouslySetInnerHTML={{ __html: highlight(esc(snippet(s.text, terms)), terms) }} />
                       {s.notes && <details className="sc-notes"><summary>{s.kind === 'word' ? '💬 批注' : '🗣 讲解词'}</summary><div dangerouslySetInnerHTML={{ __html: highlight(esc(s.notes), terms) }} /></details>}
                       <div className="sc-foot">
+                        {s.kind === 'pdf' && s.theme === 'dark' && <span className="tag theme-dark">{THEME_LABEL.dark}</span>}
                         {s.matched.map((m) => <span key={m} className="tag hit">{m}</span>)}
                         {s.has_video && <span className="tag">🎬</span>}
                       </div>

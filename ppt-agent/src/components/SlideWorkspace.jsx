@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmtSize, THEME_LABEL, unitOf } from '../api';
+import { api, fmtSize, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
@@ -174,7 +174,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 {f.status === 'failed' ? <span className="tag danger">失败</span> : null}
                 {f.status === 'duplicate' ? <span className="tag warn">重复</span> : null}
                 {f.theme ? <span className={`tag theme-${f.theme}`}>{THEME_LABEL[f.theme]}</span> : null}
-                {f.kind === 'word' ? <span className="tag word">Word</span> : null}
+                {f.kind === 'word' ? <span className="tag word">Word</span> : f.kind === 'pdf' ? <span className="tag pdf">PDF</span> : null}
                 <span>{f.slide_count || 0} {unitOf(f)}</span><span>{fmtSize(f.size)}</span>
                 {f.video_count ? <span>🎬{f.video_count}</span> : null}
               </div>
@@ -235,7 +235,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
               )}
               <div className="with-rail"><div className="wr-main"><PanelLayout layout={layout} setLayout={setLayout} panels={{
                 slide: {
-                  title: isWord ? '📄 文档内容' : '🖼 PPT 原始页',
+                  title: isWord ? '📄 文档内容' : detail && detail.source && detail.source.kind === 'pdf' ? '📕 PDF 原始页' : '🖼 PPT 原始页',
                   extra: (
                     <div className="seg small" title="三个模块的排列方式">
                       <button className={layout.mode === 'tb' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'tb' }))}>上1下2</button>
@@ -243,7 +243,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                     </div>
                   ),
                   body: (
-                    <div className="ws-stage" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>
+                    <div className="ws-stage" style={{ '--ratio': slideRatio(slide, detail && detail.source) }}>
                       {isWord ? <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /> : <ZoomStage view={zoom} setView={setZoom} onWheelPage={(d) => goPage(d)}><SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /></ZoomStage>}
                       {slide.media && slide.media.length > 0 && (
                         <div className="media-list">

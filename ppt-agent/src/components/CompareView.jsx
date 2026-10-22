@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, THEME_LABEL, unitOf } from '../api';
+import { api, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
 import SlidePreview from './SlidePreview';
 import { loadFile } from './SlideViewer';
@@ -232,7 +232,7 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
                 {d && <button className="btn tiny ghost" onClick={() => api.openPath(d.file.path)}>打开</button>}
               </div>
               <div className="cmp-title ellipsis" title={s ? s.title : ''}>{s ? s.title || `第 ${s.idx} ${unit}` : ''}</div>
-              <div className="cmp-stage" style={{ '--ratio': s && s.layout ? s.layout.w / s.layout.h : 16 / 9 }}>
+              <div className="cmp-stage" style={{ '--ratio': slideRatio(s, d && d.source) }}>
                 {s ? <SlidePreview slide={s} file={d.source} full /> : <div className="empty-tip">{d ? '没有可浏览的页面' : '加载中…'}</div>}
               </div>
               {notes && s && (

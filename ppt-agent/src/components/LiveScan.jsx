@@ -114,12 +114,12 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
               {cur.detail && cur.kind !== 'word' && <span className={`tag theme-${cur.detail.theme}`}>{THEME_LABEL[cur.detail.theme]}</span>}
               <span className="spacer" /><button className="btn tiny" title={cur.file} onClick={() => api.showItem(cur.file)}>📂 在资源管理器中显示</button></div>
             <div className="ls-stage" style={{ '--ratio': cur.detail && cur.detail.layout ? cur.detail.layout.w / cur.detail.layout.h : 16 / 9 }}>
-              <div key={cur.seq} data-seq={cur.seq} className={`ls-slide ${cur.kind === 'word' ? 'doc' : ''}`}>
+              <div key={cur.seq} data-seq={cur.seq} className={`ls-slide ${cur.kind === 'word' || cur.kind === 'pdf' ? 'doc' : ''}`}>
                 {cur.detail && cur.detail.thumb ? <img className="ls-shot" src={assetUrl('thumb', cur.detail.thumb)} alt={cur.title} draggable={false} />
                   : cur.detail && cur.detail.layout ? <HtmlSlide layout={cur.detail.layout} />
                   : <div className="ls-doc"><div className="ls-doc-title">{cur.title}</div>{String((cur.detail && cur.detail.text) || '').split('\n').slice(0, 14).map((l, i) => <div key={i}>{l}</div>)}</div>}
                 <div className={`scanline ${t.status === 'running' || cursor < scans.length - 1 ? 'on' : ''}`} />
-                <div className="ls-badge">扫描第 {cur.slide} {cur.unit || '页'}{cur.detail && cur.detail.thumb ? ' · 真实页面' : cur.kind !== 'word' ? ' · 版式预览' : ''}</div>
+                <div className="ls-badge">扫描第 {cur.slide} {cur.unit || '页'}{cur.detail && cur.detail.thumb ? ' · 真实页面' : cur.kind === 'pdf' ? ' · PDF 文字' : cur.kind !== 'word' ? ' · 版式预览' : ''}</div>
                 {!ready && <div className="ls-loading">页面加载中…</div>}
               </div>
             </div>

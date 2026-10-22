@@ -45,7 +45,7 @@ export default function NotesReviewView() {
   const files = new Set(picked.map((r) => r.path));
   const writeBack = async () => {
     const bad = picked.filter((r) => !r.writable);
-    if (!confirm(`把 ${picked.length - bad.length} 处讲解词写入 ${new Set(picked.filter((r) => r.writable).map((r) => r.path)).size} 个 PPT 文件对应页的备注？\n\n写入前每个文件都会自动备份到数据目录的 backup 文件夹；修正讲解词会替换该页备注，译文以“【语言】”段落追加。${bad.length ? `\n\n其中 ${bad.length} 处不能写回（Word / 旧版 .ppt / 原文件不存在），会跳过。` : ''}`)) return;
+    if (!confirm(`把 ${picked.length - bad.length} 处讲解词写入 ${new Set(picked.filter((r) => r.writable).map((r) => r.path)).size} 个 PPT 文件对应页的备注？\n\n写入前每个文件都会自动备份到数据目录的 backup 文件夹；修正讲解词会替换该页备注，译文以“【语言】”段落追加。${bad.length ? `\n\n其中 ${bad.length} 处不能写回（Word / PDF / 旧版 .ppt / 原文件不存在），会跳过。` : ''}`)) return;
     setBusy(true);
     try {
       const r = await api.writeBackNotesBatch(picked.filter((x) => x.writable).map((x) => x.key));
@@ -61,7 +61,7 @@ export default function NotesReviewView() {
     { key: 'before', label: 'PPT 中的讲解词', nofilter: true, className: 'small muted', render: (c) => clip(c.before) || <span className="muted">（空）</span> },
     { key: 'after', label: '修改后', nofilter: true, className: 'small', render: (c) => clip(c.after) },
     { key: 'at', label: '修改时间', type: 'date', sort: (c) => c.at || 0, filterValue: (c) => c.at, className: 'small nowrap', render: (c) => fmtTime(c.at) },
-    { key: 'writable', label: '可写回', sort: (c) => (c.writable ? 1 : 0), filterValue: (c) => (c.writable ? '可写回' : '不可写回'), className: 'nowrap', render: (c) => (c.writable ? <span className="tag ok">可写回</span> : <span className="tag warn" title="Word 文档、旧版 .ppt 或原文件不存在">不可写回</span>) },
+    { key: 'writable', label: '可写回', sort: (c) => (c.writable ? 1 : 0), filterValue: (c) => (c.writable ? '可写回' : '不可写回'), className: 'nowrap', render: (c) => (c.writable ? <span className="tag ok">可写回</span> : <span className="tag warn" title="Word / PDF 文档、旧版 .ppt 或原文件不存在">不可写回</span>) },
     { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (c) => <button className="btn tiny" onClick={(e) => { e.stopPropagation(); app.openSlide(c.slideId, [c.fileId]); }}>⛶ 查看页面</button> },
   ];
   const hcols = [

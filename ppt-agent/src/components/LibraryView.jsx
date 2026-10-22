@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { api, fmtSize, fmtTime, THEME_LABEL, KIND_LABEL, STATUS_LABEL, unitOf } from '../api';
+import { api, fmtSize, fmtTime, THEME_LABEL, KIND_LABEL, KIND_ICON, STATUS_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
 import SlideViewer from './SlideViewer';
@@ -191,8 +191,8 @@ function GalleryMode({ files }) {
     <div className="gallery" style={{ gridTemplateColumns: `${sideW}px 6px 1fr` }}>
       <div className="gallery-side">
         <div className="col-head"><span>文档（{list.length}）</span>
-          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option></select></div>
-        {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{f.kind === 'word' ? '📄' : '🖼'} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option><option value="pdf">PDF</option></select></div>
+        {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{KIND_ICON[f.kind || 'ppt']} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
       </div>
       <div className="v-split" title="拖动调整宽度，双击恢复" onMouseDown={startSide} onDoubleClick={() => setSideW(SIDE_W)} />
       <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active={!app.modalOpen} compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
@@ -218,14 +218,15 @@ function OverviewMode({ scopeTask }) {
   }, [scope, q, kind]);
   const ok = rows.filter((r) => r.status === 'parsed');
   const sum = (k) => ok.reduce((a, r) => a + (r[k] || 0), 0);
-  const ppt = ok.filter((r) => (r.kind || 'ppt') === 'ppt'), word = ok.filter((r) => r.kind === 'word');
+  const ppt = ok.filter((r) => (r.kind || 'ppt') === 'ppt'), word = ok.filter((r) => r.kind === 'word'), pdf = ok.filter((r) => r.kind === 'pdf');
   const cats = {}; for (const r of ok) cats[r.category || '其他'] = (cats[r.category || '其他'] || 0) + 1;
   const authors = new Set(ok.map((r) => r.author).filter(Boolean));
-  const isPpt = (r) => r.status === 'parsed' && (r.kind || 'ppt') === 'ppt', isWord = (r) => r.status === 'parsed' && r.kind === 'word';
+  const isPpt = (r) => r.status === 'parsed' && (r.kind || 'ppt') === 'ppt', isWord = (r) => r.status === 'parsed' && r.kind === 'word', isPdf = (r) => r.status === 'parsed' && r.kind === 'pdf';
   // 每个统计数字都可点击下钻：[名称, 数值, 筛选条件, 突出显示的列]
   const cards = [['文档总数', rows.length, () => true], ['已解析', ok.length, (r) => r.status === 'parsed'], ['PPT 文件', ppt.length, isPpt], ['PPT 页数', ppt.reduce((a, r) => a + (r.slide_count || 0), 0), isPpt, ['slide_count']],
-    ['黑底页', sum('dark_slides'), (r) => r.status === 'parsed' && r.dark_slides > 0, ['dark_slides']], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0), (r) => isPpt(r) && r.light_slides > 0, ['light_slides']],
-    ['Word 文档', word.length, isWord], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0), isWord, ['slide_count']], ['视频', sum('video_count'), (r) => r.status === 'parsed' && r.video_count > 0, ['video_count']],
+    ['黑底页', ppt.reduce((a, r) => a + (r.dark_slides || 0), 0), (r) => isPpt(r) && r.dark_slides > 0, ['dark_slides']], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0), (r) => isPpt(r) && r.light_slides > 0, ['light_slides']],
+    ['Word 文档', word.length, isWord], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0), isWord, ['slide_count']],
+    ['PDF 文档', pdf.length, isPdf], ['PDF 页数', pdf.reduce((a, r) => a + (r.slide_count || 0), 0), isPdf, ['slide_count']], ['视频', sum('video_count'), (r) => r.status === 'parsed' && r.video_count > 0, ['video_count']],
     ['作者数', authors.size, (r) => r.status === 'parsed' && !!r.author], ['总大小', fmtSize(rows.reduce((a, r) => a + (r.size || 0), 0)), () => true]];
   const scopeName = scopeTask ? '' : taskId === 'all' ? '全部任务' : `#${taskId}`;
   const drill = (k, pick, show) => app.drill({ key: `lib-${taskId}-${k}`, title: `${scopeName ? `${scopeName} · ` : ''}${k}`, rows: rows.filter(pick), show, sort: k === '总大小' ? { k: 'size', d: -1 } : show ? { k: show[0], d: -1 } : undefined });
@@ -234,9 +235,9 @@ function OverviewMode({ scopeTask }) {
     { key: 'kind', label: '类型', sort: (r) => r.kind || 'ppt', render: (r) => KIND_LABEL[r.kind || 'ppt'] },
     { key: 'dir', label: '目录', className: 'muted small ellipsis', render: (r) => <span title={r.dir}>{r.dir}</span> },
     { key: 'slide_count', label: '页数/节数', sort: (r) => r.slide_count || 0, render: (r) => `${r.slide_count || 0} ${unitOf(r)}` },
-    { key: 'dark_slides', label: '黑底页', sort: (r) => r.dark_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.dark_slides || 0 : '-') },
-    { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.light_slides || 0 : '-') },
-    { key: 'theme', label: '底色', render: (r) => ((r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
+    { key: 'dark_slides', label: '黑底页', sort: (r) => r.dark_slides || 0, render: (r) => (r.kind !== 'word' ? r.dark_slides || 0 : '-') },
+    { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => (r.kind !== 'word' ? r.light_slides || 0 : '-') },
+    { key: 'theme', label: '底色', render: (r) => (r.kind !== 'word' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'category', label: '主题分类' },
     { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} /> },
     { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
@@ -260,7 +261,7 @@ function OverviewMode({ scopeTask }) {
               <option value="all">全部任务（{data.files.length} 个文档）</option>
               {data.tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}，{STATUS_LABEL[t.status] || t.status}）</option>)}
             </select>}
-            <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option></select>
+            <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option><option value="pdf">PDF</option></select>
             <input className="input" placeholder="按路径 / 标签 / 作者 / 分类过滤" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
           </>
         )} />

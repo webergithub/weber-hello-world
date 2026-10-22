@@ -107,7 +107,7 @@ class SearchEngine {
     const { files, fileMap, vecs } = this.load();
     const analysis = await this.analyze(q, opts);
     const groups = analysis.groups;
-    const result = { analysis, files: [], slides: { light: [], dark: [], word: [] }, totalSlides: 0, timing: {} };
+    const result = { analysis, files: [], slides: { light: [], dark: [], word: [], pdf: [] }, totalSlides: 0, timing: {} };
     if (!groups.length) return result;
     // opts.fileIds：只在这些文件中检索（任务范围）
     const scope = opts.fileIds ? new Set(opts.fileIds) : null;
@@ -183,12 +183,12 @@ class SearchEngine {
 
     // 页面推荐：附带备注讲解词与 黑/白底 对应页；返回全部命中页（界面按文件筛选时与“命中 N 页”一致，全部结果分批显示）
     const limit = opts.slideLimit || 3000;
-    const light = [], dark = [], word = [];
+    const light = [], dark = [], word = [], pdf = [];
     for (const x of scored) {
-      const target = x.f.kind === 'word' ? word : x.s.theme === 'dark' ? dark : light;
+      const target = x.f.kind === 'word' ? word : x.f.kind === 'pdf' ? pdf : x.s.theme === 'dark' ? dark : light;
       if (target.length < limit) target.push(x);
     }
-    const all = [...light, ...dark, ...word];
+    const all = [...light, ...dark, ...word, ...pdf];
     const cp = this.store.counterparts(all.map((x) => x.s.id));
     const cpSlides = new Map(this.store.getSlides([...new Set([...cp.values()].map((c) => c.id))]).map((s) => [s.id, s]));
     const view = (x) => {
@@ -203,6 +203,7 @@ class SearchEngine {
     result.slides.light = light.map(view);
     result.slides.dark = dark.map(view);
     result.slides.word = word.map(view);
+    result.slides.pdf = pdf.map(view);
     result.totalSlides = scored.length;
     result.retrievers = lists.map((l) => `${l.name}:${l.ids.length}`);
     result.timing.total = Date.now() - t0;

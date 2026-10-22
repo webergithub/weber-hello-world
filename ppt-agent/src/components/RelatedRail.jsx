@@ -28,7 +28,7 @@ export default function RelatedRail({ slide, onPick, open: openProp, setOpen: se
     return () => { off = true; };
   }, [slide && slide.id, app.taskTick]);
 
-  const isWord = data ? data.kind === 'word' : false;
+  const isWord = data ? data.kind === 'word' || data.kind === 'pdf' : false; // 当前是文档（Word / PDF）页面
   const total = data ? data.ppt.length + data.word.length : 0;
   if (!open) {
     return <div className="rel-rail collapsed" onClick={() => setOpen(true)} title="展开相关推荐"><span>🔗 相关推荐{data ? `（${total}）` : ''}</span></div>;
@@ -37,7 +37,7 @@ export default function RelatedRail({ slide, onPick, open: openProp, setOpen: se
   const card = (it) => {
     const inBasket = app.basket.items.includes(it.id);
     return (
-      <div key={it.id} className={`rel-card ${it.kind === 'word' ? 'word' : ''}`} data-rel={it.id} onClick={() => onPick(it)} title={`${it.filePath}\n点击在当前位置查看该${it.kind === 'word' ? '节' : '页'}`}>
+      <div key={it.id} className={`rel-card ${it.kind === 'word' || it.kind === 'pdf' ? 'word' : ''}`} data-rel={it.id} onClick={() => onPick(it)} title={`${it.filePath}\n点击在当前位置查看该${it.kind === 'word' ? '节' : '页'}`}>
         <div className="rc-thumb"><SlidePreview slide={it} file={{ kind: it.kind }} /></div>
         <div className="rc-info">
           <div className="rc-title ellipsis">{it.title || `第 ${it.idx} ${it.kind === 'word' ? '节' : '页'}`}</div>
@@ -49,7 +49,7 @@ export default function RelatedRail({ slide, onPick, open: openProp, setOpen: se
           </div>
           <div className="rc-ops" onClick={(e) => e.stopPropagation()}>
             <button className="btn tiny" title="与当前页所在文档并排对比" onClick={() => compare(it)}>⧉ 对比</button>
-            {it.kind !== 'word' && <button className={`btn tiny ${inBasket ? 'primary' : ''}`} onClick={() => (inBasket ? app.basket.remove(it.id) : app.basket.add([it.id]))}>{inBasket ? '✓ 导出篮' : '＋ 导出篮'}</button>}
+            {(it.kind || 'ppt') === 'ppt' && <button className={`btn tiny ${inBasket ? 'primary' : ''}`} onClick={() => (inBasket ? app.basket.remove(it.id) : app.basket.add([it.id]))}>{inBasket ? '✓ 导出篮' : '＋ 导出篮'}</button>}
           </div>
         </div>
       </div>
@@ -63,7 +63,7 @@ export default function RelatedRail({ slide, onPick, open: openProp, setOpen: se
         {data && (
           <>
             <div className="rr-sec">
-              <div className="rr-title">本{isWord ? '节' : '页'}标签</div>
+              <div className="rr-title">本{data.kind === 'word' ? '节' : '页'}标签</div>
               <div className="rr-tags">{data.tags.length ? data.tags.map((t) => <span key={t} className="tag">{t}</span>) : <span className="muted small">（内容较少，没有提取到标签）</span>}</div>
             </div>
             <div className="rr-sec">
@@ -73,12 +73,12 @@ export default function RelatedRail({ slide, onPick, open: openProp, setOpen: se
             </div>
             {!isWord && data.withWord && (
               <div className="rr-sec">
-                <div className="rr-title">相关 Word 内容（{data.word.length}）</div>
+                <div className="rr-title">相关文档内容（Word / PDF，{data.word.length}）</div>
                 {data.word.map(card)}
-                {!data.word.length && <div className="muted small">没有找到相关的 Word 章节</div>}
+                {!data.word.length && <div className="muted small">没有找到相关的 Word 章节或 PDF 页面</div>}
               </div>
             )}
-            {!isWord && !data.withWord && <div className="muted small rr-tip">在“设置 → 解析文档类型”中同时选择 Word 后，会把 Word 文档内容与 PPT 页面相互关联并在这里推荐。</div>}
+            {!isWord && !data.withWord && <div className="muted small rr-tip">在“设置 → 解析文档类型”中同时选择 Word 或 PDF 后，会把文档内容与 PPT 页面相互关联并在这里推荐。</div>}
           </>
         )}
       </div>

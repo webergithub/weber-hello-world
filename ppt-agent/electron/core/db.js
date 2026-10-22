@@ -97,6 +97,7 @@ class Store {
     if (!t.has('last_watch_at')) this.db.exec('ALTER TABLE tasks ADD COLUMN last_watch_at INTEGER');
     if (!t.has('watch_summary')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch_summary TEXT');
     if (!cols('search_history').has('task_ids')) this.db.exec('ALTER TABLE search_history ADD COLUMN task_ids TEXT');
+    if (!cols('search_history').has('pdf')) this.db.exec('ALTER TABLE search_history ADD COLUMN pdf INTEGER DEFAULT 0');
     const sl = cols('slides');
     if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
     if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');

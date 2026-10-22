@@ -10,6 +10,7 @@ const { normSlideTitle } = require('./similarity');
 const { GENERIC } = require('./tagger');
 
 const PAGE_TAGS = 8;
+const isDoc = (s) => s.kind === 'word' || s.kind === 'pdf';
 
 /** 单页词项权重（标题 ×2、正文 ×1、讲解词 ×0.5）与命中的领域概念 */
 function slideKeywords(s) {
@@ -61,7 +62,9 @@ function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore 
   const out = [];
   for (let i = 0; i < N; i++) {
     const s = slides[i];
-    const allow = (o) => o.file_id !== s.file_id && (s.kind === 'word' ? withWord && o.kind !== 'word' : o.kind !== 'word' || withWord);
+    // Word / PDF 都算“文档”：文档之间不互相推荐，文档 ↔ PPT 仅在同时启用两类时关联
+    const sDoc = isDoc(s);
+    const allow = (o) => o.file_id !== s.file_id && (sDoc ? withWord && !isDoc(o) : !isDoc(o) || withWord);
     const cand = new Map();
     for (const t of s._tags) {
       const post = tagIdx.get(t);
@@ -82,11 +85,11 @@ function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore 
       if (score < minScore) continue;
       const reasons = [];
       if (sameTitle) reasons.push('标题相同');
-      if (o.kind !== 'word' && s.kind !== 'word' && o.theme !== s.theme && cos >= 0.8) reasons.push(o.theme === 'dark' ? '黑底版本' : '白底版本');
+      if (!isDoc(o) && !sDoc && o.theme !== s.theme && cos >= 0.8) reasons.push(o.theme === 'dark' ? '黑底版本' : '白底版本');
       const origTags = (o.tags || []).filter((t) => shared.includes(t.toLowerCase()));
       reasons.push(...origTags.slice(0, 4).map((t) => `#${t}`));
       if (cos >= 0.75 && !sameTitle) reasons.push('内容相近');
-      scored.push({ a: s.id, b: o.id, score: Math.round(score * 1000) / 1000, kind: o.kind === 'word' ? 'word' : 'ppt', reasons });
+      scored.push({ a: s.id, b: o.id, score: Math.round(score * 1000) / 1000, kind: isDoc(o) ? 'word' : 'ppt', reasons });
     }
     scored.sort((x, y) => y.score - x.score);
     out.push(...scored.filter((x) => x.kind === 'ppt').slice(0, pptK), ...scored.filter((x) => x.kind === 'word').slice(0, wordK));

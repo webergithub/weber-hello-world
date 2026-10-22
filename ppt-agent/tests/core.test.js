@@ -146,6 +146,40 @@ test('Word：按标题分节、表格、批注', async () => {
   assert.ok(r.slides.some((s) => /审核人/.test(s.notes)));
 });
 
+test('PDF：逐页提取文字与标题、黑底识别；服务解析入库并可检索（不改原文件）', async () => {
+  const { parsePdf } = require('../electron/core/pdf');
+  const man = await parsePdf(P('PDF文档', '行李系统运维手册.pdf'));
+  assert.strictEqual(man.kind, 'pdf');
+  assert.strictEqual(man.slides.length, 4);
+  assert.strictEqual(man.slides[1].title, '一、系统组成');
+  assert.ok(/倾翻盘式/.test(man.slides[1].text));
+  assert.strictEqual(man.props.author, '运行保障部');
+  assert.ok(man.slides.every((s) => s.theme === 'light'));
+  const dark = await parsePdf(P('PDF文档', '航班过站保障Turnaround_黑底.pdf'));
+  assert.ok(dark.slides.length >= 5 && dark.slides.every((s) => s.theme === 'dark'), '整页深色背景应识别为黑底');
+  assert.ok(/关键里程碑/.test(dark.slides[1].title));
+
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'data-pdf'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt', 'pdf'] });
+  const lib = path.join(tmp, 'lib-pdf');
+  fs.cpSync(P('PDF文档'), lib, { recursive: true });
+  const f0 = path.join(lib, '行李系统运维手册.pdf');
+  const before = { buf: fs.readFileSync(f0), mtime: fs.statSync(f0).mtimeMs };
+  const id = svc.addTask(lib);
+  const done = new Promise((res) => svc.on('task', (t) => { if (t.id === id && ['done', 'failed'].includes(t.status)) res(t); }));
+  svc.startTask(id);
+  await done;
+  const files = svc.store.listFiles({ status: 'parsed' }).filter((f) => f.kind === 'pdf');
+  assert.strictEqual(files.length, 2);
+  assert.deepStrictEqual(files.find((f) => f.name === '行李系统运维手册.pdf').preview, { engine: 'pdf', src: true });
+  assert.ok(fs.readFileSync(f0).equals(before.buf) && fs.statSync(f0).mtimeMs === before.mtime, 'PDF 原文件不应被修改');
+  const r = await svc.searchQuery('分拣机 巡检', { record: false });
+  assert.ok(r.slides.pdf.length >= 1 && r.slides.pdf.every((x) => x.kind === 'pdf'));
+  assert.strictEqual(r.slides.light.length + r.slides.dark.length, 0);
+  svc.store.close && svc.store.close();
+});
+
 test('Markdown 只保留文字，不含图片', async () => {
   const { parsePptx } = require('../electron/core/pptx');
   const { slideToMd } = require('../electron/core/markdown');

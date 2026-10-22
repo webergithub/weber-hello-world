@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { api, THEME_LABEL, unitOf } from '../api';
+import { api, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown, highlight } from '../md';
 import { PanelLayout, useStoredLayout, DEFAULT_LAYOUT, NotesBody, MdBody, onSlideUpdated } from './Panels';
@@ -251,7 +251,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
       {slide ? (() => {
         const panels = {
           slide: {
-            title: unit === '节' ? '📄 文档内容' : '🖼 PPT 页面',
+            title: unit === '节' ? '📄 文档内容' : detail && detail.source && detail.source.kind === 'pdf' ? '📕 PDF 页面' : '🖼 PPT 页面',
             body: (
               <div className="vp-slide">
                 <div className="viewer-title">
@@ -264,7 +264,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
                 {slide.counterpart && <div className="hint-bar">⇄ 该页有内容相近的 <b>{THEME_LABEL[slide.counterpart.theme]}</b> 版本：{slide.counterpart.fileName} 第 {slide.counterpart.idx} 页 <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>切换查看</button></div>}
                 <div className="viewer-stage">
                   {resMode ? <button className="stage-nav left" disabled={rIdx === 0} onClick={() => goResult(-1)}>‹</button> : <button className="stage-nav left" disabled={pos <= 0 && fpos <= 0} onClick={() => go(-1, true)}>‹</button>}
-                  <div className="stage-slide" onDoubleClick={toggleMax} title="滚轮翻页；Ctrl + 滚轮缩放；双击最大化 / 还原" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>{unit === '页' ? <ZoomStage view={zoom} setView={setZoom} onWheelPage={(d) => (resMode ? goResult(d) : go(d, true))}><SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} /></ZoomStage> : <SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} />}</div>
+                  <div className="stage-slide" onDoubleClick={toggleMax} title="滚轮翻页；Ctrl + 滚轮缩放；双击最大化 / 还原" style={{ '--ratio': slideRatio(slide, detail && detail.source) }}>{unit === '页' ? <ZoomStage view={zoom} setView={setZoom} onWheelPage={(d) => (resMode ? goResult(d) : go(d, true))}><SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} /></ZoomStage> : <SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} />}</div>
                   {resMode ? <button className="stage-nav right" disabled={rIdx === results.length - 1} onClick={() => goResult(1)}>›</button> : <button className="stage-nav right" disabled={pos >= slides.length - 1 && fpos >= ids.length - 1} onClick={() => go(1, true)}>›</button>}
                 </div>
                 <div className="viewer-strip" ref={strip}>

@@ -152,6 +152,20 @@ app.whenReady().then(async () => {
 
   protocol.handle('ppta', (req) => {
     const u = new URL(req.url);
+    // PDF 原文件（只读）：ppta://src/<文件 id>，只提供资料库中 PDF 类型的文件
+    // pdf.js 的字符映射与标准字体（中文 PDF 需要 cMap）：ppta://pdfjs/cmaps/...、ppta://pdfjs/standard_fonts/...
+    if (u.host === 'pdfjs') {
+      const root = path.dirname(path.dirname(require.resolve('pdfjs-dist/build/pdf.mjs')));
+      const rel = decodeURIComponent(u.pathname).replace(/^\/+/, '');
+      const p = path.normalize(path.join(root, rel));
+      if (!/^(cmaps|standard_fonts|wasm|iccs)[\\/]/.test(rel) || !p.startsWith(root) || !fs.existsSync(p)) return new Response('not found', { status: 404 });
+      return new Response(fs.readFileSync(p), { headers: { 'content-type': 'application/octet-stream', 'access-control-allow-origin': '*' } });
+    }
+    if (u.host === 'src') {
+      const f = service.store.getFile(Number(decodeURIComponent(u.pathname).replace(/^\//, '')));
+      if (!f || f.kind !== 'pdf' || !fs.existsSync(f.path)) return new Response('not found', { status: 404 });
+      return net.fetch(pathToFileURL(f.path).toString());
+    }
     const base = u.host === 'thumb' ? service.thumbDir : u.host === 'media' ? service.mediaDir : null;
     if (!base) return new Response('not found', { status: 404 });
     const p = path.normalize(path.join(base, decodeURIComponent(u.pathname)));

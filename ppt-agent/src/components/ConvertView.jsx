@@ -103,7 +103,7 @@ export default function ConvertView() {
 
   useEffect(() => { Promise.all(app.basket.items.map((id) => api.slideDetail(id).catch(() => null))).then((l) => setBasket(l.filter(Boolean))); }, [app.basket.items]);
   useEffect(() => { const m = {}; for (const s of basket) m[s.id] = s; setQSlides((o) => ({ ...o, ...m })); }, [basket]);
-  const pptSlides = basket.filter((s) => !(s.file && s.file.kind === 'word'));
+  const pptSlides = basket.filter((s) => !(s.file && (s.file.kind === 'word' || s.file.kind === 'pdf')));
   const inQueue = new Set(queue.map((q) => q.slideId));
   const addToQueue = () => {
     setQueue([...queue, ...[...pick].filter((id) => !inQueue.has(id)).map((id) => ({ slideId: id, dir: 'auto' }))]);
@@ -344,11 +344,18 @@ function RulePreview({ dir, rule, options }) {
   return <div className="rule-preview">{card(before, dir === 'toLight' ? '转换前（黑底示例）' : '转换前（白底示例）')}<div className="rp-arrow">→</div>{card(after, '转换后')}</div>;
 }
 
+// “新增规则”中的样例：未修改时保存会被忽略
+let draftSeq = 0;
+const SAMPLE_FIELDS = (dir) => ({ el: 'text', from: dir === 'toLight' ? 'FF0000' : 'C00000', tol: 40, to: dir === 'toLight' ? 'C00000' : 'FF6666', note: '', enabled: true });
+const sampleRule = (dir) => ({ ...SAMPLE_FIELDS(dir), _k: `d${++draftSeq}` });
+const untouchedSample = (dir, d) => { const f = SAMPLE_FIELDS(dir); return Object.keys(f).every((k) => (d[k] ?? '') === f[k]); };
+
 function RulesDialog({ onClose }) {
   const app = useApp();
   const [r, setR] = useState(null);
   const [tab, setTab] = useState('toLight');
   const [script, setScript] = useState('');
+  const [draft, setDraft] = useState(() => ({ toLight: [sampleRule('toLight')], toDark: [sampleRule('toDark')] }));
   useEffect(() => { api.getConvertRules().then((x) => { setR(x); setScript(JSON.stringify(x, null, 2)); }); }, []);
   if (!r) return null;
   const upd = (n) => { setR(n); setScript(JSON.stringify(n, null, 2)); };
@@ -357,29 +364,57 @@ function RulesDialog({ onClose }) {
   const setO = (k, v) => upd({ ...r, options: { ...r.options, [k]: v } });
   const custom = rule.custom || [];
   const setCustom = (list) => upd({ ...r, [tab]: { ...rule, custom: list } });
-  const patch = (i, p) => setCustom(custom.map((c, k) => (k === i ? { ...c, ...p } : c)));
-  const move = (i, d) => { const n = [...custom]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; setCustom(n); };
-  const addRule = () => setCustom([...custom, { el: 'text', from: tab === 'toLight' ? 'FF0000' : 'C00000', tol: 40, to: tab === 'toLight' ? 'C00000' : 'FF6666', note: '', enabled: true }]);
+  // 新增规则：先在“新增规则”中编辑（默认放一条样例），点“保存新增的规则”后才加入自定义规则；未修改的样例在保存时忽略
+  const drafts = (draft && draft[tab]) || [];
+  const setDrafts = (list) => setDraft((d) => ({ ...d, [tab]: list }));
+  const changed = drafts.filter((d) => !untouchedSample(tab, d));
+  const ruleColumns = (list, setList, isDraft) => {
+    const patch = (i, p) => setList(list.map((c, k) => (k === i ? { ...c, ...p } : c)));
+    const move = (i, d) => { const n = [...list]; const j = i + d; if (j < 0 || j >= n.length) return; [n[i], n[j]] = [n[j], n[i]]; setList(n); };
+    return [
+      { key: 'i', label: '#', nosort: true, render: (c) => (isDraft && untouchedSample(tab, c) ? <span className="tag">样例</span> : c.i + 1) },
+      { key: 'enabled', label: '启用', nosort: true, render: (c) => <input type="checkbox" checked={c.enabled !== false} onChange={(e) => patch(c.i, { enabled: e.target.checked })} /> },
+      { key: 'el', label: '元素', nosort: true, render: (c) => <select className="input tiny" value={c.el} onChange={(e) => patch(c.i, { el: e.target.value })}>{Object.entries(ELEMENTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> },
+      { key: 'from', label: '原颜色', nosort: true, render: (c) => (
+        <div className="rule-color">
+          <select className="input tiny" value={c.from === '*' ? 'any' : 'color'} onChange={(e) => patch(c.i, { from: e.target.value === 'any' ? '*' : 'FF0000' })}><option value="any">任意颜色</option><option value="color">指定颜色</option></select>
+          {c.from !== '*' && <>
+            <input type="color" value={'#' + (/^[0-9A-F]{6}$/i.test(c.from) ? c.from : 'FF0000')} onChange={(e) => patch(c.i, { from: e.target.value.slice(1).toUpperCase() })} />
+            <input className="input hex" value={c.from} onChange={(e) => patch(c.i, { from: e.target.value.toUpperCase() })} />
+            <span className="muted small" title="与指定颜色相差在该范围内都算匹配（0 = 完全一致）">近似</span>
+            <input className="input num" type="number" min="0" max="255" value={c.tol || 0} onChange={(e) => patch(c.i, { tol: Number(e.target.value) })} />
+          </>}
+        </div>
+      ) },
+      { key: 'to', label: '→ 转换后', nosort: true, render: (c) => <ColorEdit value={c.to} allowKeep onChange={(v) => patch(c.i, { to: v })} /> },
+      { key: 'note', label: '说明', nosort: true, render: (c) => <input className="input" value={c.note || ''} placeholder="如：红色强调字改深红" onChange={(e) => patch(c.i, { note: e.target.value })} /> },
+      { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (c) => <><button className="btn tiny" disabled={c.i === 0} onClick={() => move(c.i, -1)}>↑</button><button className="btn tiny" disabled={c.i === list.length - 1} onClick={() => move(c.i, 1)}>↓</button><button className="btn tiny" onClick={() => setList(list.filter((_, k) => k !== c.i))}>删除</button></> },
+    ];
+  };
   const rows = custom.map((c, i) => ({ ...c, i }));
-  const columns = [
-    { key: 'i', label: '#', nosort: true, render: (c) => c.i + 1 },
-    { key: 'enabled', label: '启用', nosort: true, render: (c) => <input type="checkbox" checked={c.enabled !== false} onChange={(e) => patch(c.i, { enabled: e.target.checked })} /> },
-    { key: 'el', label: '元素', nosort: true, render: (c) => <select className="input tiny" value={c.el} onChange={(e) => patch(c.i, { el: e.target.value })}>{Object.entries(ELEMENTS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select> },
-    { key: 'from', label: '原颜色', nosort: true, render: (c) => (
-      <div className="rule-color">
-        <select className="input tiny" value={c.from === '*' ? 'any' : 'color'} onChange={(e) => patch(c.i, { from: e.target.value === 'any' ? '*' : 'FF0000' })}><option value="any">任意颜色</option><option value="color">指定颜色</option></select>
-        {c.from !== '*' && <>
-          <input type="color" value={'#' + (/^[0-9A-F]{6}$/i.test(c.from) ? c.from : 'FF0000')} onChange={(e) => patch(c.i, { from: e.target.value.slice(1).toUpperCase() })} />
-          <input className="input hex" value={c.from} onChange={(e) => patch(c.i, { from: e.target.value.toUpperCase() })} />
-          <span className="muted small" title="与指定颜色相差在该范围内都算匹配（0 = 完全一致）">近似</span>
-          <input className="input num" type="number" min="0" max="255" value={c.tol || 0} onChange={(e) => patch(c.i, { tol: Number(e.target.value) })} />
-        </>}
-      </div>
-    ) },
-    { key: 'to', label: '→ 转换后', nosort: true, render: (c) => <ColorEdit value={c.to} allowKeep onChange={(v) => patch(c.i, { to: v })} /> },
-    { key: 'note', label: '说明', nosort: true, render: (c) => <input className="input" value={c.note || ''} placeholder="如：红色强调字改深红" onChange={(e) => patch(c.i, { note: e.target.value })} /> },
-    { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (c) => <><button className="btn tiny" disabled={c.i === 0} onClick={() => move(c.i, -1)}>↑</button><button className="btn tiny" disabled={c.i === custom.length - 1} onClick={() => move(c.i, 1)}>↓</button><button className="btn tiny" onClick={() => setCustom(custom.filter((_, k) => k !== c.i))}>删除</button></> },
-  ];
+  const columns = ruleColumns(custom, setCustom, false);
+  const draftRows = drafts.map((c, i) => ({ ...c, i }));
+  const draftColumns = ruleColumns(drafts, setDrafts, true);
+  const addRule = () => setDrafts([...drafts, sampleRule(tab)]);
+  // 把两个方向中改过的新增规则并入自定义规则（未修改的样例忽略）
+  const withDrafts = (base) => {
+    const out = { ...base };
+    for (const d of ['toLight', 'toDark']) {
+      const add = ((draft && draft[d]) || []).filter((x) => !untouchedSample(d, x)).map(({ _k, ...x }) => x);
+      if (add.length) out[d] = { ...out[d], custom: [...(out[d].custom || []), ...add] };
+    }
+    return out;
+  };
+  const saveNew = async () => {
+    if (!changed.length) { app.toast('样例规则还没有修改，没有需要保存的新增规则', 'error'); return; }
+    const next = { ...r, [tab]: { ...rule, custom: [...custom, ...changed.map(({ _k, ...x }) => x)] } };
+    try {
+      const saved = await api.setConvertRules(next);
+      upd(saved || next);
+      setDrafts([sampleRule(tab)]);
+      app.toast(`已保存 ${changed.length} 条新增规则（${tab === 'toLight' ? '黑底转白底' : '白底转黑底'}）`, 'info', { cat: '黑白底互转' });
+    } catch (e) { app.toast(e.message, 'error'); }
+  };
   return (
     <div className="overlay" onClick={() => onClose(null)}>
       <div className="modal rules-modal" onClick={(e) => e.stopPropagation()}>
@@ -403,8 +438,12 @@ function RulesDialog({ onClose }) {
             ))}</tbody>
           </table>
           <h4>自定义规则 <span className="muted small">按“元素 + 原颜色”精确或近似匹配，优先于基础规则；从上到下第一条匹配的生效</span></h4>
-          <DataTable id={`convRules-${tab}`} columns={columns} rows={rows} rowKey={(c) => c.i} empty="还没有自定义规则。点击下方“＋ 添加规则”，例如：把原红色文字改为深红、保持某种图形填充色不变。" />
-          <div className="row"><button className="btn small primary" onClick={addRule}>＋ 添加规则</button></div>
+          <DataTable id={`convRules-${tab}`} columns={columns} rows={rows} rowKey={(c) => c.i} empty="还没有自定义规则：在下方“新增规则”中修改样例，然后点击“保存新增的规则”。" />
+          <div className="rule-new">
+            <div className="rule-new-head"><b>新增规则</b><span className="muted small">{changed.length ? `已修改 ${changed.length} 条` : '样例未修改时不会保存'}</span></div>
+            <DataTable id={`convRulesNew-${tab}`} sessionKey={`convRulesNew-${tab}`} columns={draftColumns} rows={draftRows} rowKey={(c) => c._k} empty="点击“＋ 添加规则”新增一条" />
+            <div className="row"><button className="btn small" onClick={addRule}>＋ 添加规则</button><button className="btn small primary" disabled={!changed.length} onClick={saveNew}>💾 保存新增的规则{changed.length ? `（${changed.length}）` : ''}</button></div>
+          </div>
           <h4>通用选项 <span className="muted small">两个方向共用</span></h4>
           <div className="rule-opts">
             <label className="chk"><input type="checkbox" checked={r.options.keepAccentText} onChange={(e) => setO('keepAccentText', e.target.checked)} />保留“彩色文字”的区分（使用“原彩色文字”颜色）</label>
@@ -426,7 +465,7 @@ function RulesDialog({ onClose }) {
           <button className="btn ghost" onClick={async () => { if (!confirm('恢复默认规则？自定义规则会被清除。')) return; const d = await api.resetConvertRules(); upd(d); app.toast('已恢复默认规则'); }}>恢复默认</button>
           <div className="spacer" />
           <button className="btn" onClick={() => onClose(null)}>取消</button>
-          <button className="btn primary" onClick={async () => { try { const saved = await api.setConvertRules(r); app.toast('转换规则已保存，将应用到下一次转换'); onClose(saved); } catch (e) { app.toast(e.message, 'error'); } }}>保存规则</button>
+          <button className="btn primary" onClick={async () => { try { const saved = await api.setConvertRules(withDrafts(r)); app.toast('转换规则已保存，将应用到下一次转换'); onClose(saved); } catch (e) { app.toast(e.message, 'error'); } }}>保存规则</button>
         </div>
       </div>
     </div>
