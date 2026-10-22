@@ -190,6 +190,14 @@ test('黑白底互转：黑→白、白→黑', async () => {
   const backK = await parsePptx(outK, { mediaDir: tmp });
   const runsK = backK.slides[0].layout.items.flatMap((i) => (i.paras || []).flatMap((p) => p.runs || [])).filter((x) => x.text.trim());
   assert.ok(runsK.length && runsK.every((x) => x.color === '1F3864'), '自定义规则：所有文字改为 1F3864');
+  // 默认规则：白底 → 黑底时原深红色字（C00000）显示为金色 FFC000
+  assert.deepStrictEqual(normalizeRules(null).toDark.custom.map((c) => [c.from, c.to]), [['C00000', 'FFC000']]);
+  assert.strictEqual(normalizeRules({ toDark: { text: 'FFFFFF' } }).toDark.custom.length, 1, '旧规则脚本沿用默认自定义规则');
+  const backDark = path.join(tmp, 'cv-back-dark.pptx');
+  await convertTheme(out, backDark, ['toDark', null], {});
+  const runsD = (await parsePptx(backDark, { mediaDir: tmp })).slides[0].layout.items.flatMap((i) => (i.paras || []).flatMap((p) => p.runs || [])).filter((x) => x.text.trim());
+  assert.ok(runsD.some((x) => x.color === 'FFC000'), '原深红色字应转为金色');
+  assert.ok(!runsD.some((x) => x.color === 'C00000'));
 });
 
 test('智能生成：版式意图识别与相似聚类', () => {

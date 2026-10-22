@@ -18,8 +18,9 @@ const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
 // null 表示“无 / 透明”。logoMaxArea：小于该页面面积比例的图片视为 logo；fullBgMinArea：大于该比例的图片视为整页背景
 const RULES = {
   version: 1,
-  toLight: { bg: 'FFFFFF', text: '000000', accentText: 'C00000', shapeFill: 'D9D9D9', shapeLine: 'BFBFBF', tableLine: 'BFBFBF', headerFill: 'F2F2F2', logo: 'C00000' },
-  toDark: { bg: '000000', text: 'FFFFFF', accentText: 'FFFFFF', shapeFill: null, shapeLine: 'FFFFFF', tableLine: 'FFFFFF', headerFill: null, logo: null },
+  toLight: { bg: 'FFFFFF', text: '000000', accentText: 'C00000', shapeFill: 'D9D9D9', shapeLine: 'BFBFBF', tableLine: 'BFBFBF', headerFill: 'F2F2F2', logo: 'C00000', custom: [] },
+  // 白底 → 黑底：原深红色字（如黑转白时生成的 C00000）显示为金色 FFC000
+  toDark: { bg: '000000', text: 'FFFFFF', accentText: 'FFFFFF', shapeFill: null, shapeLine: 'FFFFFF', tableLine: 'FFFFFF', headerFill: null, logo: null, custom: [{ el: 'text', from: 'C00000', tol: 60, to: 'FFC000', note: '原深红色字显示为金色', enabled: true }] },
   options: { logoMaxArea: 0.06, fullBgMinArea: 0.85, removeFullBg: true, keepAccentText: true },
 };
 // 自定义规则可作用的元素
@@ -402,7 +403,8 @@ function normalizeRules(r) {
   for (const dir of ['toLight', 'toDark']) {
     for (const k of Object.keys(out[dir])) if (k !== 'custom' && r[dir] && k in r[dir]) out[dir][k] = hex(r[dir][k], out[dir][k]);
     // 自定义规则：[{ el, from: 'RRGGBB' | '*', tol, to: 'RRGGBB' | null | 'keep', note, enabled }]
-    const list = r[dir] && Array.isArray(r[dir].custom) ? r[dir].custom : [];
+    // 规则脚本中没有 custom 字段（旧版本保存的规则）时沿用默认的自定义规则
+    const list = r[dir] && Array.isArray(r[dir].custom) ? r[dir].custom : out[dir].custom;
     out[dir].custom = list.filter((c) => c && CUSTOM_ELEMENTS[c.el]).slice(0, 100).map((c) => ({
       el: c.el,
       from: c.from === '*' ? '*' : hex(c.from, '*') || '*',

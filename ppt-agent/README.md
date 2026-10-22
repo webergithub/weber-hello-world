@@ -2,11 +2,12 @@
 
 把电脑上的 PPT（以及 Word 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-1.6.4-win-x64-portable.exe`](download/PPT-Agent-1.6.4-win-x64-portable.exe)（免安装，双击运行）。
+> 下载：[`download/PPT-Agent-1.6.5-win-x64-portable.exe`](download/PPT-Agent-1.6.5-win-x64-portable.exe)（免安装，双击运行）。
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
 
 ## v1.6 新增
 
+- 白底转黑底时原深红色字显示为金色 #FFC000（默认自定义规则，可修改）。
 - **页面无级缩放**：原始页 Ctrl + 滚轮 / 缩放条 / = - 键缩放，放大后拖动查看，“⤢ 适配窗口”恢复。
 - **转换规则设置**：标题旁按钮打开，分黑转白 / 白转黑两个页签，含效果预览、基础规则与自定义规则（元素 + 原颜色 → 转换后颜色）。
 - **侧栏模块**：任务详情（蓝）、总览分析（绿，含智能搜索与相似分组）、智能模块（紫，含导出篮）、维护（橙）以不同颜色的卡片区分；子菜单再次点击可收起。
@@ -115,7 +116,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-1.6.4-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
+1. 运行 `PPT-Agent-1.6.5-win-x64-portable.exe`（未签名，Windows SmartScreen 提示时选择“仍要运行”）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。
