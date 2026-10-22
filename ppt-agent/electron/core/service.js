@@ -55,6 +55,7 @@ const DEFAULT_CONFIG = {
   docTypes: ['ppt', 'word'],
   uiTheme: 'system', // dark | light | system
   closeAction: 'ask', // ask | quit | minimize：关闭窗口时的行为
+  welcome: 'first', // 启动简介：first 首次打开显示 | always 每次显示 | never 不再显示
   keymap: {}, // 浏览窗口快捷键：只保存与默认不同的动作 { 动作: [按键组合] }
   // 定时监测更新：每天 time 对开启监测的任务做增量扫描；catchUp：错过的（程序未运行）在下次启动时补扫
   watch: { enabled: false, time: '12:30', catchUp: true, since: 0, lastRun: 0 },
@@ -250,8 +251,9 @@ class AgentService extends EventEmitter {
     this.pausing.add(id);
     this.cancelled.add(id);
     const i = this.queue.indexOf(id);
-    if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'paused', message: '已中断，可点击“继续”' }); this.emitTask(id); }
-    this.log.info(`[任务#${id}] 请求中断`);
+    if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'paused', message: '已暂停，可点击“继续”' }); this.emitTask(id); }
+    else if (this.running === id) this.emitTask(id, { pausing: true, current: '正在暂停…（当前文件会在下次继续时重新解析）' });
+    this.log.info(`[任务#${id}] 请求暂停`);
   }
 
   startAll() {
@@ -411,7 +413,12 @@ class AgentService extends EventEmitter {
       this.emitProgress(id, { stage: 'file', index: i + 1, total: files.length, file, counts: { ...counts } });
       try {
         const before = incremental ? this.store.fileByPath(file) : null;
-        const r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force) });
+        let r;
+        try { r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force), isCancelled: () => this.cancelled.has(id) }); } catch (e) {
+          // 解析过程中暂停：放弃当前文件（不记入本轮已处理），继续时重新解析
+          if (e && e.paused) { stoppedAt = i; log.warn(`${tag} 已暂停：当前文件 ${path.basename(file)} 未完成，继续时会重新解析`); break; }
+          throw e;
+        }
         counts[r]++;
         if (incremental && r === 'parsed') { if (before && before.status !== 'recycled') inc.updated++; else inc.added++; }
         if (r !== 'parsed') this.emitProgress(id, { stage: 'result', file, action: r, index: i + 1, total: files.length });
@@ -445,7 +452,8 @@ class AgentService extends EventEmitter {
     return crypto.createHash('sha1').update(`${name}|${size}|${Math.floor(mtime / 1000)}|${author || ''}`).digest('hex');
   }
 
-  async processFile(taskId, file, engines, log, tag, { force = false } = {}) {
+  async processFile(taskId, file, engines, log, tag, { force = false, isCancelled = () => false } = {}) {
+    const checkPause = () => { if (isCancelled()) { const e = new Error('已暂停'); e.paused = true; throw e; } };
     const st = fs.statSync(file);
     const name = path.basename(file), ext = path.extname(file).toLowerCase();
     const kind = KIND_OF.get(ext) || 'ppt';
@@ -504,10 +512,21 @@ class AgentService extends EventEmitter {
       }
     }
     const mediaKey = crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
-    // 逐页进度：附带页面版式、文字、讲解词与生成的 Markdown，用于“解析动态”实时展示
-    const onSlide = (i, n, t, sl) => this.emitProgress(taskId, {
+    // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
+    let preview = null;
+    if (kind === 'ppt' && this.config.thumbnails !== 'off') {
+      try {
+        checkPause();
+        this.emitProgress(taskId, { stage: 'thumb', file });
+        preview = await this.office.thumbnails(src, path.join(this.thumbDir, mediaKey), mediaKey, this.config.thumbnails, this.config.thumbWidth);
+        if (preview) log.info(`${tag} 页面截图(${preview.engine})：${preview.images ? preview.images.length + ' 页' : 'PDF'} ${name}`);
+      } catch (e) { if (e && e.paused) throw e; log.warn(`${tag} 生成截图失败 ${name}`, e); }
+    }
+    const thumbOf = (i) => (preview && preview.images && preview.images[i - 1]) || null;
+    // 逐页进度：附带真实截图、页面版式、文字、讲解词与生成的 Markdown，用于“解析动态”实时展示
+    const onSlide = (i, n, t, sl) => checkPause() || this.emitProgress(taskId, {
       stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit, kind,
-      detail: sl ? { theme: sl.theme, bg: sl.bg, layout: sl.layout || null, text: String(sl.text || '').slice(0, 600), notes: String(sl.notes || '').slice(0, 400), md: slideToMd(sl, kind).slice(0, 3000), media: (sl.media || []).map((m) => ({ type: m.type, name: m.name, subtitles: (m.subtitles || []).length })) } : null,
+      detail: sl ? { theme: sl.theme, bg: sl.bg, layout: sl.layout || null, thumb: thumbOf(i), text: String(sl.text || '').slice(0, 2000), notes: String(sl.notes || '').slice(0, 800), md: slideToMd(sl, kind).slice(0, 6000), media: (sl.media || []).map((m) => ({ type: m.type, name: m.name, subtitles: (m.subtitles || []).length })) } : null,
     });
     this.emitProgress(taskId, { stage: 'parse', file, kind });
     let parsed;
@@ -515,6 +534,7 @@ class AgentService extends EventEmitter {
       parsed = kind === 'word' ? await parseDocx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide })
         : await parsePptx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide, ffmpeg: engines.ffmpeg ? this.office.ffmpegExtractor(this.cacheDir) : null });
     } catch (e) {
+      if (e && e.paused) throw e;
       const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, kind, fingerprint: null, status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
       this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
       log.warn(`${tag} 解析失败：${file}（${e.message}）`);
@@ -523,15 +543,6 @@ class AgentService extends EventEmitter {
     if (LEGACY.has(ext)) { author = parsed.props.author; title = parsed.props.title; }
     const slides = parsed.slides;
 
-    // 页面截图（PowerPoint / LibreOffice，可选）
-    let preview = null;
-    if (kind === 'ppt' && this.config.thumbnails !== 'off' && slides.length) {
-      try {
-        this.emitProgress(taskId, { stage: 'thumb', file });
-        preview = await this.office.thumbnails(src, path.join(this.thumbDir, mediaKey), mediaKey, this.config.thumbnails, this.config.thumbWidth);
-        if (preview) log.info(`${tag} 页面截图(${preview.engine})：${preview.images ? preview.images.length + ' 页' : 'PDF'} ${name}`);
-      } catch (e) { log.warn(`${tag} 生成截图失败 ${name}`, e); }
-    }
     for (const s of slides) {
       s.md = slideToMd(s, kind);
       s.kw = slideKeywords(s);
@@ -563,6 +574,7 @@ class AgentService extends EventEmitter {
     fileRow.vec = mean([...slides.map((s) => s.vec), hashVector(name.replace(/\.[^.]+$/, ''))]) || hashVector(name);
     const metaTokens = tokenize(`${name} ${path.basename(path.dirname(file))}`).join(' ');
     let fileId;
+    checkPause();
     this.emitProgress(taskId, { stage: 'store', file, slides: slides.length });
     this.store.tx(() => {
       if (existing) this.store.deleteSlidesOf(existing.id);

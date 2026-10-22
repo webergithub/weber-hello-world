@@ -194,7 +194,8 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   svc.setConfig({ thumbnails: 'off' });
   const done = (id, st) => new Promise((res) => svc.on('task', (t) => { if (t.id === id && st.includes(t.status) && t.finished_at) res(t); }));
   const id = svc.addTask(lib);
-  svc.on('progress', (p) => { if (p.taskId === id && p.stage === 'file' && p.index === 3) svc.pauseTask(id); });
+  let pausedOnce = false;
+  svc.on('progress', (p) => { if (!pausedOnce && p.taskId === id && p.stage === 'file' && p.index === 3) { pausedOnce = true; svc.pauseTask(id); } });
   svc.startTask(id);
   const t1 = await done(id, ['paused']);
   assert.match(t1.message, /已中断/);
@@ -202,7 +203,7 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   svc.on('progress', (p) => { if (p.taskId === id && p.stage === 'file' && first === null) first = p.index; });
   svc.resumeTask(id);
   const t2 = await done(id, ['done']);
-  assert.strictEqual(first, 4, '应从第 4 个文件继续');
+  assert.strictEqual(first, 3, '暂停时正在解析的第 3 个文件应在继续时重新解析');
   assert.ok(t2.parsed >= 8);
   // 回收站
   const f = svc.library().find((x) => x.name.includes('A-CDM'));

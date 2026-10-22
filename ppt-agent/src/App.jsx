@@ -18,6 +18,7 @@ import SlideViewer, { clearFileCache } from './components/SlideViewer';
 import CompareView, { COMPARE_MAX } from './components/CompareView';
 import { WatchAskDialog } from './components/WatchSettings';
 import { clearRelatedCache } from './components/RelatedRail';
+import { Tour, WelcomeDialog, HelpView } from './components/Guide';
 
 const BASKET_KEY = 'ppta.basket';
 const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_KEY) || '[]'); } catch { return []; } };
@@ -50,7 +51,16 @@ function reduceProgress(prev, e) {
 }
 
 export default function App() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsedState] = useState(() => readLS('ppta.sbCollapsed', '0') === '1');
+  const setCollapsed = (v) => { setCollapsedState(v); try { localStorage.setItem('ppta.sbCollapsed', v ? '1' : '0'); } catch { /* ignore */ } };
+  // 侧栏分区（解析任务 / 功能 / 智能模块）可单独折叠，状态记忆
+  const [folded, setFolded] = useState(() => { try { return JSON.parse(readLS('ppta.sbFolded', '{}')); } catch { return {}; } });
+  const fold = (k) => setFolded((f) => { const n = { ...f, [k]: !f[k] }; try { localStorage.setItem('ppta.sbFolded', JSON.stringify(n)); } catch { /* ignore */ } return n; });
+  const secHead = (k, label, short) => (
+    <div className={`sb-section fold ${folded[k] ? 'folded' : ''}`} onClick={() => fold(k)} title={folded[k] ? '展开' : '折叠'}>
+      {collapsed ? (folded[k] ? '▸' : short || '▾') : <><span className="caret">{folded[k] ? '▸' : '▾'}</span>{label}</>}
+    </div>
+  );
   const [view, setView] = useState({ type: 'search' });
   const [tasks, setTasks] = useState([]);
   const [liveTasks, setLiveTasks] = useState({});
@@ -62,6 +72,8 @@ export default function App() {
   const [modal, setModal] = useState(null);
   const [compare, setCompare] = useState(null);
   const [askWatch, setAskWatch] = useState(null);
+  const [welcome, setWelcome] = useState(false);
+  const [tour, setTour] = useState(false);
   const [config, setConfig] = useState(null);
   const [libMode, setLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
@@ -86,7 +98,7 @@ export default function App() {
 
   useEffect(() => {
     refreshTasks(); reloadLogs();
-    api.getConfig().then((c) => { setConfig(c); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
+    api.getConfig().then((c) => { setConfig(c); if (c.welcome !== 'never') setWelcome(true); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
     api.systemTheme().then(setSysTheme).catch(() => {});
     const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
     const onMq = () => setSysTheme(mq.matches ? 'light' : 'dark');
@@ -165,6 +177,13 @@ export default function App() {
     setModal(null);
     setCompare({ fileIds: ids.slice(0, COMPARE_MAX), starts });
   };
+  const startTour = () => { setModal(null); setCompare(null); setWelcome(false); setTour(true); };
+  const onWelcomeClose = async ({ again, next }) => {
+    setWelcome(false);
+    try { setConfig(await api.setConfig({ welcome: again ? 'always' : 'never' })); } catch { /* ignore */ }
+    if (next === 'tour') startTour();
+    else if (next === 'help') setView({ type: 'help' });
+  };
   const ctx = {
     tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
     exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
@@ -197,7 +216,7 @@ export default function App() {
             {!collapsed && <div className="logo">PPT<span>智能体</span></div>}
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
-          <div className="add-wrap">
+          <div className="add-wrap" data-tour="add">
             <button className="btn primary add-btn" onClick={addDir} title="添加目录（添加后手动开始解析）">＋{collapsed ? '' : ' 添加目录'}</button>
             {!collapsed && <button className="btn primary add-more" onClick={() => setAddMenu(!addMenu)} title="更多添加方式">▾</button>}
             {addMenu && (
@@ -207,8 +226,8 @@ export default function App() {
               </div>
             )}
           </div>
-          <div className="sb-section">{!collapsed && '解析任务'}</div>
-          <div className="sb-tasks">
+          {secHead('tasks', `解析任务${tasks.length ? `（${tasks.length}）` : ''}`, '')}
+          {!folded.tasks && <div className="sb-tasks" data-tour="tasks">
             {!tasks.length && !collapsed && <div className="muted small pad">还没有任务，点击上方按钮添加目录</div>}
             {tasks.map((t) => {
               const live = liveTasks[t.id];
@@ -226,7 +245,7 @@ export default function App() {
                     <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); (t.status === 'draft' ? api.startTask(t.id) : api.resumeTask(t.id)).then(refreshTasks); setView({ type: 'monitor', tab: 'live', taskId: t.id }); }}>▶</button>
                   )}
                   {!collapsed && t.status === 'running' && (
-                    <button className="icon-btn tiny pause" title="中断（可继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
+                    <button className="icon-btn tiny pause" title="暂停（可从断点继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
                   )}
                   {!collapsed && !['running', 'pending'].includes(t.status) && (
                     <button className="icon-btn tiny" title="删除任务（解析历史保留）" onClick={async (e) => {
@@ -238,11 +257,11 @@ export default function App() {
                 </div>
               );
             })}
-          </div>
-          <div className="sb-section">{!collapsed && '功能'}</div>
-          {nav.map((n) => (
+          </div>}
+          {secHead('nav', '功能', '')}
+          {!folded.nav && nav.map((n) => (
             <React.Fragment key={n.key}>
-              <div className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
+              <div className={`sb-item ${view.type === n.key ? 'active' : ''}`} data-tour={`nav-${n.key}`} onClick={() => setView({ type: n.key })} title={n.label}>
                 <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
               </div>
               {n.key === 'monitor' && view.type === 'monitor' && (
@@ -252,13 +271,16 @@ export default function App() {
               )}
             </React.Fragment>
           ))}
-          <div className="sb-section">{!collapsed ? '智能模块（建设中）' : '智能'}</div>
-          {smartNav.map((n) => (
+          {secHead('smart', '智能模块（建设中）', '智能')}
+          {!folded.smart && smartNav.map((n) => (
             <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
               <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label} <span className="wip">建设中</span></span>}
             </div>
           ))}
           <div className="spacer" />
+          <div className={`sb-theme sb-help ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南：功能详解、快捷键、新手指引" onClick={() => setView({ type: 'help' })}>
+            <span className="ic">❓</span>{!collapsed && <span>帮助指南</span>}
+          </div>
           <div className="sb-theme" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
             <span className="ic">{themeIcon[themeMode]}</span>{!collapsed && <span>主题：{{ system: '跟随系统', dark: '黑色', light: '白色' }[themeMode]}</span>}
           </div>
@@ -275,6 +297,7 @@ export default function App() {
           {view.type === 'recycle' && <RecycleView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
+          {view.type === 'help' && <HelpView onTour={startTour} onWelcome={() => setWelcome(true)} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
           {view.type === 'file' && <FileView id={view.id} onBack={() => setView(view.back || { type: 'search' })} />}
         </main>
@@ -292,6 +315,8 @@ export default function App() {
             </div>
           </div>
         )}
+        {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
+        {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setLibMode} onHelp={() => setView({ type: 'help' })} />}
         {askWatch && <WatchAskDialog roots={askWatch.roots} onClose={onAskWatch} />}
         {exporting && <div className="overlay"><div className="spinner-box">正在导出 {exporting.n} 页，请稍候…</div></div>}
         <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}{t.action && <button className="btn tiny" onClick={t.action.run}>{t.action.label}</button>}</div>)}</div>

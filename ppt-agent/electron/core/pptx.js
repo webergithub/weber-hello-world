@@ -632,6 +632,7 @@ async function parsePptx(file, opts = {}) {
         slides.push(s);
         if (opts.onSlide) opts.onSlide(i + 1, info.slides.length, s.title, s);
       } catch (e) {
+        if (e && e.paused) throw e;
         opts.log && opts.log.warn(`第 ${i + 1} 页解析失败: ${file}`, e);
         slides.push({ index: i + 1, part: info.slides[i], title: '', blocks: [], media: [], notes: '', text: '', errors: [e.message], theme: 'light', bg: { lum: 1 }, layout: null });
       }
