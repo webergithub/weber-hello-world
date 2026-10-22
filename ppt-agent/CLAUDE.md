@@ -42,6 +42,7 @@
 - 侧栏顶部冻结：`.sb-top`（logo、帮助、添加目录、解析任务模块）`position: sticky`，其余模块在下方滚动，底部 `.sb-foot` 固定；新加的侧栏模块放在 `.sb-top` 之后。
 - 需要“返回”的跳转用 `app.go({ ..., back: true })`：App 记住当前视图放进 `view.back`，目标页（任务概览、解析过程）左上角显示“← 返回”；从侧栏直接打开时没有 `back`。
 - 设置分 5 个页签（`SettingsView` 的 `SET_TABS`：常规 / 界面与快捷键 / 反馈邮件 / 大模型与语义向量 / 目录与数据），`focus`（watch / keys / mail / agent / datadir）经 `FOCUS_TAB` 定位到页签；新设置项放进对应页签。
+- 讲解词小语种只在“设置 → 常规 → 讲解词小语种”配置（`config.minorLangs`，`focus: 'langs'`），讲解词模块直接列出这些语言，不要再在应用中放语言下拉。
 - 智能搜索首页推荐词与输入框示例由 `searchSuggestions` 从已导入文档的标签生成，不要写死示例词。
 - 智能搜索范围用 `taskIds`（多选的已执行任务，空 = 所有资料库），前端记在 `ppta.searchScope`；`search_history.task_ids` 记录每次范围。
 - 转换规则设置的新增规则：已保存的自定义规则与“新增规则”草稿区分开；草稿区默认一条样例（`sampleRule`），`untouchedSample` 判断与样例完全相同的行，保存（“💾 保存新增的规则” / “保存规则”）时一律忽略；保存新增后草稿区重置为一条样例。

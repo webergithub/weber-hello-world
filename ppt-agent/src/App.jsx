@@ -116,6 +116,7 @@ export default function App() {
     // back: true 表示记住当前视图，目标页左上角显示“← 返回”回到这里（如从“全部任务与历史”查看某个任务）
     const back = v && v.back === true ? view : v && v.back;
     if (v && v.type === 'help' && view.type !== 'help') helpPrev.current = view;
+    if (v && v.type === 'settings' && view.type !== 'settings') prevView.current = view; // 从其他页面“去设置”后，收起设置回到原页面
     if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live', back }); return; }
     if (v && v.type === 'task' && v.id) { setCurTask(v.id); setTaskMenu(true); setViewState({ type: 'task', back }); return; }
     if (v && v.type === 'library') { setViewState({ type: 'alllib' }); return; }

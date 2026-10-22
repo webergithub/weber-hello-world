@@ -128,8 +128,9 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
   const [edit, setEdit] = useState(false);
   const [val, setVal] = useState('');
   const [lang, setLang] = useState('src');
-  const minor = (app.config && app.config.minorLangs && app.config.minorLangs.length ? app.config.minorLangs : MINOR_DEFAULT);
-  const [minorLang, setMinorLang] = useState(minor[0]);
+  // 小语种在“设置 → 常规 → 讲解词小语种”统一配置，这里直接列出可选
+  const minor = (app.config && Array.isArray(app.config.minorLangs) ? app.config.minorLangs : MINOR_DEFAULT).filter((k) => LANG_NAMES[k]);
+  useEffect(() => { if (!['src', 'zh', 'en', ...minor].includes(lang)) setLang('src'); }, [minor.join(',')]);
   const [tr, setTr] = useState(null);
   const [tick, setTick] = useState(0);
   useEffect(() => { setEdit(false); }, [slide.id]);
@@ -171,14 +172,11 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
         {edit && <><button className="btn tiny primary" onClick={() => saveFinal(val, '修正讲解词已保存')}>保存</button><button className="btn tiny" onClick={() => setEdit(false)}>取消</button></>}
       </div>
       <div className="lang-bar">
-        <span className="muted small">语言</span>
-        <div className="seg small">
+        <div className="seg small" title="讲解词语言">
           {[['src', '原文'], ['zh', '中文'], ['en', 'English']].map(([k, v]) => <button key={k} className={lang === k ? 'on' : ''} onClick={() => setLang(k)}>{v}</button>)}
-          <button className={!['src', 'zh', 'en'].includes(lang) ? 'on' : ''} onClick={() => setLang(minorLang)} title="小语种（可在右侧选择）">小语种</button>
+          {minor.map((k) => <button key={k} className={lang === k ? 'on' : ''} onClick={() => setLang(k)}>{LANG_NAMES[k]}</button>)}
         </div>
-        <select className="input tiny" value={minorLang} title="选择小语种" onChange={(e) => { setMinorLang(e.target.value); setLang(e.target.value); }}>
-          {Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').sort((a, b) => (minor.includes(b[0]) - minor.includes(a[0]))).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-        </select>
+        <button className="btn tiny ghost" title="在设置中配置小语种" onClick={() => app.go({ type: 'settings', focus: 'langs' })}>⚙</button>
         {lang !== 'src' && tr && tr.text && !tr.same && (
           <span className="tr-meta small">
             🌐 {LANG_NAMES[lang]} 译文{tr.source ? ` · ${tr.source}` : ''} · {tr.writtenBack ? <span className="ok-fg">已写入 PPT 备注</span> : <span className="muted">保存在应用知识库</span>}
@@ -190,7 +188,7 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
       </div>
       {edit ? <textarea className="pane-edit" value={val} onChange={(e) => setVal(e.target.value)} autoFocus />
         : lang !== 'src' && tr && tr.loading ? <div className="pane-body notes muted">正在调用 Agent 接口翻译为 {LANG_NAMES[lang]}…</div>
-          : lang !== 'src' && tr && tr.error ? <div className="pane-body notes"><div className="notice danger" style={{ margin: 0 }}>{tr.error}{/Agent 接口/.test(tr.error) && <> <span className="link" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>去设置</span></>}</div></div>
+          : lang !== 'src' && tr && tr.error ? <div className="pane-body notes"><div className={`notice ${/单机版/.test(tr.error) ? "" : "danger"}`} style={{ margin: 0 }}>{tr.error}{/Agent 接口/.test(tr.error) && <> <span className="link" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>去设置</span></>}</div></div>
             : <div className="pane-body notes" dangerouslySetInnerHTML={{ __html: showing ? highlight(esc(showing), terms) : `<span class="muted">${empty}</span>` }} />}
     </div>
   );

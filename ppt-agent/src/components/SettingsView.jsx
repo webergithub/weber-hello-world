@@ -19,7 +19,7 @@ const LLM_PRESETS = [
 ];
 
 const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
-const FOCUS_TAB = { watch: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const FOCUS_TAB = { watch: 'general', langs: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
 
 export default function SettingsView({ focus }) {
@@ -28,6 +28,7 @@ export default function SettingsView({ focus }) {
   const watchRef = useRef(null);
   const agentRef = useRef(null);
   const mailRef = useRef(null);
+  const langRef = useRef(null);
   const [mailBusy, setMailBusy] = useState(false);
   const [fbSt, setFbSt] = useState(null);
   useEffect(() => { api.feedbackStatus().then(setFbSt).catch(() => {}); }, []);
@@ -43,7 +44,7 @@ export default function SettingsView({ focus }) {
   const [tab, setTab] = useState(() => FOCUS_TAB[focus] || LAST_TAB.k || 'general');
   const pickTab = (k) => { LAST_TAB.k = k; setTab(k); };
   useEffect(() => { if (FOCUS_TAB[focus]) pickTab(FOCUS_TAB[focus]); }, [focus]);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'langs' ? langRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
   if (!cfg) return null;
   const offline = !!cfg.offlineOnly;
   const set = (patch) => setCfg({ ...cfg, ...patch });
@@ -108,6 +109,14 @@ export default function SettingsView({ focus }) {
           <div className="row"><label>内容相似阈值</label><input className="input" type="number" step="0.01" min="0.5" max="0.99" value={cfg.similarityThreshold} onChange={(e) => set({ similarityThreshold: Number(e.target.value) })} /></div>
           <div className="row"><label /><button className="btn" onClick={async () => { await save(); await api.rebuild(); app.bump(); app.toast('已重新计算标签、分组与黑白底对应关系'); }}>重新计算标签 / 分组 / 黑白底对应</button></div>
         </section>
+          <section ref={langRef} className={focus === 'langs' ? 'flash-sec' : ''}>
+            <h3>讲解词小语种</h3>
+            <div className="row wrap">{Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').map(([k, v]) => {
+              const cur = Array.isArray(cfg.minorLangs) ? cfg.minorLangs : [];
+              const on = cur.includes(k);
+              return <label key={k} className={`type-chip small ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => { const next = on ? cur.filter((x) => x !== k) : [...cur, k]; setCfg((c) => ({ ...c, minorLangs: next })); saveNow({ minorLangs: next }, `${on ? '已移除' : '已添加'}小语种：${v}`); }} />{v}</label>;
+            })}</div>
+          </section>
         </>}
         {tab === 'ui' && <>
         <section>
@@ -162,14 +171,6 @@ export default function SettingsView({ focus }) {
             <button className="btn" onClick={async () => { try { const r = await api.testLlm(cfg.llm); app.toast(`连接成功（${r.ms}ms）：${r.reply}`); } catch (e) { app.toast('连接失败：' + e.message, 'error'); } }}>测试连接</button></div>
           <div className="row"><label>用于查询解析</label><input type="checkbox" checked={cfg.llm.useForQuery} onChange={(e) => setL({ useForQuery: e.target.checked })} /></div>
           <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析 / 重算标签时调用，每个文件一次）</span></div>
-          <h4>讲解词翻译</h4>
-          <p className="muted small">译文只保存在应用知识库，不会改动原文件；需要时在讲解词模块手动点击“写入 PPT 备注”（确认后先备份再写入）。</p>
-          <div className="row"><label>常用小语种</label>
-            <div className="row wrap" style={{ margin: 0 }}>{Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').map(([k, v]) => {
-              const on = (cfg.minorLangs || []).includes(k);
-              return <label key={k} className={`type-chip small ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => set({ minorLangs: on ? cfg.minorLangs.filter((x) => x !== k) : [...(cfg.minorLangs || []), k] })} />{v}</label>;
-            })}</div>
-          </div>
           <p className="muted small">修改后点击右上角“保存设置”生效。</p>
         </section>
         <section>
