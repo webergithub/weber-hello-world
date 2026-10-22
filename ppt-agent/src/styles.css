@@ -1352,3 +1352,26 @@ body.resizing-v, body.resizing-v * { cursor: ns-resize !important; user-select: 
 .sb-helpbtn { min-width: 66px; white-space: nowrap; text-align: center; }
 .sb-head .logo { white-space: nowrap; flex: none; }
 .sb-head .logo .sb-ver { display: block; margin: 2px 0 0; line-height: 1; vertical-align: baseline; position: static; }
+
+/* v3.1 智能生成：步骤条 + 生成结果（逐页拆解，抬头统一白底 / 黑底） */
+.gen-steps { display: inline-flex; align-items: center; gap: 4px; margin-right: 8px; }
+.gen-steps .gs { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--fg3); padding: 3px 8px; border-radius: 999px; background: var(--bg3); white-space: nowrap; }
+.gen-steps .gs b { width: 16px; height: 16px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; background: var(--bg4); color: var(--fg2); }
+.gen-steps .gs.on { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.gen-steps .gs.on b { background: var(--accent); color: #fff; }
+.gen-steps .gs.done { color: var(--ok); }
+.gen-steps .gs.done b { background: var(--ok); color: #fff; }
+.gen-made { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 12px; overflow: hidden; }
+.gm-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--bg2); box-shadow: var(--sh-sm); }
+.gm-title { font-size: 14px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-out { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: var(--radius); background: var(--accent-soft); font-size: 13px; }
+.gm-out b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gm-pages { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; align-content: start; padding: 2px; }
+.gm-page { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); padding: 8px; display: flex; flex-direction: column; gap: 6px; cursor: default; }
+.gm-page:hover { box-shadow: var(--sh-md); }
+/* 全部任务与历史：任务多选删除 */
+.mon-bar { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; border-bottom: 1px solid var(--line2); position: sticky; top: -8px; background: var(--bg2); z-index: 2; }
+.tc-check { margin: 0; flex: none; }
+/* 智能合成（建设中） */
+.merge-body { gap: 10px; }
+.merge-foot { display: flex; align-items: center; gap: 8px; padding-top: 4px; }

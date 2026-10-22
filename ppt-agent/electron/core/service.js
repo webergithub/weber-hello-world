@@ -323,6 +323,22 @@ class AgentService extends EventEmitter {
     this.log.info(`[任务#${id}] 已删除${removeFiles ? '（同时移除其解析的文件）' : ''}`);
   }
 
+  /** 批量删除任务（全部任务与历史中多选）：解析中 / 排队中的任务跳过；解析历史保留 */
+  deleteTasks(ids, removeFiles = true) {
+    const done = [], skipped = [];
+    for (const id of [...new Set(ids || [])]) {
+      const t = this.store.getTask(id);
+      if (!t) continue;
+      if (this.running === id || this.queue.includes(id)) { skipped.push(id); continue; }
+      if (removeFiles) for (const f of this.store.taskFiles(id)) if (f.id && f.task_id === id) this.store.deleteFile(f.id);
+      this.store.deleteTask(id);
+      this.log.info(`[任务#${id}] 已删除${removeFiles ? '（同时移除其解析的文件）' : ''}`);
+      done.push(id);
+    }
+    if (removeFiles && done.length) this.afterLibraryChange();
+    return { deleted: done, skipped };
+  }
+
   async pump() {
     if (this.running || !this.queue.length) return;
     const id = this.queue.shift();
@@ -1057,7 +1073,7 @@ class AgentService extends EventEmitter {
    * 转换一份 PPT 的全部页面。direction：toLight（黑底页转白底）| toDark（白底页转黑底）| auto（每页黑白互换）
    * outMode：suffix（原目录下，文件名加 _白底 / _黑底 / _黑白互转）| dir（统一输出到 outDir）；同名文件已存在时自动加序号，绝不覆盖原文件
    */
-  async convertFile(src, { direction = 'auto', outMode = 'suffix', outDir = '' } = {}) {
+  async convertFile(src, { direction = 'auto', outMode = 'suffix', outDir = '', themes: knownThemes = null } = {}) {
     const log = logger.child('convert');
     const t0 = Date.now();
     src = path.resolve(src);
@@ -1065,10 +1081,10 @@ class AgentService extends EventEmitter {
     if (/\.ppt$/i.test(src)) throw new Error('旧版 .ppt 请先用 PowerPoint 另存为 .pptx 后再转换');
     if (outMode === 'dir' && !outDir) throw new Error('请先选择输出目录');
     // 每页的底色：资料库中已解析且未修改的直接使用，否则临时解析一次
-    let themes;
+    let themes = Array.isArray(knownThemes) && knownThemes.length ? knownThemes : null;
     const f = this.store.fileByPath(src);
     const st = fs.statSync(src);
-    if (f && f.status === 'parsed' && Math.abs((f.mtime || 0) - st.mtimeMs) < 2000) themes = this.store.slidesOf(f.id).map((s) => s.theme);
+    if (themes) { /* 调用方已知每页底色（如智能生成：沿用资料库中源页面的底色） */ } else if (f && f.status === 'parsed' && Math.abs((f.mtime || 0) - st.mtimeMs) < 2000) themes = this.store.slidesOf(f.id).map((s) => s.theme);
     else {
       const tmpMedia = path.join(this.cacheDir, 'convert', `probe-${Date.now()}`);
       try { themes = (await parsePptx(src, { mediaDir: tmpMedia, mediaKey: 'probe', log })).slides.map((s) => s.theme); } finally { fs.rmSync(tmpMedia, { recursive: true, force: true }); }
@@ -1172,6 +1188,15 @@ class AgentService extends EventEmitter {
   }
 
   /** 生成 PPT：可选统一底色（不一致的页按黑白底互转规则转换） */
+  /** 智能生成第二步：把生成的新 PPT 统一为白底 / 黑底，另存为 *_白底 / *_黑底（生成的 PPT 与原 PPT 都不改） */
+  async unifyDeck(pptPath, slideIds, theme) {
+    if (theme !== 'light' && theme !== 'dark') throw new Error('请选择统一为白底或黑底');
+    const byId = new Map(this.store.getSlides(slideIds || []).map((s) => [s.id, s]));
+    // 生成时 Word / PDF 页面会被跳过：只按 PPT 页面的顺序对应新 PPT 的每一页
+    const pages = (slideIds || []).map((id) => byId.get(id)).filter((x) => x && ((this.store.getFile(x.file_id) || {}).kind || 'ppt') === 'ppt');
+    const themes = pages.map((x) => x.theme);
+    return this.convertFile(pptPath, { direction: theme === 'light' ? 'toLight' : 'toDark', outMode: 'suffix', themes: themes.length ? themes : null });
+  }
   async generateDeck(slideIds, outPath, { unifyTheme = 'none' } = {}) {
     // 第一步：把选择的页面生成新 PPT（保持原样）
     const base = await this.exportSlides(slideIds, outPath, { includeNotes: true });

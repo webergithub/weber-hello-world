@@ -209,8 +209,10 @@ app.whenReady().then(async () => {
     convertHistory: () => service.convertHistory(),
     listPptx: (paths) => service.listPptx(paths),
     convertFile: (src, opts) => service.convertFile(src, opts),
-    selectFiles: async (title) => {
-      const r = await dialog.showOpenDialog(win, { title: title || '选择 PPT 文件', properties: ['openFile', 'multiSelections'], filters: [{ name: 'PowerPoint', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt'] }] });
+    selectFiles: async (title, kind) => {
+      // kind = 'docs'：PPT / Word / PDF 都可选（智能合成）；默认只选 PPT
+      const filters = kind === 'docs' ? [{ name: 'PPT / Word / PDF', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt', 'docx', 'docm', 'doc', 'pdf'] }] : [{ name: 'PowerPoint', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt'] }];
+      const r = await dialog.showOpenDialog(win, { title: title || '选择 PPT 文件', properties: ['openFile', 'multiSelections'], filters });
       return r.canceled ? [] : r.filePaths;
     },
     notesChanges: () => service.notesChanges(),
@@ -226,6 +228,7 @@ app.whenReady().then(async () => {
     purgeRecycled: (ids) => service.purgeRecycled(ids),
     generateNotes: (id) => service.generateNotes(id),
     getConvertRules: () => service.getConvertRules(),
+    unifyDeck: (p, ids, theme) => service.unifyDeck(p, ids, theme),
     defaultConvertRules: () => require('./core/converter').normalizeRules(null),
     setConvertRules: (r) => service.setConvertRules(r),
     resetConvertRules: () => service.resetConvertRules(),
@@ -269,6 +272,7 @@ app.whenReady().then(async () => {
     rerunTask: (id) => service.rerunTask(id),
     cancelTask: (id) => service.cancelTask(id),
     deleteTask: (id, removeFiles) => service.deleteTask(id, removeFiles),
+    deleteTasks: (ids, removeFiles) => service.deleteTasks(ids, removeFiles),
     taskDetail: (id) => service.taskDetail(id),
     library: (opts) => service.library(opts),
     fileDetail: (id) => service.fileDetail(id),

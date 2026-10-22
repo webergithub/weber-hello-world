@@ -43,12 +43,31 @@ function QueuePanel({ initial, onLive }) {
   const cur = sel || runningId || (tasks[0] && tasks[0].id);
   const queued = tasks.filter((t) => t.queuePos > 0).sort((a, b) => a.queuePos - b.queuePos);
   const others = tasks.filter((t) => !(t.queuePos > 0));
+  // 任务删除统一在这里：多选后删除（解析中 / 排队中的任务不能删除），删除前确认
+  const [checked, setChecked] = useState(() => new Set());
+  const deletable = (t) => !['running', 'pending'].includes(t.status) && !(t.queuePos > 0);
+  const picked = tasks.filter((t) => checked.has(t.id) && deletable(t));
+  const toggleCheck = (id) => setChecked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  const allOn = tasks.some(deletable) && tasks.filter(deletable).every((t) => checked.has(t.id));
+  const delPicked = async () => {
+    if (!picked.length) return;
+    const names = picked.slice(0, 8).map((t) => `#${t.id} ${t.name}`).join('\n') + (picked.length > 8 ? `\n… 共 ${picked.length} 个` : '');
+    if (!confirm(`删除以下 ${picked.length} 个任务？\n\n${names}\n\n这些任务解析的文件会从资料库移除（原文件不受影响），解析历史记录会保留。`)) return;
+    try {
+      const r = await api.deleteTasks(picked.map((t) => t.id), true);
+      setChecked(new Set());
+      if (r.deleted.includes(LAST_SEL.id)) setSel(null);
+      app.refreshTasks(); app.bump();
+      app.toast(`已删除 ${r.deleted.length} 个任务${r.skipped.length ? `；${r.skipped.length} 个正在解析或排队，未删除` : ''}`, 'info', { cat: '解析任务' });
+    } catch (e) { app.toast(e.message, 'error'); }
+  };
   const card = (t) => {
     const live = app.progress[t.id];
     const done = t.parsed + t.skipped + t.duplicate + t.failed;
     return (
       <div key={t.id} className={`task-card ${cur === t.id ? 'active' : ''}`} onClick={() => setSel(t.id)}>
         <div className="tc-head">
+          <input type="checkbox" className="tc-check" checked={checked.has(t.id)} disabled={!deletable(t)} title={deletable(t) ? '选择后可批量删除' : '解析中 / 排队中的任务不能删除'} onClick={(e) => e.stopPropagation()} onChange={() => toggleCheck(t.id)} />
           <span className={`dot s-${t.status}`} />
           <b className="link" title="查看任务概览" onClick={(e) => { e.stopPropagation(); setSel(t.id); app.go({ type: 'task', id: t.id, back: true }); }}>#{t.id} {t.name}</b>
           <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status] || t.status}{t.queuePos > 0 ? ` · 第 ${t.queuePos} 位` : ''}</span>
@@ -77,6 +96,14 @@ function QueuePanel({ initial, onLive }) {
   return (
     <div className="monitor">
       <div className="mon-list">
+        {tasks.length > 0 && (
+          <div className="mon-bar">
+            <label className="chk"><input type="checkbox" checked={allOn} onChange={() => setChecked(allOn ? new Set() : new Set(tasks.filter(deletable).map((t) => t.id)))} /> 全选</label>
+            {picked.length > 0 && <span className="badge">已选 {picked.length}</span>}
+            <div className="spacer" />
+            <button className="btn small danger-btn" disabled={!picked.length} onClick={delPicked}>🗑 删除所选{picked.length ? `（${picked.length}）` : ''}</button>
+          </div>
+        )}
         {!tasks.length && <div className="empty-tip">还没有任务。点击左上角“＋ 添加目录”（或其下拉菜单中的“添加所有本地文档”）。</div>}
         {queued.length > 0 && <div className="side-title">排队中（{queued.length}）</div>}
         {queued.map(card)}

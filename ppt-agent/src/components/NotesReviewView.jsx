@@ -71,7 +71,7 @@ export default function NotesReviewView() {
     { key: 'kind', label: '类型', render: (h) => (h.kind === 'final' ? '修正讲解词' : `译文 · ${h.lang}`) },
     { key: 'before', label: '写回前', nofilter: true, className: 'small muted', render: (h) => clip(h.before) },
     { key: 'after', label: '写回内容', nofilter: true, className: 'small', render: (h) => clip(h.after) },
-    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (h) => <><button className="btn tiny" onClick={() => api.openPath(h.path)}>打开原文件</button>{h.backup && <button className="btn tiny" title="在资源管理器中显示写回前的备份文件" onClick={() => api.showItem(h.backup)}>📂 备份</button>}</> },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (h) => <><button className="btn tiny" title={h.path} onClick={() => api.openPath(h.path)}>打开刷新文件</button><button className="btn tiny" disabled={!h.backup} title={h.backup || '没有备份'} onClick={() => api.openPath(h.backup)}>打开原文件</button></> },
   ];
   return (
     <div className="view">

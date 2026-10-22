@@ -15,6 +15,7 @@ import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
+import MergeView from './components/MergeView';
 import AnalyticsView from './components/AnalyticsView';
 import RecycleView from './components/Recycle';
 import SettingsView from './components/SettingsView';
@@ -331,6 +332,7 @@ export default function App() {
     { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
+    { key: 'merge', icon: '🧬', label: '智能合成', wip: true },
   ];
   // 点击任务：选中并在任务下方展开“任务详情”菜单（任务概览 / 解析过程）；再次点击已选中的任务收起菜单
   const selectTask = (t) => {
@@ -409,13 +411,6 @@ export default function App() {
                     {t.status === 'running' && (
                       <button className="icon-btn tiny pause" title="暂停（可从断点继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
                     )}
-                    {!['running', 'pending'].includes(t.status) && (
-                      <button className="icon-btn tiny del" title="删除任务（解析历史保留）" onClick={async (e) => {
-                        e.stopPropagation();
-                        if (!confirm(`删除任务 #${t.id}「${t.name}」？\n\n该任务解析的文件会从资料库移除，解析历史记录会保留。`)) return;
-                        await api.deleteTask(t.id, true); refreshTasks(); bump();
-                      }}>✕</button>
-                    )}
                   </div>}
                   {!collapsed && <span className="sbt-caret" title={on && taskMenu ? '收起任务详情菜单' : '展开任务详情菜单'}>{on && taskMenu ? '▾' : '▸'}</span>}
                 </div>
@@ -465,6 +460,7 @@ export default function App() {
           {view.type === 'notices' && <NoticesView />}
           {view.type === 'notesreview' && <NotesReviewView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
+          {view.type === 'merge' && <MergeView />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
