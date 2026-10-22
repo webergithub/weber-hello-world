@@ -1,11 +1,12 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, fmtSize, THEME_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
 import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
 import RelatedRail from './RelatedRail';
-import ZoomStage, { FIT } from './ZoomStage';
+import ZoomStage, { FIT, zoomBy } from './ZoomStage';
+import { useKeymap, comboOf, isTyping } from '../keymap';
 
 const slideCache = new Map();
 export async function loadSlide(id) {
@@ -21,6 +22,8 @@ const WS_LAYOUT = { mode: 'tb', slots: ['slide', 'notes', 'md'], main: 58, sub: 
 // 主视图：左 文件列表 · 中 页面列表（可多选）· 右 PPT 原始页 + 备注讲解词 + 解析 Markdown
 export default function SlideWorkspace({ files, initialFileId, initialSlideId, emptyText = '暂无已解析的 PPT', highlight = [] }) {
   const app = useApp();
+  const keys = useKeymap();
+  const root = useRef(null);
   const [filter, setFilter] = useState('');
   const [fileId, setFileId] = useState(initialFileId || null);
   const [detail, setDetail] = useState(null);
@@ -102,9 +105,6 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
     setSelected(next);
   };
   const onKey = (e) => {
-    const i = slides.findIndex((s) => s.id === slideId);
-    if (e.key === 'ArrowDown' && i < slides.length - 1) { setSlideId(slides[i + 1].id); e.preventDefault(); }
-    if (e.key === 'ArrowUp' && i > 0) { setSlideId(slides[i - 1].id); e.preventDefault(); }
     if (e.key === ' ' && slide) { toggle(slide); e.preventDefault(); }
   };
   const goCounterpart = (cp) => { setFileId(cp.fileId); setSlideId(cp.id); };
@@ -115,6 +115,33 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
     setFileId(it.file_id); setSlideId(it.id);
   };
   const goBack = () => { const last = back[back.length - 1]; if (!last) return; setBack(back.slice(0, -1)); setFileId(last.fileId); setSlideId(last.slideId); };
+  // 打开文件详情后（不进入逐页浏览）也可以直接翻页：↑ ↓ ← → / PgUp PgDn 翻页，Home / End 首末页，Shift + 方向键跳 5 页，滚轮翻页；按键可在设置中自定义
+  const goPage = useCallback((d, abs = null) => {
+    if (!slides.length) return;
+    const i = Math.max(0, slides.findIndex((s) => s.id === slideId));
+    const j = abs !== null ? (abs < 0 ? slides.length - 1 : abs) : Math.max(0, Math.min(slides.length - 1, i + d));
+    if (slides[j] && slides[j].id !== slideId) setSlideId(slides[j].id);
+  }, [slides, slideId]);
+  useEffect(() => {
+    const k = (e) => {
+      if (isTyping(e.target) || app.modalOpen || document.querySelector('.overlay')) return;
+      if (!root.current || !root.current.offsetParent) return; // 本工作区不可见（如在其他页签）
+      const c = comboOf(e);
+      const action = c && keys.lut.get(c);
+      const map = { next: 1, nextFile: 1, prev: -1, prevFile: -1, next5: 5, prev5: -5, nextFile5: 5, prevFile5: -5 };
+      if (action in map) goPage(map[action]);
+      else if (action === 'first' || action === 'firstFile') goPage(0, 0);
+      else if (action === 'last' || action === 'lastFile') goPage(0, -1);
+      else if (action === 'zoomIn') setZoom((z) => zoomBy(z, 1.25));
+      else if (action === 'zoomOut') setZoom((z) => zoomBy(z, 1 / 1.25));
+      else if (action === 'zoomFit') setZoom(FIT);
+      else if (action === 'back' && back.length) goBack();
+      else return;
+      e.preventDefault(); e.stopPropagation();
+    };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  }, [goPage, keys, app.modalOpen, back]);
   // 连续点了多个推荐后，一步回到最初的那一页
   const goOrigin = () => { const first = back[0]; if (!first) return; setBack([]); setFileId(first.fileId); setSlideId(first.slideId); };
   const outside = detail && !files.some((f) => f.id === detail.file.id);
@@ -123,7 +150,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
   const isWord = unit === '节';
 
   return (
-    <div className="workspace" data-open-files={files.map((f) => f.id).join(',')}>
+    <div ref={root} className="workspace" data-open-files={files.map((f) => f.id).join(',')}>
       <div className="ws-toolbar">
         <input className="input" placeholder="筛选文件 / 目录 / 标签" value={filter} onChange={(e) => setFilter(e.target.value)} style={{ width: 220 }} />
         <span className="muted">共 {visible.length} 个文件</span>
@@ -217,7 +244,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                   ),
                   body: (
                     <div className="ws-stage" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>
-                      {isWord ? <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /> : <ZoomStage view={zoom} setView={setZoom}><SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /></ZoomStage>}
+                      {isWord ? <SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /> : <ZoomStage view={zoom} setView={setZoom} onWheelPage={(d) => goPage(d)}><SlidePreview slide={slide} file={detail && detail.source} full highlight={highlight} /></ZoomStage>}
                       {slide.media && slide.media.length > 0 && (
                         <div className="media-list">
                           {slide.media.map((m, i) => (

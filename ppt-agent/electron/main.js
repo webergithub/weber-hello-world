@@ -131,12 +131,24 @@ async function confirmQuit(skipAsk = false) {
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 
+// 启动时是否询问数据目录：未勾选“记住选择”且不是刚刚主动切换目录后的重启；记录使用过的目录（最多 10 个）
+let askDataDirNow = false;
+function noteDataDir(dir) {
+  const b = readBootstrap();
+  const hist = [path.resolve(dir), ...(b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(dir))].slice(0, 10);
+  askDataDirNow = (!process.env.PPTA_DATA_DIR || process.env.PPTA_ASK_DIR === '1') && b.askDataDir !== false && !b.skipAskOnce;
+  const { skipAskOnce, ...rest } = b; // eslint-disable-line no-unused-vars
+  try { writeBootstrap({ ...rest, dataDirHistory: hist }); } catch { /* ignore */ }
+}
+
 app.whenReady().then(async () => {
   const dataDir = resolveDataDir();
+  noteDataDir(dataDir);
   logger = require('./core/logger');
   const { AgentService } = require('./core/service');
   service = new AgentService(dataDir);
   logger.child('app').info(`PPT智能体 v${app.getVersion()} 启动（Electron ${process.versions.electron}，${process.platform}）`);
+  setTimeout(() => service.flushFeedback().catch(() => {}), 15000);
 
   protocol.handle('ppta', (req) => {
     const u = new URL(req.url);
@@ -180,6 +192,9 @@ app.whenReady().then(async () => {
     overview: () => service.overview(),
     docTypes: () => service.docTypes(),
     convertSlides: (items, out) => service.convertSlides(items, out),
+    convertHistory: () => service.convertHistory(),
+    convertHistoryResult: (id) => service.convertHistoryResult(id),
+    convertHistoryDelete: (ids) => service.convertHistoryDelete(ids),
     smartCandidates: (desc, opts) => service.smartCandidates(desc, opts),
     updateSlideText: (id, f) => service.updateSlideText(id, f),
     recycleFiles: (ids, opts) => service.recycleFiles(ids, opts),
@@ -196,7 +211,17 @@ app.whenReady().then(async () => {
     localRoots: () => require('./core/service').localRoots(),
     systemTheme: () => (nativeTheme.shouldUseDarkColors ? 'dark' : 'light'),
     setUiTheme: (t) => { applyTheme(t); return service.setConfig({ uiTheme: t }); },
-    dataDirInfo: () => ({ current: service.dataDir, bootstrap: readBootstrap().dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null }),
+    dataDirInfo: () => {
+      const b = readBootstrap();
+      const history = (b.dataDirHistory || []).map((d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')), current: path.resolve(d) === path.resolve(service.dataDir) }));
+      return { current: service.dataDir, bootstrap: b.dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null, history, ask: b.askDataDir !== false, askNow: askDataDirNow };
+    },
+    setDataDirAsk: (ask) => { writeBootstrap({ ...readBootstrap(), askDataDir: !!ask }); askDataDirNow = false; return true; },
+    dataDirAsked: () => { askDataDirNow = false; return true; },
+    removeDataDirHistory: (dir) => { const b = readBootstrap(); writeBootstrap({ ...b, dataDirHistory: (b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(dir)) }); return true; },
+    sendFeedback: (fb) => service.sendFeedback(fb, { version: app.getVersion() }),
+    feedbackStatus: () => service.feedbackStatus(),
+    testMail: (mail) => service.testMail(mail),
     setDataDir: async (dir, mode) => {
       // mode: 'migrate' 迁移现有数据 | 'use' 直接使用目标目录（已有数据则沿用）
       if (!dir) throw new Error('请选择目录');
@@ -213,11 +238,11 @@ app.whenReady().then(async () => {
         service.close();
         for (const f of fs.readdirSync(cur)) fs.cpSync(path.join(cur, f), path.join(dir, f), { recursive: true });
       }
-      writeBootstrap({ ...readBootstrap(), dataDir: dir });
+      writeBootstrap({ ...readBootstrap(), dataDir: dir, skipAskOnce: true });
       setTimeout(() => { app.relaunch(); app.exit(0); }, 300);
       return { changed: true, restarting: true };
     },
-    resetDataDir: () => { const b = readBootstrap(); delete b.dataDir; writeBootstrap(b); setTimeout(() => { app.relaunch(); app.exit(0); }, 300); return true; },
+    resetDataDir: () => { const b = readBootstrap(); delete b.dataDir; b.skipAskOnce = true; writeBootstrap(b); setTimeout(() => { app.relaunch(); app.exit(0); }, 300); return true; },
     rerunTask: (id) => service.rerunTask(id),
     cancelTask: (id) => service.cancelTask(id),
     deleteTask: (id, removeFiles) => service.deleteTask(id, removeFiles),

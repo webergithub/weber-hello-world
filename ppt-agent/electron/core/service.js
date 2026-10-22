@@ -3,6 +3,8 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const os = require('os');
+const { sendMail } = require('./mailer');
 const { EventEmitter } = require('events');
 const logger = require('./logger');
 const { Store } = require('./db');
@@ -65,7 +67,13 @@ const DEFAULT_CONFIG = {
   keymap: {}, // 浏览窗口快捷键：只保存与默认不同的动作 { 动作: [按键组合] }
   // 定时监测更新：每天 time 对开启监测的任务做增量扫描；catchUp：错过的（程序未运行）在下次启动时补扫
   watch: { enabled: false, time: '12:30', catchUp: true, since: 0, lastRun: 0 },
+  // 鼠标滚轮：page 未放大时滚轮翻页；ctrlZoom Ctrl + 滚轮无级缩放
+  wheel: { page: true, ctrlZoom: true },
+  // 反馈邮件的发件邮箱（用户自行配置，应用不内置账号）；secure：true 为 SSL（465），false 为 STARTTLS（587 / 25）
+  mail: { host: '', port: 465, secure: true, user: '', pass: '', from: '' },
 };
+// 反馈接收地址只在主进程中使用，不传给界面
+const FEEDBACK_TO = 'weber.liuweibo@huawei.com';
 
 class AgentService extends EventEmitter {
   constructor(dataDir) {
@@ -100,7 +108,7 @@ class AgentService extends EventEmitter {
   loadConfig() {
     try {
       const c = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
-      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) } };
+      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
   getConfig() { return this.config; }
@@ -109,7 +117,8 @@ class AgentService extends EventEmitter {
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch };
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) } };
+    if (patch.mail) setImmediate(() => this.flushFeedback().catch(() => {}));
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
     if (patch.docTypes && this.store) setImmediate(() => this.computeRelations().catch((e) => this.log.warn('重算页面关联失败', e)));
@@ -836,11 +845,14 @@ class AgentService extends EventEmitter {
 
   async searchQuery(q, opts = {}) {
     const useLlm = opts.useLlm !== false && this.config.llm.enabled && this.config.llm.useForQuery;
-    const fileIds = opts.taskId ? [...this.taskFileIds(opts.taskId)] : null;
+    // 检索范围：taskIds 为多选的任务（取这些任务解析文件的并集），为空表示所有资料库；taskId 兼容旧的单个任务
+    const taskIds = (opts.taskIds && opts.taskIds.length ? opts.taskIds : opts.taskId ? [opts.taskId] : []).map(Number);
+    const fileIds = taskIds.length ? [...new Set(taskIds.flatMap((id) => [...this.taskFileIds(id)]))] : null;
+    opts = { ...opts, taskIds, taskId: taskIds.length === 1 ? taskIds[0] : null };
     const t0 = Date.now();
     let r;
     try { r = await this.search.search(q, { ...opts, useLlm, fileIds }); } catch (e) {
-      if (opts.record !== false) this.store.db.prepare('INSERT INTO search_history(q, task_id, use_llm, at, ms, status, error) VALUES (?,?,?,?,?,?,?)').run(q, opts.taskId || null, useLlm ? 1 : 0, Date.now(), Date.now() - t0, 'failed', String(e.message || e));
+      if (opts.record !== false) this.store.db.prepare('INSERT INTO search_history(q, task_id, task_ids, use_llm, at, ms, status, error) VALUES (?,?,?,?,?,?,?,?)').run(q, opts.taskId || null, JSON.stringify(taskIds), useLlm ? 1 : 0, Date.now(), Date.now() - t0, 'failed', String(e.message || e));
       throw e;
     }
     logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
@@ -848,11 +860,52 @@ class AgentService extends EventEmitter {
     return r;
   }
 
+  // ---------- 反馈：后台发送到反馈邮箱；发件邮箱未配置或发送失败时先保存在本机，配置好后自动补发 ----------
+  feedbackDir() { const d = path.join(this.dataDir, 'feedback'); fs.mkdirSync(d, { recursive: true }); return d; }
+  mailReady() { const m = this.config.mail || {}; return !!(m.host && m.from); }
+  feedbackStatus() { return { configured: this.mailReady(), queued: fs.readdirSync(this.feedbackDir()).filter((f) => f.endsWith('.json')).length }; }
+  async sendFeedback({ type = '建议', text = '', contact = '', withEnv = true, withLog = false } = {}, appInfo = {}) {
+    if (!String(text).trim()) throw new Error('请填写反馈内容');
+    const at = Date.now();
+    const lines = [`类型：${type}`, `时间：${new Date(at).toLocaleString('zh-CN', { hour12: false })}`, contact ? `联系方式：${contact}` : null, '', String(text).trim(), ''];
+    if (withEnv) lines.push('—— 运行环境 ——', `版本：${appInfo.version || ''}`, `系统：${process.platform} ${os.release()} ${process.arch}`, `Electron：${process.versions.electron || ''}`, `资料库：${(() => { try { const st = this.store.stats(); return `${st.files} 个文档 / ${st.slides} 页`; } catch { return ''; } })()}`, '');
+    if (withLog) lines.push('—— 最近运行日志 ——', ...logger.tail(200), '');
+    const fb = { at, subject: `【PPT智能体反馈】${type}：${String(text).trim().split('\n')[0].slice(0, 40)}`, text: lines.filter((l) => l !== null).join('\n'), replyTo: /@/.test(contact) ? contact : '' };
+    const file = path.join(this.feedbackDir(), `${at}.json`);
+    fs.writeFileSync(file, JSON.stringify(fb));
+    if (!this.mailReady()) { this.log.info('反馈已保存在本机，配置发件邮箱后自动发送'); return { sent: false, queued: true, reason: 'unconfigured' }; }
+    try { await this.mailFeedback(fb); fs.unlinkSync(file); this.log.info('反馈已发送'); return { sent: true }; } catch (e) {
+      this.log.warn('反馈发送失败，已保存在本机，稍后自动重试', e);
+      return { sent: false, queued: true, reason: 'failed', error: e.message };
+    }
+  }
+  mailFeedback(fb) {
+    const m = this.config.mail;
+    return sendMail({ host: m.host, port: Number(m.port) || (m.secure ? 465 : 587), secure: m.secure !== false, user: m.user, pass: m.pass, from: m.from || m.user, to: FEEDBACK_TO, subject: fb.subject, text: fb.text, replyTo: fb.replyTo });
+  }
+  async flushFeedback() {
+    if (!this.mailReady()) return 0;
+    let n = 0;
+    for (const f of fs.readdirSync(this.feedbackDir()).filter((x) => x.endsWith('.json')).sort()) {
+      const p = path.join(this.feedbackDir(), f);
+      try { await this.mailFeedback(JSON.parse(fs.readFileSync(p, 'utf8'))); fs.unlinkSync(p); n++; } catch (e) { this.log.warn('补发反馈失败', e); break; }
+    }
+    if (n) this.log.info(`已补发 ${n} 条反馈`);
+    return n;
+  }
+  /** 测试发件邮箱：发一封测试邮件到发件邮箱自己 */
+  async testMail(mail) {
+    const m = { ...(this.config.mail || {}), ...(mail || {}) };
+    const from = m.from || m.user;
+    await sendMail({ host: m.host, port: Number(m.port) || (m.secure ? 465 : 587), secure: m.secure !== false, user: m.user, pass: m.pass, from, to: from, subject: 'PPT智能体：发件邮箱测试', text: '这是一封测试邮件：发件邮箱配置正确，反馈可以正常发送。' });
+    return true;
+  }
+
   // ---------- 智能搜索历史：每次检索记录一条，结果保存在数据目录 cache/search/<id>.json，可随时重新查看 ----------
   searchDir() { const d = path.join(this.cacheDir, 'search'); fs.mkdirSync(d, { recursive: true }); return d; }
   recordSearch(q, opts, useLlm, r) {
-    const info = this.store.db.prepare('INSERT INTO search_history(q, task_id, use_llm, at, ms, files, light, dark, word, status) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(q, opts.taskId || null, useLlm ? 1 : 0, Date.now(), r.timing.total || 0, r.files.length, r.slides.light.length, r.slides.dark.length, r.slides.word.length, 'done');
+    const info = this.store.db.prepare('INSERT INTO search_history(q, task_id, task_ids, use_llm, at, ms, files, light, dark, word, status) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(q, opts.taskId || null, JSON.stringify(opts.taskIds || []), useLlm ? 1 : 0, Date.now(), r.timing.total || 0, r.files.length, r.slides.light.length, r.slides.dark.length, r.slides.word.length, 'done');
     const id = Number(info.lastInsertRowid);
     try { fs.writeFileSync(path.join(this.searchDir(), `${id}.json`), JSON.stringify(r)); } catch (e) { this.log.warn('保存搜索结果失败', e); }
     // 只保留最近 300 条历史的结果文件
@@ -863,7 +916,11 @@ class AgentService extends EventEmitter {
   searchHistory({ limit = 300 } = {}) {
     const tasks = new Map(this.store.listTasks().map((t) => [t.id, t.name]));
     return this.store.db.prepare('SELECT * FROM search_history ORDER BY id DESC LIMIT ?').all(limit)
-      .map((h) => ({ ...h, task_name: h.task_id ? tasks.get(h.task_id) || '（已删除的任务）' : null, hasResult: fs.existsSync(path.join(this.searchDir(), `${h.id}.json`)) }));
+      .map((h) => {
+        let ids = []; try { ids = JSON.parse(h.task_ids || '[]'); } catch { /* ignore */ }
+        if (!ids.length && h.task_id) ids = [h.task_id];
+        return { ...h, task_ids: ids, task_names: ids.map((id) => tasks.get(id) || `#${id}（已删除）`), task_name: ids.length === 1 ? tasks.get(ids[0]) || '（已删除的任务）' : null, hasResult: fs.existsSync(path.join(this.searchDir(), `${h.id}.json`)) };
+      });
   }
   searchHistoryResult(id) {
     const h = this.store.db.prepare('SELECT * FROM search_history WHERE id = ?').get(id);
@@ -910,7 +967,8 @@ class AgentService extends EventEmitter {
    */
   async convertSlides(items, outPath) {
     const log = logger.child('convert');
-    const sels = [], dirs = [];
+    const t0 = Date.now();
+    const sels = [], dirs = [], srcNames = [];
     for (const it of items) {
       const s = this.store.getSlide(it.slideId, false);
       if (!s) continue;
@@ -922,6 +980,7 @@ class AgentService extends EventEmitter {
       const dir = it.dir === 'keep' ? null : it.dir === 'toLight' || it.dir === 'toDark' ? it.dir : (s.theme === 'dark' ? 'toLight' : 'toDark');
       sels.push({ path: src, idx: s.idx, ns: dir || 'keep' });
       dirs.push(dir);
+      srcNames.push({ file: f.name, path: f.path, idx: s.idx, theme: s.theme, dir: dir || 'keep' });
     }
     if (!sels.length) throw new Error('转换队列中没有可转换的 PPT 页面');
     log.info(`开始黑白底互转：${sels.length} 页（黑→白 ${dirs.filter((d) => d === 'toLight').length}，白→黑 ${dirs.filter((d) => d === 'toDark').length}）`);
@@ -953,8 +1012,26 @@ class AgentService extends EventEmitter {
     for (let i = 0; i < preview.length; i++) if (checks[i]) preview[i].check = checks[i];
     if (verify.failed.length) log.warn(`转换校验：${verify.failed.length} 页未达到目标底色（第 ${verify.failed.map((c) => c.idx).join('、')} 页），可能含整页图片、图表图片或文字在图片中`);
     else log.info(`转换校验：${verify.ok}/${verify.total} 页已转换为目标底色`);
-    return { ...r, preview, verify, size: fs.statSync(outPath).size, fileId: imported && imported.fileId, slideIds: imported ? imported.slideIds : [] };
+    const result = { ...r, preview, verify, size: fs.statSync(outPath).size, fileId: imported && imported.fileId, slideIds: imported ? imported.slideIds : [], path: outPath, sources: srcNames };
+    // 黑白底互转历史：每次转换记录一条（含完整结果，可在“转换历史”中重新查看）
+    try {
+      const info = this.store.db.prepare('INSERT INTO convert_history(at, ms, out_path, slides, to_light, to_dark, keep, sources, size, verify_ok, verify_total, file_id, result) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)')
+        .run(Date.now(), Date.now() - t0, outPath, sels.length, dirs.filter((d) => d === 'toLight').length, dirs.filter((d) => d === 'toDark').length, dirs.filter((d) => !d).length, JSON.stringify(srcNames), result.size, verify.ok, verify.total, result.fileId || null, JSON.stringify(result));
+      result.historyId = Number(info.lastInsertRowid);
+    } catch (e) { log.warn('保存转换历史失败', e); }
+    return result;
   }
+
+  convertHistory() {
+    return this.store.db.prepare('SELECT id, at, ms, out_path, slides, to_light, to_dark, keep, sources, size, verify_ok, verify_total, file_id FROM convert_history ORDER BY id DESC LIMIT 500').all()
+      .map((h) => { const src = (() => { try { return JSON.parse(h.sources || '[]'); } catch { return []; } })(); return { ...h, sources: src, srcFiles: [...new Set(src.map((x) => x.file))], exists: fs.existsSync(h.out_path), inLibrary: !!(h.file_id && this.store.getFile(h.file_id)) }; });
+  }
+  convertHistoryResult(id) {
+    const h = this.store.db.prepare('SELECT result, at FROM convert_history WHERE id = ?').get(id);
+    if (!h) throw new Error('转换记录不存在');
+    const r = JSON.parse(h.result || '{}'); r.historyId = id; r.historyAt = h.at; return r;
+  }
+  convertHistoryDelete(ids) { for (const id of ids || []) this.store.db.prepare('DELETE FROM convert_history WHERE id = ?').run(id); return true; }
 
   /** 把本工具生成的文件（转换结果等）解析进资料库，归入同名的固定任务 */
   async importOutput(file, taskName) {

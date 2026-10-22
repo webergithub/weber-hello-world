@@ -50,6 +50,10 @@ Each table must support:
 - **No duplicated buttons**: global actions (e.g. 添加目录, 扫描本机) live in one place only, normally the left sidebar. Sub-views that are switched from the sidebar do not get duplicate tabs on the right.
 - Sidebar order: work items → item detail (scoped) → overview → smart / experimental modules → maintenance (recycle bin, logs) → bottom tools (basket, help). The very bottom row: user info on the left (placeholder until accounts exist), a ⚙ settings icon on the right; theme switching lives in settings.
 - Closing the window offers "minimize to the system tray (右下角图标栏)" / "quit" (rememberable). In the tray: click restores, right-click menu has show window and quit. Allow only one running instance; launching again restores the window.
+- Toggle buttons for pages like settings / help: a second click closes the page and restores the exact previous view.
+- Feedback: a "💬 反馈" button sends in the background; never show the recipient address in the UI or ship it in front-end code, never embed mail credentials — the sending mailbox is configured in settings and feedback is queued locally until it can be sent.
+- On startup, apps with a data directory let the user pick the current / a previously used / a new directory, with "remember, don't ask again" (re-enable in settings).
+- Detail views support keyboard and mouse-wheel paging even without opening the full viewer; wheel paging and Ctrl+wheel zoom are user options in settings.
 - AI-dependent features with no configured API key show a clear "去设置" prompt instead of silently falling back to a canned template; mark unfinished AI features "建设中".
 - Features still being built are marked "建设中" (a small tag on the menu item or button).
 - Clicking a running item jumps straight to its live detail view.
@@ -72,6 +76,9 @@ Each table must support:
 - Starting / resuming a job navigates straight to its live progress view.
 - Live animations are driven by event sequence numbers, never by indexes into a capped buffer; each frame has a minimum dwell measured from when it was shown, and backlogs speed up gradually instead of skipping.
 - **Notification center**: every toast is also stored (time, category, level, message, serializable jump target) in a "通知管理" page under maintenance, with an unread badge; clicking a notification jumps to the related screen (finished task → task detail, finished search → its results).
+- **Every run is history**: any user-triggered job that produces a result (search, conversion, export…) is recorded with its full result so it can be reopened later from a "历史" list.
+- **Scope pickers are multi-select**: when an action can be limited to items (e.g. search within tasks), let the user tick any number of them (with 全选 / 仅当前 / 清空 = all), remember the choice, and record the scope in history.
+- **Collections are multi-select**: baskets / queues support checkboxes with Shift range selection, and bulk actions (export, remove) apply to the selection (falling back to all when nothing is ticked).
 - **Search history and queue**: every search is recorded with its result; users can queue several searches (reorder / remove / pause), and reopen any past search's result.
 
 - Adding work never starts it automatically; the user presses start. Tasks queue and run one by one.

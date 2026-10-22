@@ -37,18 +37,20 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const inputRef = useRef(null);
   const llmOn = app.config && app.config.llm && app.config.llm.enabled;
   const [stats, setStats] = useState(null);
-  const [scopeAll, setScopeAll] = useState(defaultAll || !taskId);
-  useEffect(() => { setScopeAll(defaultAll || !taskId); }, [taskId]);
+  // 检索范围：在已经执行过的任务中多选；不选 = 所有资料库（选择会记住）
+  const ran = app.tasks.filter((t) => t.status !== 'draft' && (t.status === 'done' || (t.parsed || 0) + (t.skipped || 0) + (t.duplicate || 0) > 0));
+  const [scopeIdsRaw, setScopeIdsRaw] = useState(() => { try { return JSON.parse(localStorage.getItem('ppta.searchScope') || '[]'); } catch { return []; } });
+  const scopeIds = scopeIdsRaw.filter((id) => ran.some((t) => t.id === id));
+  const setScopeIds = (ids) => { setScopeIdsRaw(ids); try { localStorage.setItem('ppta.searchScope', JSON.stringify(ids)); } catch { /* ignore */ } };
+  const scopeKey = scopeIds.join(',');
   useEffect(() => {
-    if (taskId && !scopeAll) api.library({ taskId }).then((fs) => { const ok = fs.filter((f) => f.status === 'parsed'); setStats({ files: ok.length, slides: ok.reduce((a, f) => a + (f.slide_count || 0), 0) }); }).catch(() => {});
-    else api.stats().then(setStats).catch(() => {});
-  }, [app.taskTick, taskId, scopeAll]);
-  const scopeSeg = taskId ? (
-    <div className="seg small scope-seg" title="检索范围">
-      <button className={!scopeAll ? 'on' : ''} onClick={() => { setScopeAll(false); setState({}); }}>当前任务 #{taskId} {taskName}</button>
-      <button className={scopeAll ? 'on' : ''} onClick={() => { setScopeAll(true); setState({}); }}>所有资料库</button>
-    </div>
-  ) : null;
+    if (!scopeIds.length) { api.stats().then(setStats).catch(() => {}); return; }
+    Promise.all(scopeIds.map((id) => api.library({ taskId: id }).catch(() => []))).then((ls) => {
+      const m = new Map(); for (const f of ls.flat()) if (f.status === 'parsed') m.set(f.id, f);
+      setStats({ files: m.size, slides: [...m.values()].reduce((a, f) => a + (f.slide_count || 0), 0) });
+    });
+  }, [app.taskTick, scopeKey]);
+  const scopeSeg = <ScopePicker tasks={ran} value={scopeIds} curTaskId={taskId} onChange={(ids) => { setScopeIds(ids); }} />;
 
   useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
   const qs = useSearchQueue();
@@ -56,7 +58,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const setTasksOpen = (v) => { TASKS_OPEN = v; setTasksOpenState(v); };
   const [recent, setRecent] = useState([]);
   useEffect(() => { if (!result) api.searchHistory({ limit: 30 }).then((h) => { const seen = new Set(); setRecent(h.filter((x) => x.status === 'done' && !seen.has(x.q) && seen.add(x.q)).slice(0, 8)); }).catch(() => {}); }, [result, qs.items.length]);
-  const curScope = () => ({ useLlm: llmOn && useLlm, taskId: taskId && !scopeAll ? taskId : undefined, taskName: taskId && !scopeAll ? taskName : undefined });
+  const curScope = () => ({ useLlm: llmOn && useLlm, taskIds: scopeIds, taskNames: scopeIds.map((id) => (ran.find((t) => t.id === id) || {}).name || `#${id}`) });
   const show = (q, r) => {
     setState({ q, result: r, tab: state.tab === 'viewer' ? 'viewer' : firstTab(r) });
     setInput(q); setAnswer(null); setFileFilter(null); setSel(new Set()); setCmpSel(new Set());
@@ -64,12 +66,12 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const run = async (text = input, scope = curScope()) => {
     if (!text.trim()) return;
     setBusy(true);
-    try { show(text.trim(), await api.search(text.trim(), { useLlm: scope.useLlm, taskId: scope.taskId })); } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
+    try { show(text.trim(), await api.search(text.trim(), { useLlm: scope.useLlm, taskIds: scope.taskIds || [] })); } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
   };
   const enqueue = () => { if (!input.trim()) return; searchQueue.add(input, curScope()); app.toast(`已加入搜索队列：${input.trim()}`); setTasksOpen(true); };
   // 查看历史 / 队列中某次搜索的结果
   const viewHistory = async (id) => { try { const r = await api.searchHistoryResult(id); show(r.analysis.raw || input, r); } catch (e) { app.toast(e.message, 'error'); } };
-  const rerun = (h) => run(h.q, { useLlm: !!h.use_llm, taskId: h.task_id || undefined });
+  const rerun = (h) => run(h.q, { useLlm: !!h.use_llm, taskIds: h.task_ids || [] });
   const busyQ = qs.items.filter((x) => x.status === 'queued' || x.status === 'running').length;
   const tasksBtn = <button className={`btn ${tasksOpen ? 'primary' : ''}`} onClick={() => setTasksOpen(!tasksOpen)}>🗂 搜索任务与历史{busyQ ? `（${busyQ}）` : ''}</button>;
   const terms = result ? [...result.analysis.zh, ...result.analysis.en] : [];
@@ -252,6 +254,51 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
         </div>
       )}
       {tasksOpen && <SearchTasks currentId={result && result.historyId} onView={viewHistory} onRerun={rerun} onClose={() => setTasksOpen(false)} />}
+    </div>
+  );
+}
+
+/** 检索范围选择：所有资料库，或在已执行的任务中多选 */
+export function scopeText(ids = [], names = []) {
+  if (!ids || !ids.length) return '所有资料库';
+  if (ids.length === 1) return `任务 #${ids[0]}${names && names[0] ? ` ${names[0]}` : ''}`;
+  return `${ids.length} 个任务：${(names || []).slice(0, 3).join('、')}${ids.length > 3 ? ' 等' : ''}`;
+}
+function ScopePicker({ tasks, value, onChange, curTaskId }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return undefined;
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    window.addEventListener('mousedown', close);
+    return () => window.removeEventListener('mousedown', close);
+  }, [open]);
+  const set = new Set(value);
+  const toggle = (id) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); onChange(tasks.filter((t) => n.has(t.id)).map((t) => t.id)); };
+  const label = scopeText(value, value.map((id) => (tasks.find((t) => t.id === id) || {}).name));
+  return (
+    <div className="scope-pick" ref={ref}>
+      <button className={`btn ${value.length ? 'primary' : ''}`} title="检索范围：所有资料库，或在已执行的任务中多选" onClick={() => setOpen(!open)}>🎯 范围：{label} ▾</button>
+      {open && (
+        <div className="scope-pop">
+          <label className="chk sp-all"><input type="checkbox" checked={!value.length} onChange={() => onChange([])} /> <b>所有资料库</b></label>
+          <div className="sp-list">
+            {!tasks.length && <div className="muted small">还没有已执行的任务</div>}
+            {tasks.map((t) => (
+              <label key={t.id} className="chk sp-item" title={t.dir}>
+                <input type="checkbox" checked={set.has(t.id)} onChange={() => toggle(t.id)} />
+                <span className="ellipsis">#{t.id} {t.name}</span><span className="muted small">{t.parsed || 0} 个文件{t.id === curTaskId ? ' · 当前任务' : ''}</span>
+              </label>
+            ))}
+          </div>
+          <div className="sp-foot">
+            <button className="btn tiny" disabled={!tasks.length} onClick={() => onChange(tasks.map((t) => t.id))}>全选</button>
+            {curTaskId && tasks.some((t) => t.id === curTaskId) && <button className="btn tiny" onClick={() => onChange([curTaskId])}>仅当前任务</button>}
+            <button className="btn tiny ghost" onClick={() => onChange([])}>清空（所有资料库）</button>
+            <div className="spacer" /><button className="btn tiny primary" onClick={() => setOpen(false)}>完成</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

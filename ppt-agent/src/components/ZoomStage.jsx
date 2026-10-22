@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useApp } from '../ctx';
 
 export const ZOOM_MIN = 0.2;
 export const ZOOM_MAX = 8;
@@ -17,8 +18,19 @@ export const zoomBy = (v, f) => zoomAt(v, v.z * f);
  * 页面无级缩放：Ctrl + 滚轮以鼠标位置为中心缩放；放大后可拖动平移、滚轮平移；
  * 右下角工具条：－ / 缩放比例滑块 / ＋ / “适配窗口”。view / setView 为 { z, x, y }，由外部保存（便于键盘快捷键控制）。
  */
-export default function ZoomStage({ view, setView, children, className = '' }) {
+// 未放大时滚轮翻页：累计滚动量达到阈值才翻一页，并限制翻页频率，避免触控板一次滑动连翻多页
+const WHEEL_STEP = 60, WHEEL_GAP_MS = 260;
+
+export default function ZoomStage({ view, setView, children, className = '', onWheelPage }) {
   const box = useRef(null);
+  const app = useApp();
+  const wheelCfg = (app && app.config && app.config.wheel) || {};
+  // 设置中可关闭“滚轮翻页”与“Ctrl + 滚轮缩放”
+  const pageRef = useRef(onWheelPage);
+  pageRef.current = wheelCfg.page === false ? null : onWheelPage;
+  const zoomOn = useRef(true);
+  zoomOn.current = wheelCfg.ctrlZoom !== false;
+  const acc = useRef({ v: 0, t: 0 });
   const drag = useRef(null);
   const [dragging, setDragging] = useState(false);
   const v = view || FIT;
@@ -28,8 +40,15 @@ export default function ZoomStage({ view, setView, children, className = '' }) {
     const wheel = (e) => {
       const r = el.getBoundingClientRect();
       const cx = e.clientX - r.left - r.width / 2, cy = e.clientY - r.top - r.height / 2;
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); setView((cur) => zoomAt(cur || FIT, (cur || FIT).z * Math.exp(-e.deltaY * 0.0015), cx, cy)); }
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); if (zoomOn.current) setView((cur) => zoomAt(cur || FIT, (cur || FIT).z * Math.exp(-e.deltaY * 0.0015), cx, cy)); }
       else if ((view || FIT).z > 1.001) { e.preventDefault(); setView((cur) => ({ ...cur, x: cur.x - e.deltaX, y: cur.y - e.deltaY })); }
+      else if (pageRef.current) {
+        e.preventDefault();
+        const a = acc.current, now = Date.now();
+        if (now - a.t > 600) a.v = 0;
+        a.v += e.deltaY;
+        if (Math.abs(a.v) >= WHEEL_STEP && now - a.t >= WHEEL_GAP_MS) { pageRef.current(a.v > 0 ? 1 : -1); a.v = 0; a.t = now; }
+      }
     };
     el.addEventListener('wheel', wheel, { passive: false });
     return () => el.removeEventListener('wheel', wheel);

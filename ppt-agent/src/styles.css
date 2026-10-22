@@ -1075,3 +1075,31 @@ td.tags-cell .tag-more { color: var(--fg3); font-size: 11px; margin-left: 2px; }
 .sb-task-menu .sb-item { padding: 5px 8px; }
 .sb-task-menu .sb-sub { padding-left: 28px; }
 .collapsed .sb-task-menu { margin: 0 0 4px; padding: 2px 0; border-left: none; }
+/* 启动选择数据目录 / 意见反馈 */
+.datadir-modal { width: min(680px, 94vw); }
+.dd-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; max-height: 46vh; overflow-y: auto; }
+.dd-item { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; background: var(--bg2); }
+.dd-item.on { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.dd-item.missing { opacity: .55; }
+.dd-main { min-width: 0; flex: 1; }
+.dd-path { font-family: ui-monospace, Consolas, monospace; font-size: 12.5px; word-break: break-all; }
+.dd-remember { margin-top: 10px; }
+.dd-hist { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; }
+.dd-hrow { display: flex; align-items: center; gap: 6px; }
+.dd-hrow code { max-width: 60%; }
+.feedback-modal { width: min(620px, 94vw); }
+.fb-body { display: flex; flex-direction: column; gap: 10px; }
+.fb-text { min-height: 140px; resize: vertical; font: inherit; }
+.settings h4 { margin: 14px 0 6px; font-size: 13.5px; }
+/* 智能搜索：检索范围多选 */
+.scope-pick { position: relative; }
+.scope-pick > .btn { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+.scope-pop { position: absolute; z-index: 60; top: calc(100% + 6px); left: 0; width: 360px; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 10px 28px var(--shadow); padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.search-landing .scope-pop { left: 50%; transform: translateX(-50%); }
+.sp-list { max-height: 280px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border-top: 1px solid var(--line2); border-bottom: 1px solid var(--line2); padding: 6px 0; }
+.sp-item { display: grid !important; grid-template-columns: auto 1fr auto; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; }
+.sp-item:hover { background: var(--bg3); }
+.sp-foot { display: flex; gap: 4px; align-items: center; }
+/* 导出篮多选 */
+.basket-item .bi-check { flex: none; width: 16px; height: 16px; margin: 0 2px 0 0; cursor: pointer; }
+.basket-item.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }

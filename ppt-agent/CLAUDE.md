@@ -32,6 +32,13 @@
 - 双击任何带 `data-sid` 的页面预览都会打开逐页浏览（App 级监听）；浏览 / 对比窗口内双击保留为最大化；不需要该行为的区域加 `data-noopen`。
 - DataTable 列宽可拖动（表头右边缘，双击按内容适配，记住在 `ppta.table.<id>.widths`）；不要再给列表单元格写死 `max-width`。
 - 浏览类快捷键的 `isTyping` 不把勾选框 / 单选框算作输入。
+- 文件详情（`SlideWorkspace`）在不进入逐页浏览时也支持键盘翻页（keymap 的翻页与切换文件动作都用于翻页）和滚轮翻页；滚轮翻页 / Ctrl + 滚轮缩放由 `config.wheel` 控制，`ZoomStage` 的 `onWheelPage` 负责翻页。
+- 反馈：接收地址只在主进程 `service.js` 中（`FEEDBACK_TO`），不得传给界面或写进前端代码；发件邮箱 `config.mail` 由用户在设置中配置，未配置 / 失败时存 `dataDir/feedback/*.json`，配置后或启动后自动补发（`electron/core/mailer.js` 为无依赖 SMTP 客户端）。
+- 启动选择数据目录：`bootstrap.json` 中 `dataDirHistory`（最多 10 个）、`askDataDir`（记住选择 = false）、`skipAskOnce`（主动切换目录后的重启不再询问）；使用环境变量 `PPTA_DATA_DIR` 时不询问（测试用 `PPTA_ASK_DIR=1` 强制询问）。
+- 侧栏左下角按钮（帮助、设置）再次点击收起并还原打开前的界面。
+- 智能搜索范围用 `taskIds`（多选的已执行任务，空 = 所有资料库），前端记在 `ppta.searchScope`；`search_history.task_ids` 记录每次范围。
+- 黑白底互转每次转换写入 `convert_history`（含完整结果 JSON），转换页“🕘 转换历史”可重新查看。
+- 导出篮支持多选（Shift 连选），勾选时只导出所选页面。
 - 列表项很多的页面（如相似分组）用“左侧列表 + 右侧详情”的主从布局，不要在一个滚动区里堆叠多个 DataTable。
 - 智能搜索：后端返回全部命中页（不截断），文件的“命中 N 页”= 该文件在结果中的页数；选中文件时页签数字只统计该文件，再次单击取消；结果过多时前端分批显示。
 - 浏览窗口从搜索结果打开时传 `results`（结果页顺序），左右键只在搜索结果之间翻页；点击相关推荐后必须显示醒目的“↩ 返回原来的页面”。

@@ -8,6 +8,8 @@ import LibraryView from './components/LibraryView';
 import SearchView from './components/SearchView';
 import { searchQueue } from './searchQueue';
 import NoticesView from './components/NoticesView';
+import DataDirDialog from './components/DataDirDialog';
+import FeedbackDialog from './components/FeedbackDialog';
 import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
@@ -70,6 +72,15 @@ export default function App() {
   );
   const [view, setViewState] = useState({ type: 'search' });
   const [subOpen, setSubOpen] = useState({});
+  const [askDir, setAskDir] = useState(null); // 启动时选择数据目录
+  const pendingWelcome = useRef(false);
+  const [feedback, setFeedback] = useState(false);
+  // 设置按钮：第一次点击打开设置，再次点击收起并还原打开前的界面
+  const prevView = useRef(null);
+  const toggleSettings = () => {
+    if (view.type === 'settings') { setViewState(prevView.current && prevView.current.type !== 'settings' ? prevView.current : { type: 'search' }); return; }
+    prevView.current = view; setViewState({ type: 'settings' });
+  };
   const [taskMenu, setTaskMenu] = useState(true); // 选中任务下方的“任务详情”菜单是否展开
   const [version, setVersion] = useState('');
   useEffect(() => { api.appVersion().then(setVersion).catch(() => {}); }, []);
@@ -128,7 +139,8 @@ export default function App() {
 
   useEffect(() => {
     refreshTasks(); reloadLogs();
-    api.getConfig().then((c) => { setConfig(c); if (c.welcome !== 'never') setWelcome(true); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
+    // 启动时先询问数据目录（未勾选“记住选择”时），关闭后再显示启动简介
+    Promise.all([api.getConfig(), api.dataDirInfo().catch(() => null)]).then(([c, dd]) => { setConfig(c); if (dd && dd.askNow) { setAskDir(dd); pendingWelcome.current = c.welcome !== 'never'; } else if (c.welcome !== 'never') setWelcome(true); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
     api.systemTheme().then(setSysTheme).catch(() => {});
     const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
     const onMq = () => setSysTheme(mq.matches ? 'light' : 'dark');
@@ -399,7 +411,8 @@ export default function App() {
               <span className="sb-avatar">👤</span>
               {!collapsed && <div className="sb-user-main"><div className="sb-user-name">本地用户</div><div className="sb-user-sub">用户信息（预留）</div></div>}
             </div>
-            <button className={`sb-gear ${view.type === 'settings' ? 'active' : ''}`} title="设置" data-tour="nav-settings" onClick={() => setViewState({ type: 'settings' })}>⚙</button>
+            <button className="sb-gear" title="意见反馈" onClick={() => setFeedback(true)}>💬</button>
+            <button className={`sb-gear ${view.type === 'settings' ? 'active' : ''}`} title={view.type === 'settings' ? '收起设置，回到原来的界面' : '设置'} data-tour="nav-settings" onClick={toggleSettings}>⚙</button>
           </div>
         </aside>
         <main className="main">
@@ -436,6 +449,8 @@ export default function App() {
           </div>
         )}
         {drill && <DrillDialog spec={drill} onClose={() => setDrill(null)} />}
+        {askDir && <DataDirDialog info={askDir} onClose={() => { setAskDir(null); if (pendingWelcome.current) setWelcome(true); }} />}
+        {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
         {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
         {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setAllLibMode} onHelp={() => setView({ type: 'help' })} />}
         {askWatch && <WatchAskDialog roots={askWatch.roots} onClose={onAskWatch} />}

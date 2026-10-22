@@ -405,3 +405,50 @@ test('讲解词译文：保存到知识库、写回 PPT 备注（同语言再次
   assert.strictEqual(t2.parsed, 0);
   svc.close();
 });
+
+test('反馈邮件：SMTP 客户端（AUTH LOGIN、UTF-8 主题与正文）', async () => {
+  const net = require('net');
+  const { sendMail } = require('../electron/core/mailer');
+  const got = { cmds: [], data: '' };
+  const server = net.createServer((sock) => {
+    let buf = '', inData = false;
+    sock.write('220 fake ESMTP\r\n');
+    sock.on('data', (d) => {
+      buf += d.toString('utf8');
+      let i;
+      while ((i = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, i); buf = buf.slice(i + 2);
+        if (inData) { if (line === '.') { inData = false; sock.write('250 queued\r\n'); } else got.data += line + '\n'; continue; }
+        got.cmds.push(line);
+        if (/^EHLO/.test(line)) sock.write('250-fake\r\n250 AUTH LOGIN PLAIN\r\n');
+        else if (line === 'AUTH LOGIN') sock.write('334 VXNlcm5hbWU6\r\n');
+        else if (got.cmds.length === 3) sock.write('334 UGFzc3dvcmQ6\r\n');
+        else if (got.cmds.length === 4) sock.write('235 ok\r\n');
+        else if (line === 'DATA') { inData = true; sock.write('354 go\r\n'); }
+        else if (line === 'QUIT') { sock.write('221 bye\r\n'); sock.end(); }
+        else sock.write('250 ok\r\n');
+      }
+    });
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  const port = server.address().port;
+  await sendMail({ host: '127.0.0.1', port, secure: false, user: 'me@example.com', pass: 'secret', from: 'me@example.com', to: 'dev@example.com', subject: '反馈：测试', text: '你好，世界' });
+  server.close();
+  assert.ok(got.cmds.includes('MAIL FROM:<me@example.com>'));
+  assert.ok(got.cmds.includes('RCPT TO:<dev@example.com>'));
+  assert.strictEqual(got.cmds[2], Buffer.from('me@example.com').toString('base64'));
+  assert.ok(got.data.includes(`Subject: =?UTF-8?B?${Buffer.from('反馈：测试').toString('base64')}?=`));
+  const body = got.data.split('\n\n').slice(1).join('').replace(/\n/g, '');
+  assert.strictEqual(Buffer.from(body, 'base64').toString('utf8'), '你好，世界');
+});
+
+test('反馈：未配置发件邮箱时保存在本机', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppta-fb-'));
+  const svc = new AgentService(dir);
+  const r = await svc.sendFeedback({ type: '建议', text: '希望增加某功能' }, { version: 'test' });
+  assert.strictEqual(r.sent, false);
+  assert.strictEqual(svc.feedbackStatus().queued, 1);
+  await assert.rejects(() => svc.sendFeedback({ text: '  ' }));
+  svc.close();
+});

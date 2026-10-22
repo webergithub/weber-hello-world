@@ -3,6 +3,9 @@ import { api, fmtSize, THEME_LABEL, assetUrl } from '../api';
 import { useApp } from '../ctx';
 import SlidePreview, { HtmlSlide } from './SlidePreview';
 import DataTable from './DataTable';
+import { fmtTime } from '../api';
+
+let SHOW_HIST = false; // 是否在看转换历史（会话内记住，从逐页浏览返回时保持）
 
 const DIR_LABEL = { auto: '自动（黑↔白）', toLight: '黑底 → 白底', toDark: '白底 → 黑底' };
 
@@ -17,6 +20,13 @@ export default function ConvertView() {
   const [result, setResult] = useState(null);
   const [rules, setRules] = useState(null);
   const [rulesOpen, setRulesOpen] = useState(false);
+  const [showHist, setShowHistState] = useState(SHOW_HIST);
+  const setShowHist = (v) => { SHOW_HIST = v; setShowHistState(v); };
+  const [hist, setHist] = useState([]);
+  const [histSel, setHistSel] = useState(() => new Set());
+  const loadHist = () => api.convertHistory().then(setHist).catch(() => setHist([]));
+  useEffect(() => { loadHist(); }, [app.taskTick]);
+  const viewHist = async (id) => { try { setResult(await api.convertHistoryResult(id)); setShowHist(false); } catch (e) { app.toast(e.message, 'error'); } };
   useEffect(() => { api.getConvertRules().then(setRules); }, []);
 
   useEffect(() => { Promise.all(app.basket.items.map((id) => api.slideDetail(id).catch(() => null))).then((l) => setBasket(l.filter(Boolean))); }, [app.basket.items]);
@@ -40,17 +50,34 @@ export default function ConvertView() {
     setBusy(true); setResult(null);
     try {
       const r = await api.convertSlides(queue, out);
-      setResult(r);
-      app.toast(`转换完成：${r.slides} 页 → ${out}`, 'info', { label: '打开', run: () => api.openPath(out) });
+      setResult(r); loadHist();
+      app.toast(`转换完成：${r.slides} 页 → ${out}`, 'info', { label: '打开', link: { type: 'open', path: out }, cat: '黑白底互转' });
     } catch (e) { app.toast('转换失败：' + e.message, 'error'); } finally { setBusy(false); }
   };
 
+  const histCols = [
+    { key: 'at', label: '转换时间', type: 'date', sort: (h) => h.at, filterValue: (h) => h.at, className: 'small nowrap', render: (h) => fmtTime(h.at) },
+    { key: 'out', label: '输出文件', sort: (h) => h.out_path, render: (h) => <span className={h.exists ? 'link' : 'muted'} title={h.out_path} onClick={() => h.exists && api.openPath(h.out_path)}>{h.out_path.split(/[\\/]/).pop()}{!h.exists && '（文件已不存在）'}</span> },
+    { key: 'slides', label: '页数', type: 'number', sort: (h) => h.slides, render: (h) => h.slides },
+    { key: 'to_light', label: '黑→白', type: 'number', sort: (h) => h.to_light, render: (h) => h.to_light || '' },
+    { key: 'to_dark', label: '白→黑', type: 'number', sort: (h) => h.to_dark, render: (h) => h.to_dark || '' },
+    { key: 'src', label: '来源文件', sort: (h) => h.srcFiles.join('、'), filterList: (h) => h.srcFiles, className: 'small', render: (h) => <span title={h.srcFiles.join('\n')}>{h.srcFiles.slice(0, 2).join('、')}{h.srcFiles.length > 2 ? ` 等 ${h.srcFiles.length} 个` : ''}</span> },
+    { key: 'verify', label: '校验', sort: (h) => (h.verify_total ? h.verify_ok / h.verify_total : 1), render: (h) => (h.verify_total ? <span className={`tag ${h.verify_ok === h.verify_total ? 'ok' : 'warn'}`}>{h.verify_ok}/{h.verify_total}</span> : '') },
+    { key: 'size', label: '大小', type: 'number', sort: (h) => h.size || 0, className: 'nowrap', render: (h) => fmtSize(h.size) },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (h) => <>
+      <button className="btn tiny primary" onClick={() => viewHist(h.id)}>查看结果</button>
+      {h.inLibrary && <button className="btn tiny" onClick={() => app.openFile(h.file_id)}>⛶ 逐页浏览</button>}
+      <button className="btn tiny" disabled={!h.exists} onClick={() => api.openPath(h.out_path)}>打开原文件</button>
+      <button className="btn tiny" disabled={!h.exists} title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(h.out_path)}>📂 位置</button>
+    </> },
+  ];
   return (
     <div className="view">
       {rulesOpen && <RulesDialog onClose={(r) => { setRulesOpen(false); if (r) setRules(r); }} />}
       <div className="view-head">
         <div className="vh-title">🌓 PPT 黑白底互转 <button className="btn small rules-btn" onClick={() => setRulesOpen(true)}>⚙ 转换规则设置</button></div>
         <div className="spacer" />
+        <button className={`btn ${showHist ? 'primary' : ''}`} onClick={() => { if (!showHist) loadHist(); setShowHist(!showHist); }}>{showHist ? '← 返回转换' : `🕘 转换历史（${hist.length}）`}</button>
         <button className="btn ghost" disabled={!queue.length} onClick={() => setQueue([])}>清空序列</button>
         <button className="btn primary" disabled={!queue.length || busy} onClick={run}>{busy ? '转换中…' : `开始转换并导出（${queue.length} 页）`}</button>
       </div>
@@ -60,7 +87,13 @@ export default function ConvertView() {
           <RulesSummary rules={rules} />
         </div>
       )}
-      <div className="convert">
+      {showHist && (
+        <div className="tab-body pad flex-col">
+          <DataTable id="convertHistory" columns={histCols} rows={hist} rowKey={(h) => h.id} defaultSort={{ k: 'at', d: -1 }} empty="还没有转换记录" selectable selected={histSel} onSelect={setHistSel}
+            actions={<button className="btn small" disabled={!histSel.size} onClick={async () => { if (!confirm(`删除 ${histSel.size} 条转换记录？（只删除记录，不删除转换生成的文件）`)) return; await api.convertHistoryDelete([...histSel]); setHistSel(new Set()); loadHist(); }}>删除记录</button>} />
+        </div>
+      )}
+      {!showHist && <div className="convert">
         <div className="cv-col">
           <div className="side-title">① 导出篮中的 PPT 页面（{pptSlides.length}）<div className="spacer" />
             <button className="btn tiny" onClick={() => setPick(new Set(pptSlides.filter((s) => !inQueue.has(s.id)).map((s) => s.id)))}>全选</button>
@@ -119,10 +152,11 @@ export default function ConvertView() {
             {result.fileId && <div className="muted small" style={{ margin: '0 0 8px' }}>转换结果已加入资料库（解析任务“黑白底转换结果”），可在资料库与检索中找到。</div>}
             <div className="cv-grid big">
               {result.preview.map((p, i) => {
-                const src = qSlides[queue[i] && queue[i].slideId];
+                const src = result.historyAt ? null : qSlides[queue[i] && queue[i].slideId];
+                const srcInfo = result.sources && result.sources[i];
                 return (
                   <div key={p.id} className="cv-pair">
-                    <div>{src && <SlidePreview slide={src} file={src.file} />}<div className="small muted">原：{THEME_LABEL[src && src.theme]}</div></div>
+                    <div>{src ? <><SlidePreview slide={src} file={src.file} /><div className="small muted">原：{THEME_LABEL[src.theme]}</div></> : srcInfo ? <div className="small muted cv-src-info">原：{srcInfo.file} 第 {srcInfo.idx} 页（{THEME_LABEL[srcInfo.theme] || ''}）</div> : null}</div>
                     <div>{p.thumb ? <div className="slide-box" style={{ aspectRatio: p.layout ? `${p.layout.w / p.layout.h}` : '16/9' }}><img src={assetUrl('thumb', p.thumb)} alt="" /></div>
                       : p.layout ? <div className="slide-box" style={{ aspectRatio: `${p.layout.w / p.layout.h}` }}><HtmlSlide layout={p.layout} /></div> : null}
                       <div className="small">转换后：{p.dir === 'toLight' ? '白底' : p.dir === 'toDark' ? '黑底' : '保持'}
@@ -133,7 +167,7 @@ export default function ConvertView() {
             </div>
           </div>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

@@ -12,7 +12,7 @@ export const searchQueue = {
   get: () => state,
   subscribe: (f) => { subs.add(f); return () => subs.delete(f); },
   setOnDone: (f) => { onDone = f; },
-  /** opts：{ taskId, taskName, useLlm } */
+  /** opts：{ taskIds, taskNames, useLlm }（taskIds 为空 = 所有资料库） */
   add(q, opts = {}) {
     const text = String(q || '').trim();
     if (!text) return null;
@@ -39,7 +39,7 @@ async function pump() {
   if (!it) return;
   it.status = 'running'; it.startedAt = Date.now(); emit();
   try {
-    const r = await api.search(it.q, { useLlm: it.opts.useLlm, taskId: it.opts.taskId });
+    const r = await api.search(it.q, { useLlm: it.opts.useLlm, taskIds: it.opts.taskIds || [] });
     Object.assign(it, { status: 'done', historyId: r.historyId, files: r.files.length, light: r.slides.light.length, dark: r.slides.dark.length, word: r.slides.word.length, ms: r.timing.total });
     emit();
     if (onDone) onDone(it, r);

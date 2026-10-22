@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS search_history (
   id INTEGER PRIMARY KEY AUTOINCREMENT, q TEXT, task_id INTEGER, use_llm INTEGER, at INTEGER, ms INTEGER,
   files INTEGER, light INTEGER, dark INTEGER, word INTEGER, status TEXT, error TEXT
 );
+CREATE TABLE IF NOT EXISTS convert_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, ms INTEGER, out_path TEXT, slides INTEGER, to_light INTEGER, to_dark INTEGER, keep INTEGER,
+  sources TEXT, size INTEGER, verify_ok INTEGER, verify_total INTEGER, file_id INTEGER, result TEXT
+);
 CREATE TABLE IF NOT EXISTS recycle (
   id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, name TEXT, orig_path TEXT, bin_path TEXT, moved INTEGER,
   prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER
@@ -89,6 +93,7 @@ class Store {
     if (!t.has('watch')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch INTEGER DEFAULT 0');
     if (!t.has('last_watch_at')) this.db.exec('ALTER TABLE tasks ADD COLUMN last_watch_at INTEGER');
     if (!t.has('watch_summary')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch_summary TEXT');
+    if (!cols('search_history').has('task_ids')) this.db.exec('ALTER TABLE search_history ADD COLUMN task_ids TEXT');
     const sl = cols('slides');
     if (!sl.has('notes_user')) this.db.exec('ALTER TABLE slides ADD COLUMN notes_user TEXT');
     if (!sl.has('md_user')) this.db.exec('ALTER TABLE slides ADD COLUMN md_user TEXT');

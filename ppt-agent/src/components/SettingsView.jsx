@@ -19,6 +19,10 @@ export default function SettingsView({ focus }) {
   const keysRef = useRef(null);
   const watchRef = useRef(null);
   const agentRef = useRef(null);
+  const mailRef = useRef(null);
+  const [mailBusy, setMailBusy] = useState(false);
+  const [fbSt, setFbSt] = useState(null);
+  useEffect(() => { api.feedbackStatus().then(setFbSt).catch(() => {}); }, []);
   const [cfg, setCfg] = useState(null);
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
@@ -27,12 +31,17 @@ export default function SettingsView({ focus }) {
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
   useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
   if (!cfg) return null;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
   const setE = (patch) => setCfg({ ...cfg, embedding: { ...cfg.embedding, ...patch } });
   const save = async () => { const c = await api.setConfig(cfg); setCfg(c); app.setConfig(c); app.toast('设置已保存'); };
+  // 立即生效的小项（鼠标滚轮）：保存后同步本页状态，避免之后“保存设置”用旧值覆盖
+  const saveNow = async (patch, msg) => { const c = await api.setConfig(patch); setCfg((cur) => ({ ...cur, ...patch, ...c })); app.setConfig(c); if (msg) app.toast(msg); };
+  const wheel = cfg.wheel || { page: true, ctrlZoom: true };
+  const mail = cfg.mail || {};
+  const setM = (patch) => setCfg({ ...cfg, mail: { ...mail, ...patch } });
   return (
     <div className="view">
       <div className="view-head"><div className="vh-title">⚙️ 设置</div><div className="spacer" /><button className="btn primary" onClick={save}>保存设置</button></div>
@@ -71,6 +80,9 @@ export default function SettingsView({ focus }) {
           <h3>快捷键（逐页浏览 / 对比窗口）</h3>
           <p className="muted">每个动作可设置多个按键组合；例如选择预设“↑ ↓ 翻页 · ← → 切换文件”即可用上下键翻 PPT 页、左右键切换文件。修改立即生效。</p>
           <KeymapEditor />
+          <h4>鼠标滚轮</h4>
+          <label className="chk"><input type="checkbox" checked={wheel.page !== false} onChange={(e) => saveNow({ wheel: { ...wheel, page: e.target.checked } }, e.target.checked ? '已开启滚轮翻页' : '已关闭滚轮翻页')} /> 滚轮翻页（在 PPT 页面上滚动鼠标滚轮翻到上一页 / 下一页；页面放大时滚轮用于移动画面）</label>
+          <label className="chk"><input type="checkbox" checked={wheel.ctrlZoom !== false} onChange={(e) => saveNow({ wheel: { ...wheel, ctrlZoom: e.target.checked } }, e.target.checked ? '已开启 Ctrl + 滚轮缩放' : '已关闭 Ctrl + 滚轮缩放')} /> Ctrl + 滚轮放大 / 缩小页面（以鼠标位置为中心无级缩放）</label>
         </section>
         <section>
           <h3>关闭窗口时</h3>
@@ -96,6 +108,25 @@ export default function SettingsView({ focus }) {
             }}>直接使用该目录</button>
             {dd && dd.bootstrap && <button className="btn ghost" onClick={() => confirm('恢复为默认数据目录并重启？') && api.resetDataDir()}>恢复默认</button>}
           </div>
+          {dd && (
+            <>
+              <label className="chk"><input type="checkbox" checked={dd.ask !== false} onChange={async (e) => { await api.setDataDirAsk(e.target.checked); setDd({ ...dd, ask: e.target.checked }); app.toast(e.target.checked ? '下次启动时询问数据目录' : '启动时不再询问，直接使用当前目录'); }} /> 启动时询问使用哪个数据目录（取消勾选 = 记住当前选择）</label>
+              {dd.history && dd.history.length > 0 && (
+                <div className="dd-hist">
+                  <div className="muted small">使用过的数据目录：</div>
+                  {dd.history.map((h) => (
+                    <div key={h.dir} className="dd-hrow">
+                      <code className="ellipsis" title={h.dir}>{h.dir}</code>
+                      {h.current ? <span className="tag ok">当前</span> : !h.exists ? <span className="tag warn">已不存在</span> : h.hasData ? <span className="tag">有数据</span> : <span className="tag">空</span>}
+                      <div className="spacer" />
+                      {!h.current && h.exists && <button className="btn tiny" onClick={async () => { if (!confirm(`切换到数据目录：\n${h.dir}\n\n程序将自动重启。`)) return; try { await api.setDataDir(h.dir, 'use'); app.toast('正在切换并重启…'); } catch (err) { app.toast(err.message, 'error'); } }}>切换到此目录</button>}
+                      {!h.current && <button className="btn tiny ghost" onClick={async () => { await api.removeDataDirHistory(h.dir); setDd(await api.dataDirInfo()); }}>移除记录</button>}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
         </section>
         <section>
           <h3>页面截图（PPT 原始页预览）</h3>
@@ -135,6 +166,18 @@ export default function SettingsView({ focus }) {
             })}</div>
           </div>
           <p className="muted small">修改后点击右上角“保存设置”生效。</p>
+        </section>
+        <section ref={mailRef} className={focus === 'mail' ? 'flash-sec' : ''}>
+          <h3>💬 反馈邮件发送设置</h3>
+          <p className="muted">左下角“💬 意见反馈”会通过这里配置的发件邮箱在后台发送给开发者。应用不内置任何邮箱账号；未配置或发送失败时反馈先保存在本机，配置好后自动补发{fbSt && fbSt.queued ? `（当前待发送 ${fbSt.queued} 条）` : ''}。密码一般填写邮箱的“授权码 / 客户端专用密码”。</p>
+          <div className="row"><label>SMTP 服务器</label><input className="input" value={mail.host || ''} placeholder="如 smtp.qq.com / smtp.163.com / smtp.office365.com" onChange={(e) => setM({ host: e.target.value.trim() })} />
+            <label className="short">端口</label><input className="input num" type="number" value={mail.port || ''} onChange={(e) => setM({ port: Number(e.target.value) })} />
+            <div className="seg small"><button className={mail.secure !== false ? 'on' : ''} onClick={() => setM({ secure: true, port: mail.port === 587 ? 465 : mail.port || 465 })}>SSL（465）</button><button className={mail.secure === false ? 'on' : ''} onClick={() => setM({ secure: false, port: mail.port === 465 ? 587 : mail.port || 587 })}>STARTTLS（587）</button></div></div>
+          <div className="row"><label>账号</label><input className="input" value={mail.user || ''} placeholder="登录邮箱的账号" onChange={(e) => setM({ user: e.target.value.trim(), from: mail.from || '' })} />
+            <label className="short">密码</label><input className="input" type="password" value={mail.pass || ''} placeholder="授权码" onChange={(e) => setM({ pass: e.target.value })} /></div>
+          <div className="row"><label>发件地址</label><input className="input" value={mail.from || ''} placeholder="默认与账号相同" onChange={(e) => setM({ from: e.target.value.trim() })} />
+            <button className="btn primary" onClick={async () => { await saveNow({ mail: { ...mail, from: mail.from || mail.user } }, '发件邮箱已保存（待发送的反馈会自动补发）'); setFbSt(await api.feedbackStatus()); }}>保存发件邮箱</button>
+            <button className="btn" disabled={mailBusy || !mail.host} onClick={async () => { setMailBusy(true); try { await api.testMail({ ...mail, from: mail.from || mail.user }); app.toast('测试邮件已发送到发件邮箱，请查收'); } catch (e) { app.toast('测试失败：' + e.message, 'error'); } finally { setMailBusy(false); } }}>{mailBusy ? '发送中…' : '发送测试邮件'}</button></div>
         </section>
         <section>
           <h3>语义向量（可选，增强 RAG 召回）</h3>
