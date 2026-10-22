@@ -1,11 +1,41 @@
 ---
 name: desktop-app-ui-conventions
-description: UI and list (table) conventions for building desktop / web business apps (Electron, React, admin tools, document or data management apps) with a Chinese-speaking product owner. Use whenever building or changing an app's UI - lists/tables, navigation menus, search pages, dashboards/analytics, viewers, settings, onboarding/help, long-running tasks - so every new app gets these behaviors by default without being asked again.
+description: Conventions and a default skeleton for building desktop / web business apps (Electron, React, admin tools, document or data management apps) with a Chinese-speaking product owner. Use whenever starting a new app or building / changing an app's UI - app skeleton (sidebar order and folding, help, logs, notifications, settings, feedback), lists/tables, navigation, search, dashboards, viewers, long-running tasks, visual design and the release routine - so every new app gets these behaviors by default without being asked again.
 ---
 
 # Desktop app UI conventions
 
 These rules come from many rounds of product feedback. Apply them by default in every app; the owner should not have to ask again.
+
+## 0. Default app skeleton (build this first in every new app)
+
+Treat this as the checklist for a new app; each item was requested explicitly at least once.
+
+**Layout, folding and order**
+- Left sidebar + main area. Sidebar top: app name with version and a "❓ 帮助" toggle next to it, a collapse « / » button (icon-only mode); then the primary "＋ 添加…" action (with a ▾ menu for variants).
+- Sidebar order, top to bottom: work items (e.g. tasks) with each selected item's scoped menu expanded directly under it → overview / all-data module → smart / tool modules → maintenance (recycle bin, run log, notifications) → bottom row: user info (placeholder) on the left, 💬 feedback and ⚙ settings icons on the right, pinned to the bottom.
+- Every module and every sub-menu can be folded; clicking a parent opens it, clicking again folds it; fold states, sidebar width / collapsed state, panel sizes and column widths are remembered.
+- Toggle buttons (help, settings) close on a second click and restore the exact previous view.
+- Modules are distinguished by an accent color (icon chip + section rule + active state), not by heavy colored blocks; unfinished features carry a small "建设中" tag on the item only.
+
+**Help and onboarding**
+- A floating "?" in the bottom-left corner of every page and viewer window opens that page's operation guide (with the current shortcuts); never in the title bar.
+- A help guide with chapters per feature, a "本版本新增" chapter refreshed every major version, a welcome screen on first launch ("show next time" choice) and a step-by-step tour (≤ 12 steps) covering every main menu; extend both whenever a feature is added.
+- No permanent hint bars or long explanatory sentences in the UI; explanations live in the help.
+
+**Run log and notifications**
+- Exactly one log file for the whole app, recording every operation (parsing, search, export, conversion, errors) with module and item tags.
+- Log page: filter by level / keyword / scope (scoped views default to "this item only" with a switch to "all"), auto-scroll, open log location, clear, and **export** (filtered lines, or the whole file).
+- Every toast is also stored in a "通知管理" page (time, category, level, message, jump target) with an unread badge; clicking a notification jumps to the related screen.
+
+**Settings and data**
+- Settings page sections: document types, scheduled jobs, theme (light / dark / system), shortcuts (fully remappable, presets) and mouse wheel options, close-window behaviour (tray / quit, remembered), data directory (move / switch / history, "ask on startup" with remember), external AI interfaces (user-provided keys only, test button), feedback mail sender.
+- On startup, optionally ask which data directory to use (current / previous / new), with "remember, don't ask again".
+- Originals are read-only by default: any change to user files happens only through an explicit, confirmed write-back with an automatic backup; deletions go to a recycle bin first.
+- Feedback: background sending with the recipient hidden from the UI and code shipped to the renderer; queue locally when the sender isn't configured.
+
+**Release routine (every iteration)**
+- Bump the version, refresh the requirements document (change log + numbered requirement list with status) and its .docx, update help / tour, run unit tests and UI automation, build the installer / portable exe, commit and push, and send the build and document to the owner.
 
 ## 1. Lists and tables (every list in the app)
 
