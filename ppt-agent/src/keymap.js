@@ -140,9 +140,11 @@ export const keysLabel = (map, action, n = 2) => (map[action] || []).slice(0, n)
 
 /** 浏览窗口底部的按键提示（根据当前按键设置生成） */
 /** 浏览窗口的快捷键说明（根据当前按键设置生成）：[[按键, 说明], …] */
-export function viewerHintItems(map, { compare = false } = {}) {
+export function viewerHintItems(map, { compare = false, results = false } = {}) {
   const k = (a) => keysLabel(map, a);
   const kp = (a, b) => `${keysLabel(map, a, 1)}  ${keysLabel(map, b, 1)}`;
+  // 从搜索结果打开：只用左右键在搜索结果之间翻页
+  if (results) return [[kp('prev', 'next'), '上一个 / 下一个搜索结果'], [k('close'), '关闭']];
   return compare
     ? [
       [kp('prev', 'next'), '一起翻页（关闭联动时只翻选中窗格）'],

@@ -3,6 +3,9 @@ import { api, fmtSize, fmtTime, STATUS_LABEL, ACTION_LABEL, KIND_LABEL } from '.
 import { useApp } from '../ctx';
 import LiveScan from './LiveScan';
 import DataTable from './DataTable';
+import { drillTask } from './DrillDialog';
+
+const Num = ({ onClick, children }) => <span className="num-link" onClick={(e) => { e.stopPropagation(); onClick(); }}>{children}</span>;
 
 // 解析任务：任务队列（手动开始、排队、调整顺序）+ 实时解析动态 + 全部解析历史
 const SUB_TITLE = { queue: '任务队列', live: '解析动态（实时）', history: '解析历史' };
@@ -53,7 +56,8 @@ function QueuePanel({ initial, onLive }) {
             <span className="small muted">{live && live.index ? live.index : done}/{t.total || '?'}</span>
           </div>
         )}
-        {t.status !== 'draft' && t.status !== 'pending' && <div className="small muted">解析 {t.parsed} · 已解析过 {t.skipped} · 重复 {t.duplicate} · 失败 {t.failed}</div>}
+        {t.status !== 'draft' && t.status !== 'pending' && <div className="small muted">
+          <Num onClick={() => drillTask(app, t, '本次解析', ['parsed'])}>解析 {t.parsed}</Num> · <Num onClick={() => drillTask(app, t, '已解析过', ['skipped'])}>已解析过 {t.skipped}</Num> · <Num onClick={() => drillTask(app, t, '重复', ['duplicate'])}>重复 {t.duplicate}</Num> · <Num onClick={() => drillTask(app, t, '失败', ['failed'])}>失败 {t.failed}</Num></div>}
         <div className="tc-ops" onClick={(e) => e.stopPropagation()}>
           {t.status === 'draft' && <button className="btn tiny primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button>}
           {['paused', 'interrupted'].includes(t.status) && <button className="btn tiny primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 继续</button>}
@@ -104,11 +108,11 @@ function LivePanel({ taskId }) {
       {['paused', 'interrupted'].includes(t.status) && <div className="notice">{t.message || '任务已暂停'} <button className="btn small primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 从断点继续</button></div>}
       {t.status === 'pending' && <div className="notice">排队中：第 {t.queuePos} 位，前面的任务完成后自动开始。</div>}
       <div className="live-stats">
-        <div className="card"><div className="card-v">{t.total || (p.scan ? p.scan.found : 0)}</div><div className="card-k">{t.status === 'running' && !t.total ? '已发现文档' : '文档总数'}</div></div>
-        <div className="card"><div className="card-v">{p.index || (t.status === 'done' ? t.total : 0)}</div><div className="card-k">当前第几个</div></div>
-        <div className="card"><div className="card-v">{nParsed}</div><div className="card-k">已解析</div></div>
-        <div className="card"><div className="card-v">{repeat}</div><div className="card-k">已解析过 / 重复</div></div>
-        <div className="card"><div className="card-v">{nFailed}</div><div className="card-k">失败</div></div>
+        <div className="card drill" onClick={() => drillTask(app, t, '已处理文档')}><div className="card-v">{t.total || (p.scan ? p.scan.found : 0)}</div><div className="card-k">{t.status === 'running' && !t.total ? '已发现文档' : '文档总数'}</div></div>
+        <div className="card drill" onClick={() => drillTask(app, t, '已处理文档')}><div className="card-v">{p.index || (t.status === 'done' ? t.total : 0)}</div><div className="card-k">当前第几个</div></div>
+        <div className="card drill" onClick={() => drillTask(app, t, '已解析', ['parsed'])}><div className="card-v">{nParsed}</div><div className="card-k">已解析</div></div>
+        <div className="card drill" onClick={() => drillTask(app, t, '已解析过 / 重复', ['skipped', 'duplicate'])}><div className="card-v">{repeat}</div><div className="card-k">已解析过 / 重复</div></div>
+        <div className="card drill" onClick={() => drillTask(app, t, '失败', ['failed'])}><div className="card-v">{nFailed}</div><div className="card-k">失败</div></div>
       </div>
       {(t.status === 'running' || p.index) && (
         <div className="live-progress">
@@ -182,11 +186,18 @@ export function ReparseDialog({ files, onClose }) {
   );
 }
 
+// 解析历史的筛选与当前选中的文件按范围记住：从文件详情返回时恢复到原来的条目
+const HIST_STATE = new Map();
+
 function HistoryPanel({ taskId }) {
   const app = useApp();
+  const skey = `history-${taskId || 'all'}`;
+  const saved = HIST_STATE.get(skey);
   const [rows, setRows] = useState([]);
-  const [action, setAction] = useState('');
-  const [q, setQ] = useState('');
+  const [action, setAction] = useState(saved ? saved.action : '');
+  const [q, setQ] = useState(saved ? saved.q : '');
+  const [cur, setCur] = useState(saved ? saved.cur : null);
+  useEffect(() => { HIST_STATE.set(skey, { action, q, cur }); }, [skey, action, q, cur]);
   const [sel, setSel] = useState(() => new Set());
   const [dlg, setDlg] = useState(null);
   useEffect(() => { api.history({ action: action || undefined, q: q || undefined, limit: 5000, taskId }).then(setRows); }, [action, q, app.taskTick, taskId]);
@@ -206,13 +217,15 @@ function HistoryPanel({ taskId }) {
   const locate = () => { const el = document.querySelector('.files-stats .row-live'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return !!el; };
   const livePath = live.map((r) => r.path).join('|');
   // 打开时自动定位到正在解析的文件；勾选“跟随”时文件切换也自动定位
-  const opened = useRef(false);
+  const opened = useRef(!!(saved && saved.cur));
   useEffect(() => {
     if (!livePath) return;
     if (!opened.current || follow) { setTimeout(locate, 60); opened.current = true; }
   }, [livePath, follow]);
   const toggle = (id) => { const n = new Set(sel); if (n.has(id)) n.delete(id); else n.add(id); setSel(n); };
   const picked = rows.filter((r) => sel.has(r.hid));
+  // 资源管理器：只选了一条时用所选，否则用最近点击的那条
+  const target = (sel.size === 1 && all.find((r) => sel.has(r.hid))) || (cur && all.find((r) => r.hid === cur.hid || r.path === cur.path)) || null;
   const counts = useMemo(() => rows.reduce((m, r) => { m[r.action] = (m[r.action] || 0) + 1; return m; }, {}), [rows]);
   return (
     <div className="files-stats">
@@ -221,7 +234,7 @@ function HistoryPanel({ taskId }) {
           <option value="">全部记录</option>{Object.entries(ACTION_LABEL).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
         </select>
         <input className="input" placeholder="按路径搜索" value={q} onChange={(e) => setQ(e.target.value)} />
-        <span className="muted">{rows.length} 条{Object.entries(counts).map(([k, v]) => ` · ${ACTION_LABEL[k]} ${v}`).join('')}</span>
+        <span className="muted"><Num onClick={() => setAction('')}>{rows.length} 条</Num>{Object.entries(counts).map(([k, v]) => <React.Fragment key={k}> · <Num onClick={() => setAction(k)}>{ACTION_LABEL[k]} {v}</Num></React.Fragment>)}</span>
         {live.length > 0 && <>
           <span className="status s-running">解析中 {live.length}</span>
           <button className="btn small" onClick={locate} title="滚动到正在解析的文件">📍 定位到正在解析的文件</button>
@@ -229,10 +242,11 @@ function HistoryPanel({ taskId }) {
           <label className="chk" title="正在解析的文件切换时自动定位"><input type="checkbox" checked={follow} onChange={(e) => setFollow(e.target.checked)} /> 跟随</label>
         </>}
         <div className="spacer" />
+        <button className="btn small" disabled={!target} title={target ? target.path : ''} onClick={() => api.showItem(target.path)}>📂 在资源管理器中显示</button>
         <span className="badge">已选 {sel.size}</span>
         <button className="btn primary" disabled={!sel.size} onClick={() => setDlg(picked.map((r) => ({ ...r, link_path: r.path })))}>重新解析所选…</button>
       </div>
-      <DataTable id="history" rows={all} rowKey={(r) => r.hid} selectable selected={sel} onSelect={setSel} selectableRow={(r) => !r.live} rowClass={(r) => (r.live ? 'row-live' : '')} defaultSort={{ k: 'at', d: -1 }} empty="还没有解析记录" columns={[
+      <DataTable id="history" sessionKey={skey} rows={all} onRowClick={(r) => setCur({ hid: r.hid, path: r.path })} rowKey={(r) => r.hid} selectable selected={sel} onSelect={setSel} selectableRow={(r) => !r.live} rowClass={(r) => (r.live ? 'row-live' : '')} defaultSort={{ k: 'at', d: -1 }} empty="还没有解析记录" columns={[
         { key: 'at', label: '时间', sort: (r) => r.at, className: 'small nowrap', render: (r) => fmtTime(r.at) },
         { key: 'task', label: '任务', sort: (r) => r.task_id, className: 'small', render: (r) => `#${r.task_id} ${r.task_name || '（已删除）'}` },
         { key: 'action', label: '结果', sort: (r) => ACTION_LABEL[r.action] || r.action, render: (r) => (r.live ? <span className="status s-running live-pulse">⏳ 解析中</span> : <span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span>) },
@@ -243,6 +257,7 @@ function HistoryPanel({ taskId }) {
         { key: 'author', label: '作者' },
         { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime), hidden: true },
         { key: 'message', label: '说明', className: 'small muted' },
+        { key: 'ops', label: '位置', nosort: true, nofilter: true, className: 'nowrap', render: (r) => <button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={(e) => { e.stopPropagation(); setCur({ hid: r.hid, path: r.path }); api.showItem(r.path); }}>📂</button> },
       ]} />
       {dlg && <ReparseDialog files={dlg} onClose={() => { setDlg(null); setSel(new Set()); }} />}
     </div>

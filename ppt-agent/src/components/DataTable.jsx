@@ -145,14 +145,23 @@ function FilterPop({ col, kind, values, value, onChange, onClose, anchor, onSort
  *   type?: 'text' | 'number' | 'date'（筛选类型，默认自动推断）, filterValue?: (row) => 筛选用的值, filterList?: (row) => 多值（如标签，按值筛选时任一命中即可）, nofilter? }]
  * 每列标题旁 ▾ 打开筛选（排序、文本 / 数字 / 日期条件、按值勾选），工具栏有全列表关键字搜索。
  */
-export default function DataTable({ id, columns, rows, rowKey = (r, i) => r.id ?? i, rowClass, onRowClick, empty = '暂无数据', defaultSort = null, toolbar = null, maxHeight, selectable = false, selected, onSelect, selectableRow = () => true, actions = null }) {
+// 会话内记住每个列表的筛选、关键字、滚动位置与“上次查看”的行：从详情返回时恢复到原来的位置
+const SESSION = new Map();
+
+export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, i) => r.id ?? i, rowClass, onRowClick, empty = '暂无数据', defaultSort = null, toolbar = null, maxHeight, selectable = false, selected, onSelect, selectableRow = () => true, actions = null }) {
+  const sk = sessionKey || id;
+  const sess = useMemo(() => SESSION.get(sk) || {}, [sk]);
+  const wrapRef = useRef(null);
+  const [lastRow, setLastRow] = useState(sess.last ?? null);
+  const restored = useRef(false);
   const storeKey = `ppta.table.${id}`;
   const saved = useMemo(() => { try { return JSON.parse(localStorage.getItem(storeKey) || '{}'); } catch { return {}; } }, [storeKey]);
   const [hidden, setHidden] = useState(() => new Set(saved.hidden || columns.filter((c) => c.hidden).map((c) => c.key)));
   const [sort, setSort] = useState(saved.sort !== undefined ? saved.sort : defaultSort);
   const [menu, setMenu] = useState(false);
-  const [filters, setFilters] = useState({});
-  const [kw, setKw] = useState('');
+  const [filters, setFilters] = useState(sess.filters || {});
+  const [kw, setKw] = useState(sess.kw || '');
+  useEffect(() => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), filters, kw }); }, [filters, kw, sk]);
   const [pop, setPop] = useState(null);
   const menuRef = useRef(null);
   useEffect(() => { try { localStorage.setItem(storeKey, JSON.stringify({ hidden: [...hidden], sort })); } catch { /* ignore */ } }, [hidden, sort, storeKey]);
@@ -202,6 +211,19 @@ export default function DataTable({ id, columns, rows, rowKey = (r, i) => r.id ?
     setPop({ col: c, kind, values, anchor: e.currentTarget.getBoundingClientRect() });
   };
   const nFilters = Object.values(filters).filter(filterActive).length + (kw.trim() ? 1 : 0);
+  // 首次有数据时恢复滚动位置，并确保“上次查看”的行可见
+  useEffect(() => {
+    if (restored.current || !rows.length || !wrapRef.current) return;
+    restored.current = true;
+    const el = wrapRef.current;
+    requestAnimationFrame(() => {
+      if (sess.scroll) el.scrollTop = sess.scroll;
+      if (sess.last !== undefined && sess.last !== null) {
+        const row = el.querySelector(`tr[data-rk="${CSS.escape(String(sess.last))}"]`);
+        if (row) { const a = row.getBoundingClientRect(), b = el.getBoundingClientRect(); if (a.top < b.top || a.bottom > b.bottom) row.scrollIntoView({ block: 'center' }); }
+      }
+    });
+  }, [rows.length]);
   const sorted = useMemo(() => {
     const rows = filtered;
     if (!sort) return rows;
@@ -266,7 +288,7 @@ export default function DataTable({ id, columns, rows, rowKey = (r, i) => r.id ?
           {kw.trim() && <span className="chip">关键字：{kw}<b onClick={() => setKw('')}>×</b></span>}
         </div>
       )}
-      <div className="table-wrap" style={maxHeight ? { maxHeight } : undefined}>
+      <div className="table-wrap" ref={wrapRef} style={maxHeight ? { maxHeight } : undefined} onScroll={(e) => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), scroll: e.currentTarget.scrollTop }); }}>
         <table className="grid">
           <thead>
             <tr>{selectable && <th className="sel-col"><input type="checkbox" checked={allOn} onChange={() => onSelect(allOn ? new Set() : new Set(keys))} title="全选" /></th>}{visible.map((c) => (
@@ -278,7 +300,8 @@ export default function DataTable({ id, columns, rows, rowKey = (r, i) => r.id ?
           </thead>
           <tbody>
             {sorted.map((r, i) => (
-              <tr key={rowKey(r, i)} className={`${rowClass ? rowClass(r) : ''} ${selectable && sel.has(rowKey(r, i)) ? 'row-sel' : ''}`} onClick={onRowClick ? () => onRowClick(r) : undefined}>
+              <tr key={rowKey(r, i)} data-rk={String(rowKey(r, i))} className={`${rowClass ? rowClass(r) : ''} ${selectable && sel.has(rowKey(r, i)) ? 'row-sel' : ''} ${lastRow !== null && String(rowKey(r, i)) === String(lastRow) ? 'row-last' : ''}`}
+                onMouseDown={() => { const k = rowKey(r, i); setLastRow(k); SESSION.set(sk, { ...(SESSION.get(sk) || {}), last: k }); }} onClick={onRowClick ? () => onRowClick(r) : undefined}>
                 {selectable && <td className="sel-col">{selectableRow(r) ? <input type="checkbox" checked={sel.has(rowKey(r, i))} onClick={(e) => { e.stopPropagation(); pick(rowKey(r, i), e); }} readOnly /> : null}</td>}
                 {visible.map((c) => <td key={c.key} className={c.className || ''}>{c.render ? c.render(r) : r[c.key]}</td>)}
               </tr>

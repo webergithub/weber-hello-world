@@ -7,15 +7,20 @@ import { ReparseDialog } from './TaskMonitor';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
+import { StatCards } from './DrillDialog';
+
+// 每个任务上次所在的页签：从文件详情等页面返回时恢复
+const TAB_MEMO = new Map();
 
 export default function TaskView({ taskId }) {
   const app = useApp();
-  const [tab, setTab] = useState('slides');
+  const [tab, setTabState] = useState(() => TAB_MEMO.get(taskId) || 'slides');
+  const setTab = (t) => { TAB_MEMO.set(taskId, t); setTabState(t); };
   const [data, setData] = useState(null);
   const [focusFile, setFocusFile] = useState(null);
   const [dupes, setDupes] = useState(null);
   const load = () => api.taskDetail(taskId).then(setData);
-  useEffect(() => { setTab('slides'); setFocusFile(null); load(); }, [taskId]);
+  useEffect(() => { setTabState(TAB_MEMO.get(taskId) || 'slides'); setFocusFile(null); load(); }, [taskId]);
   useEffect(() => { load(); }, [app.taskTick]);
   if (!data) return <div className="empty-tip">加载中…</div>;
   const { task, stats } = data;
@@ -56,7 +61,7 @@ export default function TaskView({ taskId }) {
       </div>
       <div className="tab-body">
         {tab === 'slides' && <SlideWorkspace files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
-        {tab === 'files' && <FilesStats files={files} stats={stats} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
+        {tab === 'files' && <FilesStats files={files} stats={stats} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
         {tab === 'log' && <LogView taskId={taskId} />}
       </div>
     </div>
@@ -70,7 +75,8 @@ function dedupe(rows) {
   return [...m.values()];
 }
 
-export function FilesStats({ files, stats, onOpen }) {
+export function FilesStats({ files, stats, onOpen, title = '' }) {
+  const app = useApp();
   const [q, setQ] = useState('');
   const [act, setAct] = useState('');
   const [sel, setSel] = useState(() => new Set());
@@ -78,10 +84,15 @@ export function FilesStats({ files, stats, onOpen }) {
     const f = q.trim().toLowerCase();
     return files.filter((r) => (!act || r.action === act) && (!f || (r.link_path || '').toLowerCase().includes(f) || (r.tags || []).join(' ').toLowerCase().includes(f)));
   }, [files, q, act]);
+  const ok = (r) => r.status === 'parsed';
+  const byAct = (a) => (r) => r.action === a;
+  // 每个统计数字都可点击下钻：[名称, 数值, 筛选条件, 突出显示的列]
   const cards = [
-    ['文件总数', stats.files], ['本次解析', stats.parsed || 0], ['已解析过·跳过', stats.skipped || 0], ['重复文件', stats.duplicate || 0], ['失败', stats.failed || 0],
-    ['页面总数', stats.slides], ['含备注页', stats.notes], ['视频', stats.videos], ['含字幕页', stats.subtitles], ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`], ['隐藏页', stats.hidden], ['文件总大小', fmtSize(stats.size)],
+    ['文件总数', stats.files, () => true], ['本次解析', stats.parsed || 0, byAct('parsed')], ['已解析过·跳过', stats.skipped || 0, byAct('skipped')], ['重复文件', stats.duplicate || 0, byAct('duplicate')], ['失败', stats.failed || 0, byAct('failed')],
+    ['页面总数', stats.slides, ok, ['slide_count']], ['含备注页', stats.notes, (r) => ok(r) && r.notes_count > 0, ['notes_count']], ['视频', stats.videos, (r) => ok(r) && r.video_count > 0, ['video_count']], ['含字幕页', stats.subtitles, (r) => ok(r) && r.subtitle_count > 0, ['subtitle_count']],
+    ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`, (r) => ok(r) && (r.kind || 'ppt') === 'ppt', ['dark_slides', 'light_slides']], ['隐藏页', stats.hidden, (r) => ok(r) && r.hidden_count > 0, ['hidden_count']], ['文件总大小', fmtSize(stats.size), () => true],
   ];
+  const drill = (k, pick, show) => app.drill({ key: `task-${title}-${k}`, title: `${title ? `${title} · ` : ''}${k}`, rows: files.filter(pick), show, sort: k === '文件总大小' ? { k: 'size', d: -1 } : show ? { k: show[0], d: -1 } : undefined });
   const columns = [
     { key: 'action', label: '状态', sort: (r) => ACTION_LABEL[r.action] || r.action, render: (r) => <span className={`tag act-${r.action}`}>{ACTION_LABEL[r.action] || r.action}</span> },
     { key: 'name', label: '文件名', sort: (r) => r.name || r.link_path, render: (r) => <span className="link" onClick={() => r.id && onOpen(r.id)} title={r.link_path}>{r.name || r.link_path}</span> },
@@ -109,10 +120,10 @@ export function FilesStats({ files, stats, onOpen }) {
   ];
   return (
     <div className="files-stats">
-      <div className="cards">{cards.map(([k, v]) => <div key={k} className="card"><div className="card-v">{v}</div><div className="card-k">{k}</div></div>)}</div>
+      <StatCards cards={cards} onDrill={drill} />
       <div className="chips">
-        {Object.entries(stats.byCategory || {}).map(([k, v]) => <span key={k} className="chip">{k} {v}</span>)}
-        {Object.entries(stats.byExt || {}).map(([k, v]) => <span key={k} className="chip ghost">{k} × {v}</span>)}
+        {Object.entries(stats.byCategory || {}).map(([k, v]) => <span key={k} className="chip drill" onClick={() => drill(`主题分类·${k}`, (r) => ok(r) && (r.category || '其他') === k)}>{k} {v}</span>)}
+        {Object.entries(stats.byExt || {}).map(([k, v]) => <span key={k} className="chip ghost drill" onClick={() => drill(`${k} 文件`, (r) => (r.ext || (r.link_path || '').replace(/^.*(\.[^.\\/]+)$/, '$1')) === k)}>{k} × {v}</span>)}
       </div>
       <DataTable id="taskFiles" columns={columns} rows={rows} rowKey={(r, i) => r.link_path || i} rowClass={(r) => `row-${r.action}`} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文件"
         selectable selected={sel} onSelect={setSel} selectableRow={(r) => r.id && r.status !== 'recycled'}

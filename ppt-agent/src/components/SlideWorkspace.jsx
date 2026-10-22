@@ -104,6 +104,8 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
     setFileId(it.file_id); setSlideId(it.id);
   };
   const goBack = () => { const last = back[back.length - 1]; if (!last) return; setBack(back.slice(0, -1)); setFileId(last.fileId); setSlideId(last.slideId); };
+  // 连续点了多个推荐后，一步回到最初的那一页
+  const goOrigin = () => { const first = back[0]; if (!first) return; setBack([]); setFileId(first.fileId); setSlideId(first.slideId); };
   const outside = detail && !files.some((f) => f.id === detail.file.id);
   const selIds = [...selected];
   const unit = unitOf(detail && detail.source);
@@ -177,6 +179,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                   <div className="dh-title">{slide.title || `第 ${slide.idx} 页`}</div>
                   <div className="muted small">{slide.file && slide.file.path} · 第 {slide.idx} {unit}{slide.section && !isWord ? ` · 分节：${slide.section}` : ''}</div>
                 </div>
+                {back.length > 0 && <button className="btn small back-origin" title={back[back.length - 1].label} onClick={goBack}>↩ 返回原来的页面</button>}
                 <div className="spacer" />
                 <label className="chk"><input type="checkbox" checked={selected.has(slide.id)} onChange={() => toggle(slide)} /> 选择此页</label>
                 <button className="btn small" onClick={() => app.basket.add([slide.id])}>加入导出篮</button>
@@ -184,7 +187,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 {slide.file && <button className="btn small ghost" onClick={() => api.openPath(slide.file.path)}>打开原文件</button>}
               </div>
               {(back.length > 0 || outside) && (
-                <div className="hint-bar">🔗 正在查看推荐的页面{outside ? '（该文档不在当前列表中）' : ''}{back.length > 0 && <> · <button className="btn small" onClick={goBack}>↩ 返回 {back[back.length - 1].label}</button></>}</div>
+                <div className="hint-bar">🔗 正在查看推荐的页面{outside ? '（该文档不在当前列表中）' : ''}{back.length > 0 && <> · <button className="btn small" onClick={goBack}>↩ 返回 {back[back.length - 1].label}</button></>}{back.length > 1 && <button className="btn small" onClick={goOrigin}>⤒ 回到最初：{back[0].label}</button>}</div>
               )}
               {slide.counterpart && (
                 <div className="hint-bar">

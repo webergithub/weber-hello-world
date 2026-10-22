@@ -24,7 +24,9 @@ export function clearFileCache() { fileCache.clear(); }
  * 默认 ← →：上一页 / 下一页；↑ ↓：上一个 / 下一个文件；空格：加入 / 移出导出篮。
  * fileIds：可切换的文件顺序（如搜索结果的文件顺序）；matched：命中的页面 id（在缩略条上标记）
  */
-export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], onClose, active = true, compact = false, onFileChange }) {
+const first0 = (b) => (b[0] ? b[0].label : '');
+
+export default function SlideViewer({ fileIds, initialFileId, initialSlideId, terms = [], matched = [], results = null, onClose, active = true, compact = false, onFileChange }) {
   const app = useApp();
   const keys = useKeymap();
   // 点击推荐跳转到列表外的文件时，临时加入可切换的文件顺序（排在当前文件之后）
@@ -106,6 +108,20 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     else if (wrap && d < 0 && pos === 0) goFile(-1, true);
     else if (slides.length) setSlideId(slides[Math.max(0, Math.min(slides.length - 1, j))].id);
   }, [pos, slides, goFile]);
+  // 搜索结果模式：左右键按结果页的顺序在搜索结果之间翻页（可跨文件），不再按文件内页码翻页
+  const resMode = !!(results && results.length);
+  const rIdx = resMode ? results.findIndex((h) => h.id === slideId) : -1;
+  const lastR = useRef(0);
+  if (rIdx >= 0) lastR.current = rIdx;
+  const goResult = useCallback((d) => {
+    if (!resMode) return;
+    const j = Math.max(0, Math.min(results.length - 1, (rIdx >= 0 ? rIdx : lastR.current) + d));
+    const h = results[j];
+    if (!h || (h.id === slideId)) return;
+    lastR.current = j;
+    if (!ids.includes(h.file_id)) setExtra((x) => [...x, { id: h.file_id, after: fileId }]);
+    setFileId(h.file_id); setSlideId(h.id);
+  }, [resMode, results, rIdx, slideId, ids, fileId]);
   const inBasket = slide && app.basket.items.includes(slide.id);
   const goBack = useCallback(() => {
     setBack((b) => {
@@ -126,6 +142,8 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
       if (!action) return;
       let handled = true;
       const toSlide = (i) => { if (slides.length) setSlideId(slides[i < 0 ? slides.length - 1 : i].id); };
+      if (resMode && ['next', 'prev'].includes(action)) { goResult(action === 'next' ? 1 : -1); e.preventDefault(); e.stopPropagation(); return; }
+      if (resMode && ['next5', 'prev5', 'first', 'last', 'nextFile', 'prevFile', 'nextFile5', 'prevFile5', 'firstFile', 'lastFile'].includes(action)) return;
       switch (action) {
         case 'next': go(1, true); break;
         case 'prev': go(-1, true); break;
@@ -161,12 +179,12 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     };
     window.addEventListener('keydown', k, true);
     return () => window.removeEventListener('keydown', k, true);
-  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout, keys, back]);
+  }, [active, go, goFile, slides, ids, toggleBasket, onClose, maxed, toggleMax, toggleFull, setLayout, keys, back, resMode, goResult]);
 
   // 翻页 / 切换文件时的屏幕提示
   useEffect(() => {
     if (!detail || pos < 0) return;
-    setOsd(`文件 ${fpos + 1}/${ids.length} · 第 ${pos + 1}/${slides.length} ${unitOf(detail.source)}`);
+    setOsd(resMode && rIdx >= 0 ? `搜索结果 ${rIdx + 1}/${results.length}` : `文件 ${fpos + 1}/${ids.length} · 第 ${pos + 1}/${slides.length} ${unitOf(detail.source)}`);
     clearTimeout(osdTimer.current);
     osdTimer.current = setTimeout(() => setOsd(null), 1100);
   }, [slideId, fileId]);
@@ -185,17 +203,27 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
     <div ref={root} className={`viewer ${compact ? 'compact' : ''} ${maxed ? 'maxed' : ''}`}>
       {osd && <div className="viewer-osd">{osd}</div>}
       <div className="viewer-bar">
-        <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title={`上一个文件（${keysLabel(keys.map, 'prevFile')}）`}>▲ 上个文件</button>
-        <button className="btn small" disabled={fpos < 0 || fpos >= ids.length - 1} onClick={() => goFile(1)} title={`下一个文件（${keysLabel(keys.map, 'nextFile')}）`}>▼ 下个文件</button>
+        {!resMode && <>
+          <button className="btn small" disabled={fpos <= 0} onClick={() => goFile(-1)} title={`上一个文件（${keysLabel(keys.map, 'prevFile')}）`}>▲ 上个文件</button>
+          <button className="btn small" disabled={fpos < 0 || fpos >= ids.length - 1} onClick={() => goFile(1)} title={`下一个文件（${keysLabel(keys.map, 'nextFile')}）`}>▼ 下个文件</button>
+        </>}
         <div className="vb-file">
           <b>{detail ? detail.file.name : ''}</b>
-          <span className="muted small"> 文件 {fpos + 1}/{ids.length}</span>
+          {!resMode && <span className="muted small"> 文件 {fpos + 1}/{ids.length}</span>}
+          {resMode && slide && <span className="muted small"> 第 {slide.idx} {unit}</span>}
         </div>
-        {back.length > 0 && <button className="btn small" onClick={goBack} title={`返回 ${back[back.length - 1].label}（${keysLabel(keys.map, 'back')}）`}>↩ 返回</button>}
+        {back.length > 0 && <button className="btn small back-origin" onClick={goBack} title={`返回 ${back[back.length - 1].label}（${keysLabel(keys.map, 'back')}）`}>↩ 返回原来的页面</button>}
+        {back.length > 1 && <button className="btn small" onClick={() => { const first = back[0]; setBack([]); setFileId(first.fileId); setSlideId(first.slideId); }} title={first0(back)}>⤒ 回到最初</button>}
         <div className="spacer" />
-        <button className="btn small" disabled={pos <= 0} onClick={() => go(-1)} title={`上一页（${keysLabel(keys.map, 'prev')}）`}>◀</button>
-        <span className="vb-page">{unit === '节' ? '第' : '第'} {pos + 1} / {slides.length} {unit}</span>
-        <button className="btn small" disabled={pos < 0 || pos >= slides.length - 1} onClick={() => go(1)} title={`下一页（${keysLabel(keys.map, 'next')}）`}>▶</button>
+        {resMode ? <>
+          <button className="btn small" disabled={rIdx === 0} onClick={() => goResult(-1)} title={`上一个搜索结果（${keysLabel(keys.map, 'prev')}）`}>◀</button>
+          <span className="vb-page res">搜索结果 {rIdx >= 0 ? rIdx + 1 : '—'} / {results.length}</span>
+          <button className="btn small" disabled={rIdx === results.length - 1} onClick={() => goResult(1)} title={`下一个搜索结果（${keysLabel(keys.map, 'next')}）`}>▶</button>
+        </> : <>
+          <button className="btn small" disabled={pos <= 0} onClick={() => go(-1)} title={`上一页（${keysLabel(keys.map, 'prev')}）`}>◀</button>
+          <span className="vb-page">第 {pos + 1} / {slides.length} {unit}</span>
+          <button className="btn small" disabled={pos < 0 || pos >= slides.length - 1} onClick={() => go(1)} title={`下一页（${keysLabel(keys.map, 'next')}）`}>▶</button>
+        </>}
         {slide && slide.counterpart && <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>⇄ 切换到{THEME_LABEL[slide.counterpart.theme]}版本</button>}
         <button className={`btn small ${inBasket ? 'primary' : ''}`} disabled={!slide} onClick={toggleBasket} title={keysLabel(keys.map, 'basket')}>{inBasket ? '✓ 已在导出篮' : '＋ 加入导出篮'}</button>
         {detail && <button className="btn small ghost" onClick={() => api.openPath(detail.file.path)}>打开原文件</button>}
@@ -207,7 +235,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         <button className="btn small" onClick={() => setPanes(!panes)} title={keysLabel(keys.map, 'panes')}>{panes ? '隐藏讲解词/MD' : '显示讲解词/MD'}</button>
         <button className="btn small" onClick={toggleMax} title={keysLabel(keys.map, 'max')}>{maxed ? '🗗 还原窗口' : '⛶ 最大化'}</button>
         <button className="btn small" onClick={toggleFull} title={keysLabel(keys.map, 'full')}>🖵 全屏</button>
-        <PageHelp page="viewer" onBeforeNav={onClose} />
+        <PageHelp page={resMode ? 'viewerResults' : 'viewer'} onBeforeNav={onClose} />
         {onClose && <button className="icon-btn" onClick={onClose}>✕</button>}
       </div>
       {slide ? (() => {
@@ -225,12 +253,18 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
                 </div>
                 {slide.counterpart && <div className="hint-bar">⇄ 该页有内容相近的 <b>{THEME_LABEL[slide.counterpart.theme]}</b> 版本：{slide.counterpart.fileName} 第 {slide.counterpart.idx} 页 <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>切换查看</button></div>}
                 <div className="viewer-stage">
-                  <button className="stage-nav left" disabled={pos <= 0 && fpos <= 0} onClick={() => go(-1, true)}>‹</button>
+                  {resMode ? <button className="stage-nav left" disabled={rIdx === 0} onClick={() => goResult(-1)}>‹</button> : <button className="stage-nav left" disabled={pos <= 0 && fpos <= 0} onClick={() => go(-1, true)}>‹</button>}
                   <div className="stage-slide" onDoubleClick={toggleMax} title="双击最大化 / 还原；Ctrl + 滚轮缩放" style={{ '--ratio': slide.layout ? slide.layout.w / slide.layout.h : 16 / 9 }}>{unit === '页' ? <ZoomStage view={zoom} setView={setZoom}><SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} /></ZoomStage> : <SlidePreview slide={slide} file={detail && detail.source} full highlight={terms} />}</div>
-                  <button className="stage-nav right" disabled={pos >= slides.length - 1 && fpos >= ids.length - 1} onClick={() => go(1, true)}>›</button>
+                  {resMode ? <button className="stage-nav right" disabled={rIdx === results.length - 1} onClick={() => goResult(1)}>›</button> : <button className="stage-nav right" disabled={pos >= slides.length - 1 && fpos >= ids.length - 1} onClick={() => go(1, true)}>›</button>}
                 </div>
                 <div className="viewer-strip" ref={strip}>
-                  {slides.map((s2) => (
+                  {resMode && results.map((h, i) => (
+                    <div key={h.id} data-vid={h.id} className={`strip-item hit ${h.id === slideId ? 'active' : ''}`} onClick={() => { lastR.current = i; if (!ids.includes(h.file_id)) setExtra((x) => [...x, { id: h.file_id, after: fileId }]); setFileId(h.file_id); setSlideId(h.id); }} title={`${h.fileName || ''} · ${h.title || ''}`}>
+                      <SlidePreview slide={h} />
+                      <span>{i + 1}</span>
+                    </div>
+                  ))}
+                  {!resMode && slides.map((s2) => (
                     <div key={s2.id} data-vid={s2.id} className={`strip-item ${s2.id === slideId ? 'active' : ''} ${matchedSet.has(s2.id) ? 'hit' : ''}`} onClick={() => setSlideId(s2.id)} title={s2.title}>
                       <SlidePreview slide={s2} file={detail.source} />
                       <span>{s2.idx}</span>

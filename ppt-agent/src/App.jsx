@@ -3,6 +3,7 @@ import { api, on, STATUS_LABEL, fmtSize } from './api';
 import { AppCtx } from './ctx';
 import TaskView from './components/TaskView';
 import TaskMonitor from './components/TaskMonitor';
+import DrillDialog from './components/DrillDialog';
 import LibraryView from './components/LibraryView';
 import SearchView from './components/SearchView';
 import GroupsView from './components/GroupsView';
@@ -73,6 +74,7 @@ export default function App() {
   const setView = (v) => {
     if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live' }); return; }
     if (v && v.type === 'task' && v.id) { setCurTask(v.id); setViewState({ type: 'task' }); return; }
+    if (v && v.type === 'library') { setViewState({ type: 'alllib' }); return; }
     setViewState(v);
   };
   const [tasks, setTasks] = useState([]);
@@ -83,12 +85,12 @@ export default function App() {
   const [basket, setBasket] = useState(readBasket);
   const [toasts, setToasts] = useState([]);
   const [modal, setModal] = useState(null);
+  const [drill, setDrill] = useState(null); // 统计数字下钻清单
   const [compare, setCompare] = useState(null);
   const [askWatch, setAskWatch] = useState(null);
   const [welcome, setWelcome] = useState(false);
   const [tour, setTour] = useState(false);
   const [config, setConfig] = useState(null);
-  const [libMode, setLibMode] = useState('overview');
   const [allLibMode, setAllLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
   const [genState, setGenState] = useState({});
@@ -180,9 +182,10 @@ export default function App() {
     clear: () => setBasket([]),
   }), [basket]);
 
-  const openSlide = async (id, fileIds, terms, matched) => {
+  // results：从搜索结果打开时的结果页面顺序（左右键在搜索结果之间翻页）
+  const openSlide = async (id, fileIds, terms, matched, results) => {
     const s = await loadSlide(id);
-    if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [] });
+    if (s) setModal({ slideId: id, fileId: s.file_id, fileIds: fileIds && fileIds.length ? fileIds : [s.file_id], terms: terms || [], matched: matched || [], results: results || null });
   };
   // 对比窗口：2–4 个文档；starts 为 { fileId: 起始页 id }
   const openCompare = (fileIds, starts = {}) => {
@@ -203,16 +206,15 @@ export default function App() {
   };
   const ctx = {
     tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
-    exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
+    exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal,
   };
 
   const cur = tasks.find((t) => t.id === curTask) || null;
-  const SCOPED = ['task', 'tmonitor', 'library'];
+  const SCOPED = ['task', 'tmonitor'];
   // 左侧菜单：解析任务（选择任务）→ 任务详情（只显示所选任务）→ 总览分析（全部历史）→ 智能模块 → 维护 → 底部工具
   const taskNav = [
     { key: 'task', icon: '📁', label: '任务概览' },
     { key: 'tmonitor', icon: '⚙️', label: '解析过程', sub: [['live', '解析动态'], ['history', '解析历史']] },
-    { key: 'library', icon: '📚', label: '资料库浏览' },
   ];
   const overNav = [
     { key: 'search', icon: '🔍', label: '智能搜索' },
@@ -344,7 +346,6 @@ export default function App() {
           <div className="page-help-fab"><PageHelp page={view.type} /></div>
           {view.type === 'task' && (cur ? <TaskView taskId={cur.id} /> : <NoTask />)}
           {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab })} /> : <NoTask />)}
-          {view.type === 'library' && (cur ? <LibraryView key={`lib-${cur.id}`} taskId={cur.id} title={`📚 资料库浏览 · ${cur.name}`} mode={libMode} setMode={setLibMode} /> : <NoTask />)}
           {view.type === 'search' && <SearchView defaultAll taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
           {view.type === 'groups' && <GroupsView />}
           {view.type === 'alllib' && <LibraryView key="alllib" title="🗂 所有资料库" mode={allLibMode} setMode={setAllLibMode} />}
@@ -357,12 +358,12 @@ export default function App() {
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}
-          {view.type === 'file' && <FileView id={view.id} onBack={() => setView(view.back || { type: 'search' })} />}
+          {view.type === 'file' && <FileView id={view.id} onBack={() => { setView(view.back || { type: 'search' }); if (view.backDrill) setDrill(view.backDrill); }} />}
         </main>
         {modal && (
           <div className="overlay" onClick={() => setModal(null)}>
             <div className="modal viewer-modal" onClick={(e) => e.stopPropagation()}>
-              <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} onClose={() => setModal(null)} />
+              <SlideViewer fileIds={modal.fileIds} initialFileId={modal.fileId} initialSlideId={modal.slideId} terms={modal.terms} matched={modal.matched} results={modal.results} onClose={() => setModal(null)} />
             </div>
           </div>
         )}
@@ -373,6 +374,7 @@ export default function App() {
             </div>
           </div>
         )}
+        {drill && <DrillDialog spec={drill} onClose={() => setDrill(null)} />}
         {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
         {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setAllLibMode} onHelp={() => setView({ type: 'help' })} />}
         {askWatch && <WatchAskDialog roots={askWatch.roots} onClose={onAskWatch} />}

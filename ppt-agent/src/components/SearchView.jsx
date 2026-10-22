@@ -183,7 +183,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
               {tab !== 'viewer' && <div className="card-grid">
                 {slides.map((s) => (
                   <div key={s.id} data-rid={s.id} className={`slide-card ${sel.has(s.id) ? 'sel' : ''} ${flash === s.id ? 'flash' : ''}`}>
-                    <div className="sc-preview" onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id))}>
+                    <div className="sc-preview" onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slides)}>
                       <SlidePreview slide={s} highlight={terms} />
                       <label className="sc-check" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={sel.has(s.id)} onChange={() => toggle(s.id)} /></label>
                       <span className="sc-score">{Math.round(s.score * 100)}</span>

@@ -758,6 +758,11 @@ class AgentService extends EventEmitter {
     }
     const agg = parsedIds.length ? this.store.db.prepare(`SELECT SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (${parsedIds.join(',')})`).get() : { h: 0, s: 0 };
     st.hidden = agg.h || 0; st.subtitles = agg.s || 0;
+    // 每个文件的隐藏页 / 含字幕页数，供统计数字下钻
+    if (parsedIds.length) {
+      const per = new Map(this.store.db.prepare(`SELECT file_id, SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (${parsedIds.join(',')}) GROUP BY file_id`).all().map((r) => [r.file_id, r]));
+      for (const f of files) { const r = f.id && f.status === 'parsed' ? per.get(f.id) : null; f.hidden_count = r ? r.h || 0 : 0; f.subtitle_count = r ? r.s || 0 : 0; }
+    }
     return { task: { ...task, running: this.running === id }, files, stats: st };
   }
 

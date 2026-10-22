@@ -6,6 +6,7 @@ import SlideViewer from './SlideViewer';
 import DataTable from './DataTable';
 import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
+import { StatCards } from './DrillDialog';
 
 const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
@@ -204,8 +205,14 @@ function OverviewMode({ scopeTask }) {
   const ppt = ok.filter((r) => (r.kind || 'ppt') === 'ppt'), word = ok.filter((r) => r.kind === 'word');
   const cats = {}; for (const r of ok) cats[r.category || '其他'] = (cats[r.category || '其他'] || 0) + 1;
   const authors = new Set(ok.map((r) => r.author).filter(Boolean));
-  const cards = [['文档总数', rows.length], ['已解析', ok.length], ['PPT 文件', ppt.length], ['PPT 页数', ppt.reduce((a, r) => a + (r.slide_count || 0), 0)], ['黑底页', sum('dark_slides')], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0)],
-    ['Word 文档', word.length], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0)], ['视频', sum('video_count')], ['作者数', authors.size], ['总大小', fmtSize(rows.reduce((a, r) => a + (r.size || 0), 0))]];
+  const isPpt = (r) => r.status === 'parsed' && (r.kind || 'ppt') === 'ppt', isWord = (r) => r.status === 'parsed' && r.kind === 'word';
+  // 每个统计数字都可点击下钻：[名称, 数值, 筛选条件, 突出显示的列]
+  const cards = [['文档总数', rows.length, () => true], ['已解析', ok.length, (r) => r.status === 'parsed'], ['PPT 文件', ppt.length, isPpt], ['PPT 页数', ppt.reduce((a, r) => a + (r.slide_count || 0), 0), isPpt, ['slide_count']],
+    ['黑底页', sum('dark_slides'), (r) => r.status === 'parsed' && r.dark_slides > 0, ['dark_slides']], ['白底页', ppt.reduce((a, r) => a + (r.light_slides || 0), 0), (r) => isPpt(r) && r.light_slides > 0, ['light_slides']],
+    ['Word 文档', word.length, isWord], ['Word 章节', word.reduce((a, r) => a + (r.slide_count || 0), 0), isWord, ['slide_count']], ['视频', sum('video_count'), (r) => r.status === 'parsed' && r.video_count > 0, ['video_count']],
+    ['作者数', authors.size, (r) => r.status === 'parsed' && !!r.author], ['总大小', fmtSize(rows.reduce((a, r) => a + (r.size || 0), 0)), () => true]];
+  const scopeName = scopeTask ? '' : taskId === 'all' ? '全部任务' : `#${taskId}`;
+  const drill = (k, pick, show) => app.drill({ key: `lib-${taskId}-${k}`, title: `${scopeName ? `${scopeName} · ` : ''}${k}`, rows: rows.filter(pick), show, sort: k === '总大小' ? { k: 'size', d: -1 } : show ? { k: show[0], d: -1 } : undefined });
   const columns = [
     { key: 'name', label: '文件名', render: (r) => <span className="link" onClick={() => r.status !== 'failed' && app.openFile(r.id)} title={r.path}>{r.name}</span> },
     { key: 'kind', label: '类型', sort: (r) => r.kind || 'ppt', render: (r) => KIND_LABEL[r.kind || 'ppt'] },
@@ -227,8 +234,8 @@ function OverviewMode({ scopeTask }) {
   ];
   return (
     <div className="files-stats">
-      <div className="cards">{cards.map(([k, v]) => <div key={k} className="card"><div className="card-v">{v}</div><div className="card-k">{k}</div></div>)}</div>
-      <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip">主题分类·{k} {v}</span>)}</div>
+      <StatCards cards={cards} onDrill={drill} />
+      <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip drill" onClick={() => drill(`主题分类·${k}`, (r) => r.status === 'parsed' && (r.category || '其他') === k)}>主题分类·{k} {v}</span>)}</div>
       <DataTable id="libOverview" columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文档"
         actions={<><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
         toolbar={(

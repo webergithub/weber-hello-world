@@ -3,6 +3,7 @@ import { api, assetUrl, STATUS_LABEL, THEME_LABEL } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import { HtmlSlide } from './SlidePreview';
+import { drillTask } from './DrillDialog';
 
 const base = (p) => String(p || '').split(/[\\/]/).pop();
 const MIN_SHOW_MS = 650; // 每页至少展示的时长（只影响动画节奏，不拖慢解析）
@@ -72,7 +73,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
         </select>}
         <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>
         <div className="ls-prog"><div className="progress big"><div style={{ width: `${t.status === 'done' ? 100 : filePct}%` }} /></div></div>
-        <span className="small">文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
+        <span className="small num-link" onClick={() => drillTask(app, t, '已处理文档')}>文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
         {t.status === 'running' && <button className="btn small" disabled={!!(app.liveTasks[t.id] && app.liveTasks[t.id].pausing)} onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>{app.liveTasks[t.id] && app.liveTasks[t.id].pausing ? '正在暂停…' : '⏸ 暂停'}</button>}
         {['paused', 'interrupted'].includes(t.status) && <button className="btn small primary" onClick={() => api.resumeTask(t.id).then(app.refreshTasks)}>▶ 继续</button>}
         {t.status === 'draft' && <button className="btn small primary" onClick={() => api.startTask(t.id).then(app.refreshTasks)}>▶ 开始解析</button>}
@@ -83,7 +84,8 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
         <div className="ls-body">
           <div className="ls-left">
             <div className="ls-file">📄 <b>{base(cur.file)}</b> <span className="muted small">第 {cur.slide}/{cur.slideTotal} {cur.unit || '页'}</span>
-              {cur.detail && cur.kind !== 'word' && <span className={`tag theme-${cur.detail.theme}`}>{THEME_LABEL[cur.detail.theme]}</span>}</div>
+              {cur.detail && cur.kind !== 'word' && <span className={`tag theme-${cur.detail.theme}`}>{THEME_LABEL[cur.detail.theme]}</span>}
+              <span className="spacer" /><button className="btn tiny" title={cur.file} onClick={() => api.showItem(cur.file)}>📂 在资源管理器中显示</button></div>
             <div className="ls-stage" style={{ '--ratio': cur.detail && cur.detail.layout ? cur.detail.layout.w / cur.detail.layout.h : 16 / 9 }}>
               <div key={cur.seq} className={`ls-slide ${cur.kind === 'word' ? 'doc' : ''}`}>
                 {cur.detail && cur.detail.thumb ? <img className="ls-shot" src={assetUrl('thumb', cur.detail.thumb)} alt={cur.title} draggable={false} />

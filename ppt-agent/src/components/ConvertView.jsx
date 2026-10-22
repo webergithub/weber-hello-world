@@ -54,6 +54,12 @@ export default function ConvertView() {
         <button className="btn ghost" disabled={!queue.length} onClick={() => setQueue([])}>清空序列</button>
         <button className="btn primary" disabled={!queue.length || busy} onClick={run}>{busy ? '转换中…' : `开始转换并导出（${queue.length} 页）`}</button>
       </div>
+      {rules && (
+        <div className="cv-rules-banner">
+          <div className="rules-head"><b>📐 当前转换规则</b><div className="spacer" /><span className="link small" onClick={() => setRulesOpen(true)}>查看 / 修改</span></div>
+          <RulesSummary rules={rules} />
+        </div>
+      )}
       <div className="convert">
         <div className="cv-col">
           <div className="side-title">① 导出篮中的 PPT 页面（{pptSlides.length}）<div className="spacer" />
@@ -97,10 +103,6 @@ export default function ConvertView() {
               </div>
             );
           })}
-          <div className="rules">
-            <div className="rules-head"><b>当前转换规则</b><div className="spacer" /><span className="link small" onClick={() => setRulesOpen(true)}>查看 / 修改</span></div>
-            {rules && <RulesSummary rules={rules} />}
-          </div>
         </div>
         {result && (
           <div className="cv-result">

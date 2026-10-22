@@ -954,3 +954,21 @@ th.filtered { color: var(--accent); }
 .zoom-bar, .zoom-bar button { white-space: nowrap; }
 .ws-stage .zoom-bar input[type=range] { width: 56px; }
 .rules-modal .rule-color .input.num { width: 56px; }
+.grid tr.row-last td { background: rgba(255, 193, 7, .14); }
+.grid tr.row-last td:first-child { box-shadow: inset 3px 0 0 #f0a500; }
+/* 统计数字下钻 */
+.card.drill { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+.card.drill:hover { box-shadow: 0 0 0 2px var(--accent) inset; transform: translateY(-1px); }
+.chip.drill, .num-link { cursor: pointer; }
+.chip.drill:hover { border-color: var(--accent); color: var(--accent); }
+.num-link:hover { color: var(--accent); text-decoration: underline; }
+.drill-modal { width: min(1200px, 96vw); height: min(80vh, 900px); display: flex; flex-direction: column; }
+.drill-body { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 8px 12px 12px; }
+.drill-body .dt { flex: 1; min-height: 0; }
+/* 黑白底互转：标题下方的当前规则提示模块 */
+.cv-rules-banner { margin: 8px 16px 0; flex-shrink: 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 8px; background: var(--bg2); }
+.cv-rules-banner .rules-head { margin-bottom: 2px; }
+.vb-page.res { font-weight: 600; color: var(--accent); }
+/* 推荐页查看中：返回原页面按钮醒目显示 */
+.btn.back-origin { background: #ffe0b2; color: #000; border-color: #f0a500; font-weight: 600; }
+.btn.back-origin:hover { background: #ffd08a; }

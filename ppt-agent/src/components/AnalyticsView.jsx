@@ -18,15 +18,19 @@ const ago = (t, now) => {
 const REFRESH = [['open', '每次打开时'], ['daily', '每天'], ['weekly', '每周'], ['manual', '仅手动']];
 
 // 总览分析：近期访问 / 修改、长期未打开、读写数据统计；统计数字与图表均可点击下钻到文件清单
+// 页签、筛选与下钻清单在会话内记住：从文件详情返回时回到原来的清单
+let MEMO = { tab: 'recent', recent: '7d', recentBy: 'any', stale: '365d', drill: null };
+
 export default function AnalyticsView() {
   const app = useApp();
   const [data, setData] = useState(null);
-  const [tab, setTab] = useState('recent');
-  const [recent, setRecent] = useState('7d');
-  const [recentBy, setRecentBy] = useState('any');
-  const [stale, setStale] = useState('365d');
+  const [tab, setTab] = useState(MEMO.tab);
+  const [recent, setRecent] = useState(MEMO.recent);
+  const [recentBy, setRecentBy] = useState(MEMO.recentBy);
+  const [stale, setStale] = useState(MEMO.stale);
   const [sel, setSel] = useState(() => new Set());
-  const [drill, setDrill] = useState(null); // { title, rows, from }
+  const [drill, setDrill] = useState(MEMO.drill); // { title, rows, from }
+  useEffect(() => { MEMO = { tab, recent, recentBy, stale, drill }; }, [tab, recent, recentBy, stale, drill]);
   const [busy, setBusy] = useState(false);
   const load = (force = false) => { setBusy(true); return api.analytics({ force }).then(setData).finally(() => setBusy(false)); };
   useEffect(() => { load(); }, [app.taskTick]);
@@ -66,7 +70,7 @@ export default function AnalyticsView() {
     { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => <><button className="btn tiny" disabled={!r.exists} onClick={() => api.openPath(r.path)} title={`用 ${r.kind === 'word' ? 'Word' : 'PowerPoint'} 打开`}>打开文件</button><button className="btn tiny" disabled={!r.exists} onClick={() => api.showItem(r.path)} title="在资源管理器中显示并选中该文件">在资源管理器中显示</button></> },
   ];
   const list = (id, rows, opts = {}) => (
-    <DataTable id={id} columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={opts.sort || { k: 'lastOpen', d: -1 }} empty={opts.empty || '没有文档'}
+    <DataTable id={id} sessionKey={drill && id === 'analytics-drill' ? `${id}-${drill.title}` : id} columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={opts.sort || { k: 'lastOpen', d: -1 }} empty={opts.empty || '没有文档'}
       toolbar={opts.toolbar}
       actions={<><button className="btn small" disabled={sel.size !== 1} onClick={() => { const r = rows.find((x) => sel.has(x.id)); if (r) api.showItem(r.path); }}>在资源管理器中显示</button><CompareButton ids={[...sel]} /><RecycleButton ids={[...sel]} done={() => { setSel(new Set()); load(true); }} /></>} />
   );

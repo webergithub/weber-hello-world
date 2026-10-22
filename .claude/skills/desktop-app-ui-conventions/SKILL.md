@@ -23,11 +23,13 @@ Each table must support:
 - **Multi-select with checkboxes**: select all, Shift+click range, "已选 N" badge, and bulk actions next to the selection (export, compare, move to recycle bin, …).
 - **Remember per-table settings** (sort, hidden columns) in local storage under a per-table id.
 - **Fill the available height**: the list stretches to the bottom of the window and scrolls inside; never stop half-way down the page.
-- Row actions for files: "打开文件" (open with the default app) and "在资源管理器中显示" (reveal in Explorer / Finder).
+- Row actions for files: "打开文件" (open with the default app) and "在资源管理器中显示" (reveal in Explorer / Finder). Every list or process view that shows files gets a toolbar "📂 在资源管理器中显示" for the selected / last-clicked file plus a per-row 📂.
+- **Coming back restores the context**: when a row opens a detail page and the user clicks "← 返回", return to the same view, tab, filters, keyword and scroll position, and highlight the row they opened (e.g. pale gold background + accent bar) scrolled into view. Keep this per-list state in memory for the session (keyed by list id + scope); also reopen any drill-down list that was open.
 
 ## 2. Layout and visual quality
 
 - **Search pages**: before searching, put the search box in the centre of the page (horizontally and vertically), large and rounded, with a title, example chips and a short stats line. After searching, move it to a compact top bar with a clear button.
+- **Every statistic drills down**: anywhere a count is shown (stat cards, "N 条 · 新增 x" counts, per-item counters on cards, category / extension chips, progress "n / total"), clicking it opens the list of the underlying items in one shared drill-down dialog (sortable / filterable table, the counted column shown first and sorted, open / reveal / compare actions). Counts inside a list's own toolbar may filter that list in place instead.
 - **Dashboards and analytics**: every number tile and every bar / column is clickable and **drills down to the underlying item list**, shown as a closable tab with a "← 返回". Charts: one axis, thin bars, value labels, hover tooltips. Let the user set the refresh frequency (每次打开 / 每天 / 每周 / 仅手动); show the "统计时间" and next refresh time.
 - **Tabs visually attached** to the content below them.
 - Detail views with several panels: panels can be resized by dragging, swapped by dragging their title bar, minimised to a bottom dock, layout toggles (上1下2 / 左1右2); remember sizes and layout.
@@ -55,7 +57,9 @@ Each table must support:
 - Allow side-by-side comparison of 2–4 items with linked paging plus per-pane controls.
 - Page / image previews support stepless zoom: Ctrl + wheel around the cursor, a small zoom bar (－ / slider / ＋ / percentage / "⤢ 适配窗口"), drag to pan when zoomed, keys = / - / 0; keep the zoom level when paging.
 - Rule editors (e.g. colour conversion) use one tab per direction, a before/after preview, a base-rule table "element · original · after · effect swatch", and a custom-rule list "element + original value (any / exact + tolerance) → result (value / keep / none)" with enable, reorder and delete; first matching custom rule wins.
-- A "related items" side rail: clicking an item replaces the current view in place, with "↩ 返回" (Backspace).
+- A "related items" side rail: clicking an item replaces the current view in place and shows a prominent "↩ 返回原来的页面" button (highlighted colour, Backspace too); after several jumps also offer "⤒ 回到最初".
+- A viewer opened from a search result pages through the **search results** (same order as the result page, across files) with ← → only; hide file / page navigation, show "搜索结果 i / N" and a strip of the results.
+- Settings that drive a page's behaviour (e.g. current conversion rules) are summarised in a small block directly under the page title, with a "查看 / 修改" link.
 
 ## 5. Long-running tasks
 
