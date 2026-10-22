@@ -16,7 +16,8 @@ function snippet(text, terms, n = 140) {
   return (start > 0 ? '…' : '') + t.slice(start, start + n) + (start + n < t.length ? '…' : '');
 }
 
-export default function SearchView({ state, setState }) {
+/** 智能搜索：taskId 为当前选择的任务，默认只在该任务的文档中检索，可切换到全部资料库 */
+export default function SearchView({ state, setState, taskId, taskName }) {
   const app = useApp();
   const { q = '', result = null, tab = 'light' } = state;
   const [input, setInput] = useState(q);
@@ -29,13 +30,26 @@ export default function SearchView({ state, setState }) {
   const [cmpSel, setCmpSel] = useState(() => new Set());
   const inputRef = useRef(null);
   const llmOn = app.config && app.config.llm && app.config.llm.enabled;
+  const [stats, setStats] = useState(null);
+  const [scopeAll, setScopeAll] = useState(!taskId);
+  useEffect(() => { setScopeAll(!taskId); }, [taskId]);
+  useEffect(() => {
+    if (taskId && !scopeAll) api.library({ taskId }).then((fs) => { const ok = fs.filter((f) => f.status === 'parsed'); setStats({ files: ok.length, slides: ok.reduce((a, f) => a + (f.slide_count || 0), 0) }); }).catch(() => {});
+    else api.stats().then(setStats).catch(() => {});
+  }, [app.taskTick, taskId, scopeAll]);
+  const scopeSeg = taskId ? (
+    <div className="seg small scope-seg" title="检索范围">
+      <button className={!scopeAll ? 'on' : ''} onClick={() => { setScopeAll(false); setState({}); }}>当前任务 #{taskId} {taskName}</button>
+      <button className={scopeAll ? 'on' : ''} onClick={() => { setScopeAll(true); setState({}); }}>所有资料库</button>
+    </div>
+  ) : null;
 
   useEffect(() => { inputRef.current && inputRef.current.focus(); }, []);
   const run = async (text = input) => {
     if (!text.trim()) return;
     setBusy(true); setAnswer(null); setFileFilter(null);
     try {
-      const r = await api.search(text.trim(), { useLlm: llmOn && useLlm });
+      const r = await api.search(text.trim(), { useLlm: llmOn && useLlm, taskId: taskId && !scopeAll ? taskId : undefined });
       setState({ q: text.trim(), result: r, tab: state.tab === 'viewer' ? 'viewer' : r.slides.light.length ? 'light' : r.slides.dark.length ? 'dark' : r.slides.word.length ? 'word' : 'light' });
       setSel(new Set()); setCmpSel(new Set());
     } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
@@ -75,16 +89,32 @@ export default function SearchView({ state, setState }) {
 
   return (
     <div className="view">
-      <div className="search-bar">
-        <input ref={inputRef} className="input big" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
-          onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
-        <button className="btn primary big" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '🔍 智能搜索'}</button>
-        {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
-      </div>
-      {!result && (
-        <div className="search-empty">
-          <p>可检索内容：设置中启用的 PPT 与 Word 文档（本地数据库 + 本地 RAG，不上传数据）。检索流程：<b>中英文解析</b>（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ <b>文件名</b>命中优先 → <b>标签</b>命中 → <b>内容</b>（BM25 全文 + 向量语义召回，RRF 融合）→ 推荐页面（附备注讲解词），按白底 / 黑底分开展示。</p>
-          <div className="chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
+      {/* 未搜索时：搜索框在页面中央（类似搜索引擎首页）；有结果后收到顶部 */}
+      {!result ? (
+        <div className="search-landing">
+          <div className="sl-hero">
+            <div className="sl-logo">🔍 智能搜索</div>
+            <div className="sl-sub">在本机的 PPT 与 Word 中按文件名、标签与内容检索，中英文混合均可</div>
+          </div>
+          <div className="sl-box">
+            <input ref={inputRef} className="input sl-input" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
+              onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
+            <button className="btn primary sl-btn" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '搜索'}</button>
+          </div>
+          {scopeSeg}
+          {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
+          <div className="chips sl-chips">{['机航 turnaround', '如何缩短飞机过站时间', 'RAG knowledge assistant', '安全培训视频', '成本优化 cost'].map((x) => <span key={x} className="chip link" onClick={() => { setInput(x); run(x); }}>{x}</span>)}</div>
+          {stats && <div className="sl-stats"><span><b>{stats.files}</b> 个文档</span><span><b>{stats.slides}</b> 页 / 节</span><span>本地 RAG · 不上传数据</span></div>}
+          <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word 分开推荐页面</div>
+        </div>
+      ) : (
+        <div className="search-bar">
+          <input ref={inputRef} className="input big" placeholder="输入关键词或一句描述，例如：机航 turnaround / 如何缩短飞机过站时间" value={input}
+            onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
+          <button className="btn primary big" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '🔍 智能搜索'}</button>
+          {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
+          {scopeSeg}
+          <button className="btn ghost" title="清空结果，回到搜索首页" onClick={() => { setState({}); setInput(''); }}>✕ 清空</button>
         </div>
       )}
       {result && (

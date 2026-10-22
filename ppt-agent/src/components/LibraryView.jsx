@@ -9,20 +9,21 @@ import { CompareButton } from './CompareView';
 
 const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
-export default function LibraryView({ mode, setMode }) {
+/** 资料库浏览：taskId 为空时是“所有资料库”（全部解析过的文档），否则只显示该任务解析到的文档 */
+export default function LibraryView({ mode, setMode, taskId, title = '📚 资料库' }) {
   const app = useApp();
   const [files, setFiles] = useState([]);
   const [cats, setCats] = useState({ categories: [], tags: [] });
-  useEffect(() => { api.library().then(setFiles); api.categories().then(setCats); }, [app.taskTick]);
+  useEffect(() => { api.library({ taskId }).then(setFiles); api.categories({ taskId }).then(setCats); }, [app.taskTick, taskId]);
   return (
     <div className="view">
       <div className="view-head">
-        <div className="vh-title">📚 资料库 <span className="muted small">{files.filter((f) => f.status === 'parsed').length} 个已解析文件</span></div>
+        <div className="vh-title">{title} <span className="muted small">{files.filter((f) => f.status === 'parsed').length} 个已解析文件</span></div>
       </div>
       <div className="lib-tabs">{Object.entries(MODES).map(([k, v]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{v}</button>)}</div>
       <div className="tab-body lib-body">
-        {mode === 'overview' && <OverviewMode />}
-        {mode === 'gallery' && <GalleryMode files={files} />}
+        {mode === 'overview' && <OverviewMode scopeTask={taskId} />}
+        {mode === 'gallery' && <GalleryMode key={taskId || 'all'} files={files} />}
         {mode === 'folder' && <FolderMode files={files} />}
         {mode === 'name' && <NameMode files={files} />}
         {mode === 'tags' && <TagMode files={files} cats={cats} />}
@@ -183,10 +184,11 @@ function GalleryMode({ files }) {
 }
 
 // 总览：每个任务 / 全部任务识别到的所有文档的汇总信息
-function OverviewMode() {
+function OverviewMode({ scopeTask }) {
   const app = useApp();
   const [data, setData] = useState({ tasks: [], files: [] });
-  const [taskId, setTaskId] = useState('all');
+  const [pick, setTaskId] = useState('all');
+  const taskId = scopeTask || pick;
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
   const [sel, setSel] = useState(() => new Set());
@@ -213,7 +215,7 @@ function OverviewMode() {
     { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => ((r.kind || 'ppt') === 'ppt' ? r.light_slides || 0 : '-') },
     { key: 'theme', label: '底色', render: (r) => ((r.kind || 'ppt') === 'ppt' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'category', label: '主题分类' },
-    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), className: 'tags-cell', render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
+    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => (r.tags || []).map((t) => <span key={t} className="tag">{t}</span>) },
     { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },
@@ -231,10 +233,10 @@ function OverviewMode() {
         actions={<><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
-            <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+            {!scopeTask && <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
               <option value="all">全部任务（{data.files.length} 个文档）</option>
               {data.tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}，{STATUS_LABEL[t.status] || t.status}）</option>)}
-            </select>
+            </select>}
             <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部类型</option><option value="ppt">PPT</option><option value="word">Word</option></select>
             <input className="input" placeholder="按路径 / 标签 / 作者 / 分类过滤" value={q} onChange={(e) => setQ(e.target.value)} style={{ width: 240 }} />
           </>

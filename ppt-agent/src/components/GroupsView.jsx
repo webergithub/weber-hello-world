@@ -6,13 +6,13 @@ import { RecycleButton } from './Recycle';
 import { CompareButton, COMPARE_MAX } from './CompareView';
 
 // 内容相近的 PPT 分组：先比较（归一化后的）标题，再比较内容向量；支持按名称或大小排序
-export default function GroupsView() {
+export default function GroupsView({ taskId }) {
   const app = useApp();
   const [sort, setSort] = useState('name');
   const [order, setOrder] = useState('asc');
   const [groups, setGroups] = useState([]);
   const [onlyTheme, setOnlyTheme] = useState(false);
-  useEffect(() => { api.groups({ sort, order }).then(setGroups); }, [sort, order, app.taskTick]);
+  useEffect(() => { api.groups({ sort, order, taskId }).then(setGroups); }, [sort, order, app.taskTick, taskId]);
   const list = onlyTheme ? groups.filter((g) => g.hasThemeVariants) : groups;
   const [sel, setSel] = useState(() => new Set());
   const memberCols = [

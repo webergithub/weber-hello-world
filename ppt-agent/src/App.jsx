@@ -61,7 +61,16 @@ export default function App() {
       {collapsed ? (folded[k] ? '▸' : short || '▾') : <><span className="caret">{folded[k] ? '▸' : '▾'}</span>{label}</>}
     </div>
   );
-  const [view, setView] = useState({ type: 'search' });
+  const [view, setViewState] = useState({ type: 'search' });
+  // 当前选择的解析任务：“任务详情”模块下的菜单只显示该任务的内容
+  const [curTask, setCurTaskState] = useState(() => Number(readLS('ppta.curTask', '0')) || null);
+  const setCurTask = (id) => { setCurTaskState(id); try { localStorage.setItem('ppta.curTask', String(id || '')); } catch { /* ignore */ } };
+  // 兼容旧的跳转写法：{ type: 'monitor', taskId } 表示某个任务的解析过程
+  const setView = (v) => {
+    if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live' }); return; }
+    if (v && v.type === 'task' && v.id) { setCurTask(v.id); setViewState({ type: 'task' }); return; }
+    setViewState(v);
+  };
   const [tasks, setTasks] = useState([]);
   const [liveTasks, setLiveTasks] = useState({});
   const [progress, setProgress] = useState({});
@@ -76,6 +85,7 @@ export default function App() {
   const [tour, setTour] = useState(false);
   const [config, setConfig] = useState(null);
   const [libMode, setLibMode] = useState('overview');
+  const [allLibMode, setAllLibMode] = useState('overview');
   const [searchState, setSearchState] = useState({});
   const [genState, setGenState] = useState({});
   const [exporting, setExporting] = useState(null);
@@ -93,6 +103,8 @@ export default function App() {
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), kind === 'error' ? 8000 : 5000);
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
+  useEffect(() => { setSearchState({}); }, [curTask]);
+  useEffect(() => { if (tasks.length && !tasks.some((t) => t.id === curTask)) setCurTask(tasks[0].id); if (!tasks.length && curTask) setCurTask(null); }, [tasks]);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
   const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
 
@@ -126,7 +138,7 @@ export default function App() {
     for (const d of dirs) {
       try { last = await api.addTask(d); toast(`已添加任务：${d}（点击“开始解析”后执行）`); } catch (e) { toast(e.message, 'error'); }
     }
-    if (last) { await refreshTasks(); setView({ type: 'monitor' }); }
+    if (last) { await refreshTasks(); setCurTask(last); setViewState({ type: 'task' }); }
   };
   const addAllLocal = async () => {
     setAddMenu(false);
@@ -138,9 +150,9 @@ export default function App() {
     if (!r) return;
     try {
       if (r.watch) setConfig(await api.setConfig({ watch: { time: r.time, catchUp: r.catchUp } }));
-      await api.addAllLocalTask({ watch: r.watch, time: r.time });
+      const nid = await api.addAllLocalTask({ watch: r.watch, time: r.time });
       setConfig(await api.getConfig());
-      await refreshTasks(); setView({ type: 'monitor' });
+      await refreshTasks(); setCurTask(nid); setViewState({ type: 'task' });
       toast(`已添加“本机全部文档”任务，点击“开始解析”后执行${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`);
     } catch (e) { toast(e.message, 'error'); }
   };
@@ -189,22 +201,50 @@ export default function App() {
     exportSlides, openSlide, openCompare, modalOpen: !!modal || !!compare, openFile: (id) => setView({ type: 'file', id, back: view }), go: setView, addDir, addAllLocal,
   };
 
-  // 左侧菜单分区：解析任务 → 智能模块 → 功能
-  const smartNav = [
-    { key: 'generate', icon: '✨', label: '智能生成' },
-  ];
-  const nav = [
-    { key: 'search', icon: '🔍', label: '智能搜索' },
-    { key: 'analytics', icon: '📈', label: '总览分析' },
-    { key: 'monitor', icon: '⚙️', label: `解析任务${tasks.some((t) => t.status === 'running') ? ' ●' : ''}` },
+  const cur = tasks.find((t) => t.id === curTask) || null;
+  const SCOPED = ['task', 'tmonitor', 'library', 'search', 'groups'];
+  // 左侧菜单：解析任务（选择任务）→ 任务详情（只显示所选任务）→ 总览分析（全部历史）→ 智能模块 → 底部工具
+  const taskNav = [
+    { key: 'task', icon: '📁', label: '任务概览' },
+    { key: 'tmonitor', icon: '⚙️', label: '解析过程', sub: [['live', '解析动态'], ['history', '解析历史']] },
     { key: 'library', icon: '📚', label: '资料库浏览' },
+    { key: 'search', icon: '🔍', label: '智能搜索' },
     { key: 'groups', icon: '🧩', label: '相似分组' },
-    { key: 'basket', icon: '🧺', label: `导出篮${basket.length ? `（${basket.length}）` : ''}` },
-    { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
+  ];
+  const overNav = [
+    { key: 'analytics', icon: '📈', label: '总览分析' },
+    { key: 'alllib', icon: '🗂', label: '所有资料库' },
+    { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => t.status === 'running') ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
     { key: 'recycle', icon: '🗑', label: '回收站' },
+  ];
+  const smartNav = [
+    { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
+    { key: 'generate', icon: '✨', label: '智能生成', wip: true },
+  ];
+  const toolNav = [
+    { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
     { key: 'logs', icon: '📜', label: '运行日志' },
     { key: 'settings', icon: '🛠', label: '设置' },
   ];
+  const selectTask = (t) => {
+    setCurTask(t.id);
+    if (['running', 'pending'].includes(t.status)) setViewState({ type: 'tmonitor', tab: 'live' });
+    else if (!SCOPED.includes(view.type)) setViewState({ type: 'task' });
+  };
+  const navItem = (n, { disabled = false } = {}) => (
+    <React.Fragment key={n.key}>
+      <div className={`sb-item ${view.type === n.key ? 'active' : ''} ${disabled ? 'disabled' : ''}`} data-tour={`nav-${n.key}`} title={n.label}
+        onClick={() => !disabled && setViewState({ type: n.key, tab: n.sub ? (view.type === n.key ? view.tab : n.sub[0][0]) : undefined })}>
+        <span className="ic">{n.icon}</span>{!collapsed && <span className="lbl">{n.label}{n.wip && <span className="wip">建设中</span>}</span>}
+        {n.badge ? <span className="sb-badge">{n.badge}</span> : null}
+      </div>
+      {n.sub && view.type === n.key && !collapsed && (
+        <div className="sb-sub">
+          {n.sub.map(([k, v]) => <div key={k} className={`sb-subitem ${(view.tab || n.sub[0][0]) === k ? 'active' : ''}`} onClick={() => setViewState({ type: n.key, tab: k })}>{v}</div>)}
+        </div>
+      )}
+    </React.Fragment>
+  );
   const themeNext = { system: 'dark', dark: 'light', light: 'system' };
   const themeIcon = { system: '🖥', dark: '🌙', light: '☀️' };
 
@@ -226,71 +266,67 @@ export default function App() {
               </div>
             )}
           </div>
-          {secHead('tasks', `解析任务${tasks.length ? `（${tasks.length}）` : ''}`, '')}
+          {secHead('tasks', <>📂 解析任务{tasks.length ? <span className="sb-count">{tasks.length}</span> : null}</>, '📂')}
           {!folded.tasks && <div className="sb-tasks" data-tour="tasks">
-            {!tasks.length && !collapsed && <div className="muted small pad">还没有任务，点击上方按钮添加目录</div>}
+            {!tasks.length && !collapsed && <div className="sb-empty">还没有任务，点击上方“添加目录”</div>}
             {tasks.map((t) => {
               const live = liveTasks[t.id];
               const pct = t.total ? Math.round(((live && live.done) || (t.parsed + t.skipped + t.duplicate + t.failed)) / t.total * 100) : 0;
+              const on = t.id === curTask;
               return (
-                <div key={t.id} className={`sb-task ${(view.type === 'task' && view.id === t.id) || (view.type === 'monitor' && view.taskId === t.id) ? 'active' : ''}`} onClick={() => setView(['running', 'pending'].includes(t.status) ? { type: 'monitor', tab: 'live', taskId: t.id } : { type: 'task', id: t.id })} title={t.dir}>
+                <div key={t.id} className={`sb-task ${on ? 'active' : ''}`} onClick={() => selectTask(t)} title={t.dir}>
                   <span className={`dot s-${t.status}`} />
                   {!collapsed && (
                     <div className="sbt-main">
-                      <div className="sbt-name">#{t.id} {t.name}{t.watch ? <span className="watch-dot" title={`已开启定时监测更新（每天 ${(config && config.watch && config.watch.time) || ''}）`}> 📡</span> : null}</div>
-                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析 / ${t.skipped + t.duplicate} 跳过`}</div>
+                      <div className="sbt-name">{t.name}{t.watch ? <span className="watch-dot" title={`已开启定时监测更新（每天 ${(config && config.watch && config.watch.time) || ''}）`}> 📡</span> : null}</div>
+                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析`}</div>
+                      {t.status === 'running' && <div className="sbt-bar"><div style={{ width: `${pct}%` }} /></div>}
                     </div>
                   )}
-                  {!collapsed && ['draft', 'interrupted', 'paused', 'cancelled'].includes(t.status) && (
-                    <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); (t.status === 'draft' ? api.startTask(t.id) : api.resumeTask(t.id)).then(refreshTasks); setView({ type: 'monitor', tab: 'live', taskId: t.id }); }}>▶</button>
-                  )}
-                  {!collapsed && t.status === 'running' && (
-                    <button className="icon-btn tiny pause" title="暂停（可从断点继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
-                  )}
-                  {!collapsed && !['running', 'pending'].includes(t.status) && (
-                    <button className="icon-btn tiny" title="删除任务（解析历史保留）" onClick={async (e) => {
-                      e.stopPropagation();
-                      if (!confirm(`删除任务 #${t.id}「${t.name}」？\n\n该任务解析的文件会从资料库移除，解析历史记录会保留。`)) return;
-                      await api.deleteTask(t.id, true); refreshTasks(); bump(); if (view.id === t.id) setView({ type: 'search' });
-                    }}>✕</button>
-                  )}
+                  {!collapsed && <div className="sbt-ops">
+                    {['draft', 'interrupted', 'paused', 'cancelled'].includes(t.status) && (
+                      <button className="icon-btn tiny start" title={t.status === 'draft' ? '开始解析' : '继续（从断点）'} onClick={(e) => { e.stopPropagation(); setCurTask(t.id); (t.status === 'draft' ? api.startTask(t.id) : api.resumeTask(t.id)).then(refreshTasks); setViewState({ type: 'tmonitor', tab: 'live' }); }}>▶</button>
+                    )}
+                    {t.status === 'running' && (
+                      <button className="icon-btn tiny pause" title="暂停（可从断点继续）" onClick={(e) => { e.stopPropagation(); api.pauseTask(t.id).then(refreshTasks); }}>⏸</button>
+                    )}
+                    {!['running', 'pending'].includes(t.status) && (
+                      <button className="icon-btn tiny del" title="删除任务（解析历史保留）" onClick={async (e) => {
+                        e.stopPropagation();
+                        if (!confirm(`删除任务 #${t.id}「${t.name}」？\n\n该任务解析的文件会从资料库移除，解析历史记录会保留。`)) return;
+                        await api.deleteTask(t.id, true); refreshTasks(); bump();
+                      }}>✕</button>
+                    )}
+                  </div>}
                 </div>
               );
             })}
           </div>}
-          {secHead('nav', '功能', '')}
-          {!folded.nav && nav.map((n) => (
-            <React.Fragment key={n.key}>
-              <div className={`sb-item ${view.type === n.key ? 'active' : ''}`} data-tour={`nav-${n.key}`} onClick={() => setView({ type: n.key })} title={n.label}>
-                <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label}</span>}
-              </div>
-              {n.key === 'monitor' && view.type === 'monitor' && (
-                <div className={`sb-sub ${collapsed ? 'mini' : ''}`}>
-                  {[['queue', '📋', '任务队列'], ['live', '📡', '解析动态（实时）'], ['history', '🕘', '解析历史']].map(([k, ic, v]) => <div key={k} title={v} className={`sb-subitem ${(view.tab || 'queue') === k ? 'active' : ''}`} onClick={() => setView({ ...view, tab: k })}>{collapsed ? ic : v}</div>)}
-                </div>
-              )}
-            </React.Fragment>
-          ))}
-          {secHead('smart', '智能模块（建设中）', '智能')}
-          {!folded.smart && smartNav.map((n) => (
-            <div key={n.key} className={`sb-item ${view.type === n.key ? 'active' : ''}`} onClick={() => setView({ type: n.key })} title={n.label}>
-              <span className="ic">{n.icon}</span>{!collapsed && <span>{n.label} <span className="wip">建设中</span></span>}
-            </div>
-          ))}
+          {secHead('detail', <>🧭 任务详情{cur && !collapsed ? <span className="sb-scope" title={cur.dir}>{cur.name}</span> : null}</>, '🧭')}
+          {!folded.detail && <div className="sb-group">{taskNav.map((n) => navItem(n, { disabled: !cur }))}{!cur && !collapsed && <div className="sb-empty">添加并选择一个解析任务后可用</div>}</div>}
+          {secHead('over', '📊 总览分析', '📊')}
+          {!folded.over && <div className="sb-group">{overNav.map((n) => navItem(n))}</div>}
+          {secHead('smart', <>🤖 智能模块<span className="wip">建设中</span></>, '🤖')}
+          {!folded.smart && <div className="sb-group">{smartNav.map((n) => navItem(n))}</div>}
           <div className="spacer" />
-          <div className={`sb-theme sb-help ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南：功能详解、快捷键、新手指引" onClick={() => setView({ type: 'help' })}>
-            <span className="ic">❓</span>{!collapsed && <span>帮助指南</span>}
-          </div>
-          <div className="sb-theme" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
-            <span className="ic">{themeIcon[themeMode]}</span>{!collapsed && <span>主题：{{ system: '跟随系统', dark: '黑色', light: '白色' }[themeMode]}</span>}
+          <div className="sb-tools">
+            {toolNav.map((n) => navItem(n))}
+            <div className={`sb-item ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>
+              <span className="ic">❓</span>{!collapsed && <span className="lbl">帮助指南</span>}
+            </div>
+            <div className="sb-item" title="切换主题：黑 / 白 / 跟随系统" onClick={() => setTheme(themeNext[themeMode])}>
+              <span className="ic">{themeIcon[themeMode]}</span>{!collapsed && <span className="lbl">主题：{{ system: '跟随系统', dark: '黑色', light: '白色' }[themeMode]}</span>}
+            </div>
           </div>
         </aside>
         <main className="main">
-          {view.type === 'task' && <TaskView taskId={view.id} />}
-          {view.type === 'monitor' && <TaskMonitor tab={view.tab || 'queue'} taskId={view.taskId} setTab={(tab, taskId) => setView({ type: 'monitor', tab, taskId: taskId || view.taskId })} />}
-          {view.type === 'library' && <LibraryView mode={libMode} setMode={setLibMode} />}
-          {view.type === 'search' && <SearchView state={searchState} setState={setSearchState} />}
-          {view.type === 'groups' && <GroupsView />}
+          {view.type === 'task' && (cur ? <TaskView taskId={cur.id} /> : <NoTask />)}
+          {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab })} /> : <NoTask />)}
+          {view.type === 'library' && (cur ? <LibraryView key={`lib-${cur.id}`} taskId={cur.id} title={`📚 资料库浏览 · ${cur.name}`} mode={libMode} setMode={setLibMode} /> : <NoTask />)}
+          {view.type === 'search' && <SearchView key={`search-${curTask || 0}`} taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
+          {view.type === 'groups' && (cur ? <GroupsView taskId={cur.id} /> : <NoTask />)}
+          {view.type === 'alllib' && <LibraryView key="alllib" title="🗂 所有资料库" mode={allLibMode} setMode={setAllLibMode} />}
+          {view.type === 'monitor' && <TaskMonitor tab={view.tab || 'queue'} taskId={view.taskId} setTab={(tab, taskId) => setViewState({ type: 'monitor', tab, taskId: taskId || view.taskId })} />}
           {view.type === 'basket' && <BasketView />}
           {view.type === 'convert' && <ConvertView />}
           {view.type === 'analytics' && <AnalyticsView />}
@@ -316,13 +352,17 @@ export default function App() {
           </div>
         )}
         {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
-        {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setLibMode} onHelp={() => setView({ type: 'help' })} />}
+        {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setAllLibMode} onHelp={() => setView({ type: 'help' })} />}
         {askWatch && <WatchAskDialog roots={askWatch.roots} onClose={onAskWatch} />}
         {exporting && <div className="overlay"><div className="spinner-box">正在导出 {exporting.n} 页，请稍候…</div></div>}
         <div className="toasts">{toasts.map((t) => <div key={t.id} className={`toast ${t.kind}`}>{t.msg}{t.action && <button className="btn tiny" onClick={t.action.run}>{t.action.label}</button>}</div>)}</div>
       </div>
     </AppCtx.Provider>
   );
+}
+
+function NoTask() {
+  return <div className="view"><div className="empty-tip">还没有解析任务。点击左上角“＋ 添加目录”添加要解析的文件夹，然后在左侧选择该任务。</div></div>;
 }
 
 function FileView({ id, onBack }) {

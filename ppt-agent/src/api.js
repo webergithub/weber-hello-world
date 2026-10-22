@@ -4,7 +4,8 @@ const bridge = window.ppta;
 export const api = new Proxy({}, {
   get: (_t, method) => (...args) => {
     if (!bridge) return Promise.reject(new Error('请在 PPT智能体 桌面程序中运行'));
-    return bridge.call(method, ...args);
+    // 去掉 Electron 附加的“Error invoking remote method …”前缀，只保留可读的错误信息
+    return bridge.call(method, ...args).catch((e) => { throw new Error(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); });
   },
 });
 

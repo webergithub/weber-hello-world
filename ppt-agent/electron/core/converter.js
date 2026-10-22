@@ -12,6 +12,7 @@ const { ZipWriter } = require('./zipwriter');
 const NS_A = 'http://schemas.openxmlformats.org/drawingml/2006/main';
 const NS_P = 'http://schemas.openxmlformats.org/presentationml/2006/main';
 const NS_R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+const NS_C = 'http://schemas.openxmlformats.org/drawingml/2006/chart';
 
 // 默认转换规则（可在界面“转换规则设置”中编辑，保存为规则脚本 convert-rules.json，下次转换生效）
 // null 表示“无 / 透明”。logoMaxArea：小于该页面面积比例的图片视为 logo；fullBgMinArea：大于该比例的图片视为整页背景
@@ -174,6 +175,48 @@ function transformTree(doc, rule, theme, slideArea, stats, options = RULES.optio
   }
 }
 
+// 图表（chart 部件）：文字颜色、坐标轴与网格线、图表背景
+function transformChart(doc, rule, theme, stats) {
+  for (const tag of ['a:defRPr', 'a:rPr', 'a:endParaRPr']) for (const e of all(doc, tag)) setTextColor(e, rule, theme);
+  const cs = all(doc, 'c:chartSpace')[0];
+  if (cs && !elems(cs).some((c) => c.nodeName === 'c:txPr')) {
+    // 图表没有统一文字样式时补一个，否则默认黑字在黑底上看不见
+    const txPr = doc.createElementNS(NS_C, 'c:txPr');
+    const p = make(doc, 'a:p', {}, [make(doc, 'a:pPr', {}, [make(doc, 'a:defRPr', {}, [solid(doc, rule.text)])]), make(doc, 'a:endParaRPr', { lang: 'zh-CN' })]);
+    for (const k of [make(doc, 'a:bodyPr'), make(doc, 'a:lstStyle'), p]) txPr.appendChild(k);
+    insertBefore(cs, txPr, ['c:externalData', 'c:printSettings', 'c:userShapes', 'c:extLst']);
+  }
+  for (const spPr of all(doc, 'c:spPr')) {
+    const owner = spPr.parentNode && spPr.parentNode.nodeName;
+    if (owner === 'c:chartSpace' || owner === 'c:plotArea') { removeFills(spPr); insertBefore(spPr, make(doc, 'a:noFill'), SPPR_AFTER_FILL); }
+    else if (['c:majorGridlines', 'c:minorGridlines', 'c:catAx', 'c:valAx', 'c:dateAx', 'c:serAx'].includes(owner)) setLine(spPr, rule.tableLine, SPPR_AFTER_LN);
+  }
+  stats.charts = (stats.charts || 0) + 1;
+}
+
+// SmartArt：绘图部件（dsp:sp）与数据部件中的文字、形状
+function transformDiagram(doc, rule, theme, stats) {
+  for (const r of [...all(doc, 'a:r'), ...all(doc, 'a:fld')]) {
+    let rPr = childEl(r, 'a:rPr');
+    if (!rPr) { rPr = make(doc, 'a:rPr', { lang: 'zh-CN' }); r.insertBefore(rPr, r.firstChild); }
+    setTextColor(rPr, rule, theme); stats.text++;
+  }
+  for (const tag of ['a:endParaRPr', 'a:defRPr']) for (const e of all(doc, tag)) setTextColor(e, rule, theme);
+  for (const sp of all(doc, 'dsp:sp')) {
+    const spPr = childEl(sp, 'dsp:spPr');
+    if (!spPr || childEl(spPr, 'a:blipFill')) continue;
+    const filled = hasExplicitFill(spPr);
+    const lnEl = childEl(spPr, 'a:ln');
+    const lined = lnEl && !childEl(lnEl, 'a:noFill');
+    if (!filled && !lined) continue;
+    removeFills(spPr);
+    insertBefore(spPr, rule.shapeFill && filled ? solid(doc, rule.shapeFill) : make(doc, 'a:noFill'), SPPR_AFTER_FILL);
+    if (lined || (filled && !rule.shapeFill)) setLine(spPr, rule.shapeLine, SPPR_AFTER_LN, 'a:ln', '12700');
+    stats.shapes++;
+  }
+  stats.diagrams = (stats.diagrams || 0) + 1;
+}
+
 function transformMaster(doc, dir) {
   const map = doc.getElementsByTagName('p:clrMap')[0];
   if (!map) return;
@@ -237,7 +280,13 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
       const dir = directions[i];
       if (!dir) continue;
       want(slides[i], dir, 'slide');
-      const layout = (await rels(slides[i])).find((r) => r.type.endsWith('/slideLayout'));
+      const sRels = await rels(slides[i]);
+      for (const r of sRels) {
+        if (r.external) continue;
+        if (r.type.endsWith('/chart')) want(r.abs, dir, 'chart');
+        else if (r.type.endsWith('/diagramDrawing') || r.type.endsWith('/diagramData')) want(r.abs, dir, 'diagram');
+      }
+      const layout = sRels.find((r) => r.type.endsWith('/slideLayout'));
       if (!layout) continue;
       const master = (await rels(layout.abs)).find((r) => r.type.endsWith('/slideMaster'));
       if (!master) { want(layout.abs, dir, 'layout'); continue; }
@@ -248,7 +297,7 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
       }
     }
     const themeOf = new Map();
-    const stats = { parts: 0, text: 0, shapes: 0, tables: 0, logos: 0, bgPictures: 0 };
+    const stats = { parts: 0, text: 0, shapes: 0, tables: 0, logos: 0, bgPictures: 0, charts: 0, diagrams: 0 };
     const out = new Map();
     // 先读主题原色（用于判断“彩色文字”），再改主题
     for (const [part, p] of plan) if (p.kind === 'theme') themeOf.set(part, themeColors(await parse(part)));
@@ -257,6 +306,8 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
     for (const [part, p] of plan) {
       const doc = await parse(part);
       if (p.kind === 'theme') transformTheme(doc);
+      else if (p.kind === 'chart') transformChart(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, stats);
+      else if (p.kind === 'diagram') transformDiagram(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, stats);
       else {
         transformTree(doc, { ...rules[p.dir], keepAccent: rules.options.keepAccentText }, anyTheme, slideArea, stats, rules.options);
         if (p.kind === 'master') transformMaster(doc, p.dir);
@@ -280,7 +331,7 @@ async function convertTheme(inPath, outPath, directions, opts = {}) {
       zw.finish();
     } catch (err) { zw.abort(); fs.rmSync(tmp, { force: true }); throw err; }
     fs.renameSync(tmp, outPath);
-    log.info(`黑白底转换完成：${outPath}（${directions.filter(Boolean).length} 页，改写部件 ${stats.parts} 个，文字 ${stats.text} 处，图形 ${stats.shapes} 个，表格 ${stats.tables} 个，logo ${stats.logos} 个，移除整页背景图 ${stats.bgPictures} 张）`);
+    log.info(`黑白底转换完成：${outPath}（${directions.filter(Boolean).length} 页，改写部件 ${stats.parts} 个，文字 ${stats.text} 处，图形 ${stats.shapes} 个，表格 ${stats.tables} 个，logo ${stats.logos} 个，图表 ${stats.charts || 0} 个，SmartArt ${stats.diagrams || 0} 个，移除整页背景图 ${stats.bgPictures} 张）`);
     return { path: outPath, slides: slides.length, stats };
   } finally { zip.close(); }
 }

@@ -167,6 +167,16 @@ test('黑白底互转：黑→白、白→黑', async () => {
   const runs = back.slides[0].layout.items.flatMap((i) => (i.paras || []).flatMap((p) => p.runs || []));
   assert.ok(runs.some((x) => x.color === 'C00000'), '彩色文字应变为深红');
   assert.ok(runs.filter((x) => x.text.trim()).every((x) => ['000000', 'C00000'].includes(x.color)));
+  // 图表：文字与网格线一起转换
+  const { openZip } = require('../electron/core/zip');
+  const outC = path.join(tmp, 'chart_light.pptx');
+  const rc = await convertTheme(P('技术方案/图表黑底测试.pptx'), outC, ['toLight']);
+  assert.strictEqual(rc.stats.charts, 1);
+  const z = await openZip(outC);
+  const cx = await z.text(z.names().find((n) => /charts\/chart\d+\.xml$/.test(n)));
+  z.close();
+  assert.ok(!/<a:srgbClr val="FFFFFF"\/>/.test(cx.split('<c:plotArea>')[0].replace(/<c:spPr>[\s\S]*?<\/c:spPr>/g, '')), '图表文字不应再是白色');
+  assert.match(cx, /<c:majorGridlines><c:spPr><a:ln[^>]*><a:solidFill><a:srgbClr val="BFBFBF"/);
 });
 
 test('智能生成：版式意图识别与相似聚类', () => {
@@ -198,7 +208,7 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   svc.on('progress', (p) => { if (!pausedOnce && p.taskId === id && p.stage === 'file' && p.index === 3) { pausedOnce = true; svc.pauseTask(id); } });
   svc.startTask(id);
   const t1 = await done(id, ['paused']);
-  assert.match(t1.message, /已中断/);
+  assert.match(t1.message, /已暂停/);
   let first = null;
   svc.on('progress', (p) => { if (p.taskId === id && p.stage === 'file' && first === null) first = p.index; });
   svc.resumeTask(id);
@@ -331,5 +341,48 @@ test('页面标签与页面关联：相似 PPT 页推荐；同时选择 Word 时
   const r3 = svc.related(wordSec.id);
   assert.strictEqual(r3.kind, 'word');
   assert.ok(r3.ppt.length > 0 && r3.ppt.every((x) => x.kind === 'ppt'), 'Word 章节推荐相关 PPT 页');
+  svc.close();
+});
+
+test('讲解词译文：保存到知识库、写回 PPT 备注（同语言再次写入时替换）', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const { parsePptx } = require('../electron/core/pptx');
+  const lib = path.join(tmp, 'lib5');
+  fs.mkdirSync(lib, { recursive: true });
+  const file = path.join(lib, '过站.pptx');
+  fs.copyFileSync(P('机场运营/航班过站保障Turnaround_白底.pptx'), file);
+  const svc = new AgentService(path.join(tmp, 'data5'));
+  svc.setConfig({ thumbnails: 'off' });
+  const id = svc.addTask(lib);
+  await new Promise((res) => { svc.on('task', (t) => { if (t.id === id && t.status === 'done' && t.finished_at) res(); }); svc.startTask(id); });
+  const f = svc.library()[0];
+  const s = svc.store.slidesOf(f.id).find((x) => x.notes);
+  // 未配置 Agent 接口时给出明确提示
+  await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /未配置 Agent 接口/);
+  // 中文讲解词切到中文直接返回原文
+  assert.strictEqual((await svc.translateNotes(s.id, { lang: 'zh' })).same, true);
+  svc.store.kbPut({ path: f.path, idx: s.idx, variant: 'final', lang: 'en', text: 'Line one.\nLine two & more.', source: 'test' });
+  const r = await svc.writeBackNotes(s.id, { lang: 'en' });
+  assert.strictEqual(r.writtenBack, true);
+  assert.ok(fs.existsSync(r.backup));
+  let back = await parsePptx(file, {});
+  let notes = back.slides[s.idx - 1].notes;
+  assert.match(notes, /【English】/);
+  assert.match(notes, /Line two & more\./);
+  assert.ok(notes.includes(s.notes.split('\n')[0]), '原讲解词保留');
+  // 再次写入同一语言：替换而不是重复追加
+  svc.store.kbPut({ path: f.path, idx: s.idx, variant: 'final', lang: 'en', text: 'Updated.', source: 'test' });
+  await svc.writeBackNotes(s.id, { lang: 'en' });
+  back = await parsePptx(file, {});
+  notes = back.slides[s.idx - 1].notes;
+  assert.strictEqual((notes.match(/【English】/g) || []).length, 1);
+  assert.match(notes, /Updated\./);
+  assert.ok(!/Line one/.test(notes));
+  assert.strictEqual(svc.notesI18n(s.id)[0].writtenBack, true);
+  // 写回后同步了文件记录，重新扫描时不会当作已修改而重新解析
+  const p2 = new Promise((res) => { svc.on('task', (t) => { if (t.id === id && t.status === 'done' && t.finished_at) res(t); }); });
+  svc.startTask(id);
+  const t2 = await p2;
+  assert.strictEqual(t2.parsed, 0);
   svc.close();
 });

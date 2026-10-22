@@ -112,6 +112,8 @@ try { $doc=$app.Documents.Open($env:PPTA_SRC, $false, $true); $doc.SaveAs2($env:
     if (mode === 'off') return null;
     const d = await this.detect();
     fs.mkdirSync(outDir, { recursive: true });
+    // 清掉旧的截图，避免页数变少时残留旧页面
+    for (const f of fs.readdirSync(outDir)) if (/^slide-\d+\.png$|^slides\.pdf$/i.test(f)) fs.rmSync(path.join(outDir, f), { force: true });
     const list = () => fs.readdirSync(outDir).filter((f) => /^slide-\d+\.png$/i.test(f))
       .sort((a, b) => Number(a.match(/\d+/)[0]) - Number(b.match(/\d+/)[0])).map((f) => `${relBase}/${f}`);
     if ((mode === 'auto' || mode === 'powerpoint') && d.powerpoint) {

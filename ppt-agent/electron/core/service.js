@@ -14,6 +14,7 @@ const { hashVector, mean, embedder } = require('./vectors');
 const { fileTerms, computeTags } = require('./tagger');
 const { computeGroups, computePairs, normSlideTitle } = require('./similarity');
 const { slideKeywords, pageTags, computeLinks } = require('./relations');
+const { writeNotes } = require('./noteswriter');
 const { SearchEngine } = require('./search');
 const { exportPptx, exportMarkdown } = require('./exporter');
 const { convertTheme, RULES: DEFAULT_RULES, normalizeRules } = require('./converter');
@@ -46,6 +47,9 @@ function localRoots() {
   return ['/'];
 }
 
+const LANG_NAMES = { zh: '中文', en: 'English', ja: '日本語', ko: '한국어', fr: 'Français', de: 'Deutsch', es: 'Español', ru: 'Русский', pt: 'Português', it: 'Italiano', ar: 'العربية', th: 'ไทย', vi: 'Tiếng Việt', id: 'Bahasa Indonesia', ms: 'Bahasa Melayu', tr: 'Türkçe', nl: 'Nederlands', pl: 'Polski', hi: 'हिन्दी' };
+const LANG_TAGS = { zh: 'zh-CN', en: 'en-US', ja: 'ja-JP', ko: 'ko-KR', fr: 'fr-FR', de: 'de-DE', es: 'es-ES', ru: 'ru-RU', pt: 'pt-BR', it: 'it-IT', ar: 'ar-SA', th: 'th-TH', vi: 'vi-VN', id: 'id-ID', ms: 'ms-MY', tr: 'tr-TR', nl: 'nl-NL', pl: 'pl-PL', hi: 'hi-IN' };
+
 const DEFAULT_CONFIG = {
   thumbnails: 'auto', // auto | powerpoint | libreoffice | off
   thumbWidth: 1280,
@@ -55,6 +59,8 @@ const DEFAULT_CONFIG = {
   docTypes: ['ppt', 'word'],
   uiTheme: 'system', // dark | light | system
   closeAction: 'ask', // ask | quit | minimize：关闭窗口时的行为
+  minorLangs: ['ja', 'ko', 'fr', 'de', 'es', 'ru'], // 讲解词“小语种”下拉中显示的语言
+  analyticsRefresh: 'open', // 总览分析统计刷新：open 每次打开 | daily 每天 | weekly 每周 | manual 仅手动
   welcome: 'first', // 启动简介：first 首次打开显示 | always 每次显示 | never 不再显示
   keymap: {}, // 浏览窗口快捷键：只保存与默认不同的动作 { 动作: [按键组合] }
   // 定时监测更新：每天 time 对开启监测的任务做增量扫描；catchUp：错过的（程序未运行）在下次启动时补扫
@@ -170,6 +176,15 @@ class AgentService extends EventEmitter {
     clearInterval(this.schedTimer);
     this.schedTimer = setInterval(() => this.checkSchedule().catch((e) => this.log.warn('定时扫描检查失败', e)), 30000);
     setTimeout(() => this.checkSchedule().catch(() => {}), 15000);
+    // 总览分析按每天 / 每周定期刷新统计
+    clearInterval(this.statTimer);
+    this.statTimer = setInterval(() => {
+      const mode = this.config.analyticsRefresh;
+      const period = { daily: 86400000, weekly: 7 * 86400000 }[mode];
+      if (!period || this.running) return;
+      const c = this.analyticsCache;
+      if (!c || Date.now() - c.computedAt >= period) { try { this.analytics({ force: true }); this.log.info(`总览分析已按“${mode === 'daily' ? '每天' : '每周'}”定期刷新统计`); } catch (e) { this.log.warn('定期刷新统计失败', e); } }
+    }, 10 * 60000);
   }
 
   async checkSchedule(now = Date.now()) {
@@ -221,8 +236,8 @@ class AgentService extends EventEmitter {
   }
 
   /** 全部解析历史（每个文件每次被处理的记录） */
-  history({ limit = 5000, action, q } = {}) {
-    return this.store.history({ limit, action, q });
+  history({ limit = 5000, action, q, taskId } = {}) {
+    return this.store.history({ limit, action, q, taskId });
   }
 
   /** 手动开始（或重新扫描）：加入队列，按顺序依次解析 */
@@ -439,7 +454,7 @@ class AgentService extends EventEmitter {
     const ms = Date.now() - t0;
     let msg = `解析 ${counts.parsed}，已解析过跳过 ${counts.skipped}，重复文件 ${counts.duplicate}，失败 ${counts.failed}，耗时 ${(ms / 1000).toFixed(1)}s`;
     if (incremental) msg = `${incremental}：新增 ${inc.added}，更新 ${inc.updated}，移除 ${inc.removed}；` + msg;
-    if (cancelled && stoppedAt >= 0) msg = `已中断（处理到 ${stoppedAt}/${files.length}），可点击“继续”从断点继续；` + msg;
+    if (cancelled && stoppedAt >= 0) msg = `${paused ? '已暂停' : '已中断'}（处理到 ${stoppedAt}/${files.length}），可点击“继续”从断点继续；` + msg;
     this.store.updateTask(id, { status: cancelled ? (paused || stoppedAt >= 0 ? 'paused' : 'cancelled') : 'done', finished_at: Date.now(), message: msg,
       ...(incremental && !cancelled ? { last_watch_at: Date.now(), watch_summary: JSON.stringify({ ...inc, total: files.length, at: Date.now(), reason: incremental }) } : {}) });
     log.info(`${tag} 任务结束：${msg}`);
@@ -511,7 +526,8 @@ class AgentService extends EventEmitter {
         return 'failed';
       }
     }
-    const mediaKey = crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
+    // 截图 / 图片缓存按“路径 + 大小 + 修改时间”区分版本：文件修改或重新生成后不会显示旧截图
+    const mediaKey = crypto.createHash('sha1').update(`${file}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 16);
     // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
     let preview = null;
     if (kind === 'ppt' && this.config.thumbnails !== 'off') {
@@ -566,7 +582,7 @@ class AgentService extends EventEmitter {
       video_count: slides.reduce((a, s) => a + s.media.filter((m) => m.type === 'video').length, 0),
       notes_count: slides.filter((s) => s.notes).length,
       lang: detectLang(allText), preview,
-      meta: { props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}${unit} ${e}`)).slice(0, 50) },
+      meta: { mediaKey, props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}${unit} ${e}`)).slice(0, 50) },
       task_id: taskId, parsed_at: Date.now(),
     };
     const info = fileTerms(fileRow, slides);
@@ -576,6 +592,11 @@ class AgentService extends EventEmitter {
     let fileId;
     checkPause();
     this.emitProgress(taskId, { stage: 'store', file, slides: slides.length });
+    // 旧版本的截图与图片缓存不再使用，清理掉
+    if (existing) {
+      const oldKey = (existing.meta && existing.meta.mediaKey) || crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
+      if (oldKey !== mediaKey) for (const d of [this.thumbDir, this.mediaDir]) { try { fs.rmSync(path.join(d, oldKey), { recursive: true, force: true }); } catch { /* ignore */ } }
+    }
     this.store.tx(() => {
       if (existing) this.store.deleteSlidesOf(existing.id);
       fileId = this.store.upsertFile(fileRow);
@@ -740,7 +761,23 @@ class AgentService extends EventEmitter {
     return { task: { ...task, running: this.running === id }, files, stats: st };
   }
 
-  library() { return this.store.listFiles().filter((f) => f.status !== 'recycled'); }
+  /** 任务范围内的文件 id（含重复文件所指向的原文件，用于检索与关联） */
+  taskFileIds(taskId) {
+    const ids = new Set();
+    for (const f of this.store.taskFiles(taskId)) {
+      if (!f.id || f.status === 'recycled') continue;
+      ids.add(f.id);
+      if (f.status === 'duplicate' && f.dup_of) ids.add(f.dup_of);
+    }
+    return ids;
+  }
+  /** 资料库文件；taskId：只返回该任务解析到的文件 */
+  library({ taskId } = {}) {
+    const all = this.store.listFiles().filter((f) => f.status !== 'recycled');
+    if (!taskId) return all;
+    const own = new Set(this.store.taskFiles(taskId).map((f) => f.id).filter(Boolean));
+    return all.filter((f) => own.has(f.id));
+  }
 
   fileDetail(id, { record = true } = {}) {
     const f = this.store.getFile(id);
@@ -762,8 +799,9 @@ class AgentService extends EventEmitter {
     return { ...s, file: f, counterpart };
   }
 
-  categories() {
-    const files = this.store.listFiles({ status: 'parsed' });
+  categories({ taskId } = {}) {
+    let files = this.store.listFiles({ status: 'parsed' });
+    if (taskId) { const own = this.taskFileIds(taskId); files = files.filter((f) => own.has(f.id)); }
     const cats = {};
     const tagCount = {};
     for (const f of files) {
@@ -775,8 +813,13 @@ class AgentService extends EventEmitter {
     return { categories: Object.entries(cats).map(([name, list]) => ({ name, files: list })).sort((a, b) => b.files.length - a.files.length), tags };
   }
 
-  groups({ sort = 'name', order = 'asc' } = {}) {
-    const groups = this.groupsCache || this.computeGroupsNow();
+  groups({ sort = 'name', order = 'asc', taskId } = {}) {
+    let groups = this.groupsCache || this.computeGroupsNow();
+    if (taskId) {
+      const own = new Set(this.store.taskFiles(taskId).map((f) => f.id).filter(Boolean));
+      groups = groups.map((g) => ({ ...g, members: g.members.filter((m) => own.has(m.file.id)) })).filter((g) => g.members.length > 1)
+        .map((g) => ({ ...g, totalSize: g.members.reduce((a, m) => a + (m.file.size || 0), 0) }));
+    }
     const dir = order === 'desc' ? -1 : 1;
     const key = (m) => (sort === 'size' ? m.file.size : m.file.name);
     const cmp = (a, b) => (sort === 'size' ? (a - b) : String(a).localeCompare(String(b), 'zh')) * dir;
@@ -787,7 +830,8 @@ class AgentService extends EventEmitter {
 
   async searchQuery(q, opts = {}) {
     const useLlm = opts.useLlm !== false && this.config.llm.enabled && this.config.llm.useForQuery;
-    const r = await this.search.search(q, { ...opts, useLlm });
+    const fileIds = opts.taskId ? [...this.taskFileIds(opts.taskId)] : null;
+    const r = await this.search.search(q, { ...opts, useLlm, fileIds });
     logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
     return r;
   }
@@ -854,7 +898,19 @@ class AgentService extends EventEmitter {
     // 转换结果加入资料库（“黑白底转换结果”任务），便于用逐页浏览窗口查看、检索与再次导出
     let imported = null;
     try { imported = await this.importOutput(outPath, '黑白底转换结果'); } catch (e) { log.warn('转换结果加入资料库失败', e); }
-    return { ...r, preview, size: fs.statSync(outPath).size, fileId: imported && imported.fileId, slideIds: imported ? imported.slideIds : [] };
+    // 转换校验：逐页检查转换后的底色是否为目标底色（有截图时按真实渲染判断）
+    const got = imported ? this.store.getSlides(imported.slideIds) : [];
+    const checks = dirs.map((d, i) => {
+      const p = preview[i] || {};
+      const theme = (got[i] && got[i].theme) || p.theme;
+      const want = d === 'toLight' ? 'light' : d === 'toDark' ? 'dark' : null;
+      return { idx: i + 1, want, theme, ok: !want || theme === want };
+    });
+    const verify = { total: checks.filter((c) => c.want).length, ok: checks.filter((c) => c.want && c.ok).length, failed: checks.filter((c) => !c.ok) };
+    for (let i = 0; i < preview.length; i++) if (checks[i]) preview[i].check = checks[i];
+    if (verify.failed.length) log.warn(`转换校验：${verify.failed.length} 页未达到目标底色（第 ${verify.failed.map((c) => c.idx).join('、')} 页），可能含整页图片、图表图片或文字在图片中`);
+    else log.info(`转换校验：${verify.ok}/${verify.total} 页已转换为目标底色`);
+    return { ...r, preview, verify, size: fs.statSync(outPath).size, fileId: imported && imported.fileId, slideIds: imported ? imported.slideIds : [] };
   }
 
   /** 把本工具生成的文件（转换结果等）解析进资料库，归入同名的固定任务 */
@@ -1076,6 +1132,67 @@ class AgentService extends EventEmitter {
     return { text, source };
   }
 
+  // ================= 讲解词多语言（翻译 + 写回 PPT 备注 / 应用知识库） =================
+  /** 讲解词的三个版本：orig 原讲解词、ai 生成讲解词、final 修正讲解词（当前采用的版本） */
+  notesVariant(s, variant) { return variant === 'orig' ? s.notes_orig || '' : variant === 'ai' ? s.notes_ai || '' : s.notes || ''; }
+  /** 某页已有的译文（来自知识库，重新解析后仍保留） */
+  notesI18n(slideId) {
+    const s = this.store.getSlide(slideId, false);
+    if (!s) return [];
+    const f = this.store.getFile(s.file_id);
+    return this.store.kbList(f.path, s.idx).map((r) => ({ variant: r.variant, lang: r.lang, text: r.text, source: r.source, writtenBack: !!r.written_back, at: r.at }));
+  }
+  /** 翻译讲解词：已有译文直接返回；否则调用设置中的 Agent 接口翻译，保存到知识库，并按设置写回 PPT 备注 */
+  async translateNotes(slideId, { variant = 'final', lang = 'en', force = false, writeBack } = {}) {
+    const s = this.store.getSlide(slideId, false);
+    if (!s) throw new Error('页面不存在');
+    const f = this.store.getFile(s.file_id);
+    const src = this.notesVariant(s, variant);
+    if (!src.trim()) throw new Error('该版本的讲解词为空，无法翻译');
+    const zh = (src.match(/[\u4e00-\u9fff]/g) || []).length, en = (src.match(/[A-Za-z]+/g) || []).join('').length;
+    const srcLang = zh * 3 >= en ? 'zh' : 'en';
+    if (lang === srcLang) return { text: src, same: true, lang, variant };
+    const hit = !force && this.store.kbGet(f.path, s.idx, variant, lang);
+    if (hit) return { text: hit.text, source: hit.source, writtenBack: !!hit.written_back, cached: true, lang, variant };
+    const client = llm.client(this.config.llm);
+    if (!client) throw new Error('未配置 Agent 接口：请在“设置 → Agent 接口”中填写接口地址、API Key 与模型（支持 DeepSeek、通义千问、Kimi、智谱、OpenAI、本地 Ollama）');
+    const name = LANG_NAMES[lang] || lang;
+    const text = await client.translate(src, name);
+    if (!text) throw new Error('翻译接口没有返回内容');
+    const source = `${this.config.llm.model}`;
+    this.store.kbPut({ path: f.path, idx: s.idx, variant, lang, text, source, written_back: 0 });
+    logger.child('agent').info(`翻译讲解词：${f.name} 第 ${s.idx} ${f.kind === 'word' ? '节' : '页'} → ${name}（${source}，${text.length} 字）`);
+    // 解析与翻译都不改动原文件：译文只保存在应用知识库，用户手动点击“写入 PPT 备注”时才写回
+    let wb = { writtenBack: false };
+    if (writeBack === true) wb = await this.writeBackNotes(slideId, { variant, lang }).catch((e) => ({ writtenBack: false, error: e.message }));
+    return { text, source, lang, variant, ...wb };
+  }
+  /** 把知识库中的译文写回 PPT 备注（Word 文档不支持写回，只保存在知识库） */
+  async writeBackNotes(slideId, { variant = 'final', lang = 'en' } = {}) {
+    const s = this.store.getSlide(slideId, false);
+    const f = s && this.store.getFile(s.file_id);
+    if (!f) throw new Error('页面不存在');
+    const hit = this.store.kbGet(f.path, s.idx, variant, lang);
+    if (!hit) throw new Error('还没有该语言的译文');
+    if ((f.kind || 'ppt') === 'word') return { writtenBack: false, error: 'Word 文档不支持写回，译文已保存在应用知识库中' };
+    if (!/\.(pptx|pptm|potx|ppsx)$/i.test(f.path)) return { writtenBack: false, error: '旧版 .ppt 不支持写回，译文已保存在应用知识库中' };
+    const name = LANG_NAMES[lang] || lang;
+    const r = await writeNotes(f.path, s.idx, name, hit.text, { backupDir: path.join(this.dataDir, 'backup'), lang: LANG_TAGS[lang] || lang });
+    this.store.kbMarkWritten(f.path, s.idx, variant, lang);
+    // 同步文件记录的大小与修改时间，避免下次扫描把自己写入的改动当作“文件已修改”而重新解析
+    const st = fs.statSync(f.path);
+    this.store.updateFile(f.id, { size: st.size, mtime: Math.round(st.mtimeMs), fingerprint: this.fingerprint(f.name, st.size, st.mtimeMs, f.author) });
+    logger.child('agent').info(`译文已写回 PPT 备注：${f.path} 第 ${s.idx} 页【${name}】（原文件已备份到 ${r.backup}）`);
+    return { writtenBack: true, backup: r.backup };
+  }
+  async testLlm(cfg) {
+    const client = llm.client({ ...this.config.llm, ...(cfg || {}), enabled: true });
+    if (!client) throw new Error('请填写模型名称');
+    const t0 = Date.now();
+    const out = await client.ping();
+    return { ok: true, reply: String(out).slice(0, 40), ms: Date.now() - t0 };
+  }
+
   // ================= 黑白底互转规则脚本 =================
   rulesFile() { return path.join(this.dataDir, 'convert-rules.json'); }
   getConvertRules() {
@@ -1104,7 +1221,21 @@ class AgentService extends EventEmitter {
    * 扣除本工具解析时产生的读取（解析时刻前后 1 小时内的访问时间视为解析造成，回退到解析前记录的访问时间），
    * 再与“在本工具中查看 / 打开”的记录合并，得到“最近一次被打开”。
    */
-  analytics() {
+  /** 总览分析（带缓存）：按设置的刷新频率复用上次的统计结果；force 立即重新统计 */
+  analytics({ force = false } = {}) {
+    const mode = this.config.analyticsRefresh || 'open';
+    const period = { daily: 86400000, weekly: 7 * 86400000 }[mode];
+    if (!this.analyticsCache) { try { this.analyticsCache = JSON.parse(fs.readFileSync(path.join(this.dataDir, 'analytics-cache.json'), 'utf8')); } catch { this.analyticsCache = null; } }
+    const c = this.analyticsCache;
+    const fresh = c && (mode === 'manual' || (period && Date.now() - c.computedAt < period));
+    if (!force && mode !== 'open' && fresh) return { ...c, mode, nextAt: period ? c.computedAt + period : null, cached: true };
+    const data = this.computeAnalytics();
+    this.analyticsCache = { ...data, computedAt: Date.now() };
+    if (mode !== 'open') { try { fs.writeFileSync(path.join(this.dataDir, 'analytics-cache.json'), JSON.stringify(this.analyticsCache)); } catch (e) { this.log.warn('保存统计缓存失败', e); } }
+    return { ...this.analyticsCache, mode, nextAt: period ? this.analyticsCache.computedAt + period : null, cached: false };
+  }
+
+  computeAnalytics() {
     const now = Date.now();
     const views = new Map(this.store.viewStats().map((v) => [v.file_id, v]));
     const files = this.store.listFiles().filter((f) => f.status === 'parsed' || f.status === 'duplicate').map((f) => {
@@ -1144,7 +1275,7 @@ class AgentService extends EventEmitter {
     await this.afterLibraryChange();
   }
 
-  close() { clearInterval(this.schedTimer); this.store.close(); }
+  close() { clearInterval(this.schedTimer); clearInterval(this.statTimer); this.store.close(); }
 }
 
 /** 移动文件（跨磁盘时复制后删除） */

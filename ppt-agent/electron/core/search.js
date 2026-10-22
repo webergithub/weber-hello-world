@@ -109,7 +109,9 @@ class SearchEngine {
     const groups = analysis.groups;
     const result = { analysis, files: [], slides: { light: [], dark: [], word: [] }, totalSlides: 0, timing: {} };
     if (!groups.length) return result;
-    const filterFile = (f) => (!opts.folder || f.dir.startsWith(opts.folder)) && (!opts.category || f.category === opts.category);
+    // opts.fileIds：只在这些文件中检索（任务范围）
+    const scope = opts.fileIds ? new Set(opts.fileIds) : null;
+    const filterFile = (f) => (!scope || scope.has(f.id)) && (!opts.folder || f.dir.startsWith(opts.folder)) && (!opts.category || f.category === opts.category);
 
     // 第 1 层：文件名；第 2 层：标签
     const fileScores = new Map();
@@ -129,16 +131,17 @@ class SearchEngine {
     const lists = [];
     if (tokens.length) {
       const match = tokens.map((t) => `"${t.replace(/"/g, '')}"`).join(' OR ');
-      lists.push({ w: 1.0, ids: this.store.ftsSearch(match, 500).map((r) => r.id), name: 'bm25' });
+      lists.push({ w: 1.0, ids: this.store.ftsSearch(match, scope ? 5000 : 500).map((r) => r.id), name: 'bm25' });
     }
     const qv = hashVector(synonyms.join(' '));
-    const hv = vecs.map((v) => ({ id: v.id, s: cosine(qv, v.vec) })).filter((x) => x.s > 0.08).sort((a, b) => b.s - a.s).slice(0, 400);
+    const pool = scope ? vecs.filter((v) => scope.has(v.file_id)) : vecs;
+    const hv = pool.map((v) => ({ id: v.id, s: cosine(qv, v.vec) })).filter((x) => x.s > 0.08).sort((a, b) => b.s - a.s).slice(0, 400);
     lists.push({ w: 0.7, ids: hv.map((x) => x.id), name: 'vector' });
     const emb = embedder(this.getConfig().embedding);
     if (emb && vecs.some((v) => v.emb)) {
       try {
         const [ev] = await emb.embed([analysis.raw + ' ' + synonyms.join(' ')]);
-        const sv = vecs.filter((v) => v.emb && v.emb.length === ev.length).map((v) => ({ id: v.id, s: cosine(ev, v.emb) })).sort((a, b) => b.s - a.s).slice(0, 400);
+        const sv = pool.filter((v) => v.emb && v.emb.length === ev.length).map((v) => ({ id: v.id, s: cosine(ev, v.emb) })).sort((a, b) => b.s - a.s).slice(0, 400);
         lists.push({ w: 1.0, ids: sv.map((x) => x.id), name: 'semantic' });
         analysis.semantic = emb.id;
       } catch (e) { this.log.warn('语义向量检索失败，已回退', e); analysis.semanticError = e.message; }

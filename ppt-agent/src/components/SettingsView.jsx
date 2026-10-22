@@ -3,11 +3,22 @@ import { api } from '../api';
 import { useApp } from '../ctx';
 import KeymapEditor from './KeymapEditor';
 import WatchSettings from './WatchSettings';
+import { LANG_NAMES } from './Panels';
+
+const LLM_PRESETS = [
+  { key: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
+  { key: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
+  { key: 'kimi', label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
+  { key: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
+  { key: 'openai', label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
+  { key: 'ollama', label: '本地 Ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
+];
 
 export default function SettingsView({ focus }) {
   const app = useApp();
   const keysRef = useRef(null);
   const watchRef = useRef(null);
+  const agentRef = useRef(null);
   const [cfg, setCfg] = useState(null);
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
@@ -16,7 +27,7 @@ export default function SettingsView({ focus }) {
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
   useEffect(() => { api.getConfig().then(setCfg); api.engines(false).then(setEng); api.stats().then(setStats); api.docTypes().then(setTypes); api.dataDirInfo().then(setDd); }, []);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus]);
   if (!cfg) return null;
   const set = (patch) => setCfg({ ...cfg, ...patch });
   const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
@@ -102,15 +113,28 @@ export default function SettingsView({ focus }) {
             <button className="btn tiny" onClick={() => api.engines(true).then(setEng)}>重新检测</button>
           </div>}
         </section>
-        <section>
-          <h3>大模型（可选，OpenAI 兼容接口）</h3>
-          <p className="muted">用于：查询的中英文解析与扩展、自动打标签（20 个）、基于检索结果的 RAG 回答。支持 DeepSeek、通义千问、Kimi、智谱、OpenAI、本地 Ollama（http://127.0.0.1:11434/v1）等。未配置时使用内置双语词表与 TF-IDF，全部离线可用。</p>
+        <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
+          <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>
+          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未启用时，讲解词生成使用内置模板，翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
+          <div className="row"><label>服务商</label>
+            <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>
+          </div>
           <div className="row"><label>启用</label><input type="checkbox" checked={cfg.llm.enabled} onChange={(e) => setL({ enabled: e.target.checked })} /></div>
-          <div className="row"><label>Base URL</label><input className="input wide" value={cfg.llm.baseUrl} onChange={(e) => setL({ baseUrl: e.target.value })} /></div>
-          <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.llm.apiKey} onChange={(e) => setL({ apiKey: e.target.value })} /></div>
-          <div className="row"><label>模型</label><input className="input" value={cfg.llm.model} onChange={(e) => setL({ model: e.target.value })} /></div>
+          <div className="row"><label>接口地址</label><input className="input wide" value={cfg.llm.baseUrl} onChange={(e) => setL({ baseUrl: e.target.value })} /></div>
+          <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.llm.apiKey} placeholder="在服务商控制台创建的 API Key（本地 Ollama 可留空）" onChange={(e) => setL({ apiKey: e.target.value })} /></div>
+          <div className="row"><label>模型</label><input className="input" value={cfg.llm.model} onChange={(e) => setL({ model: e.target.value })} />
+            <button className="btn" onClick={async () => { try { const r = await api.testLlm(cfg.llm); app.toast(`连接成功（${r.ms}ms）：${r.reply}`); } catch (e) { app.toast('连接失败：' + e.message, 'error'); } }}>测试连接</button></div>
           <div className="row"><label>用于查询解析</label><input type="checkbox" checked={cfg.llm.useForQuery} onChange={(e) => setL({ useForQuery: e.target.checked })} /></div>
-          <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析/重算标签时调用，每个文件一次）</span></div>
+          <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析 / 重算标签时调用，每个文件一次）</span></div>
+          <h4>讲解词翻译</h4>
+          <p className="muted small">译文只保存在应用知识库，不会改动原文件；需要时在讲解词模块手动点击“写入 PPT 备注”（确认后先备份再写入）。</p>
+          <div className="row"><label>常用小语种</label>
+            <div className="row wrap" style={{ margin: 0 }}>{Object.entries(LANG_NAMES).filter(([k]) => k !== 'zh' && k !== 'en').map(([k, v]) => {
+              const on = (cfg.minorLangs || []).includes(k);
+              return <label key={k} className={`type-chip small ${on ? 'on' : ''}`}><input type="checkbox" checked={on} onChange={() => set({ minorLangs: on ? cfg.minorLangs.filter((x) => x !== k) : [...(cfg.minorLangs || []), k] })} />{v}</label>;
+            })}</div>
+          </div>
+          <p className="muted small">修改后点击右上角“保存设置”生效。</p>
         </section>
         <section>
           <h3>语义向量（可选，增强 RAG 召回）</h3>

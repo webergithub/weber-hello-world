@@ -49,6 +49,7 @@ CREATE TABLE IF NOT EXISTS slides (
 CREATE INDEX IF NOT EXISTS idx_slides_file ON slides(file_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS slides_fts USING fts5(title, body, notes, meta, tokenize = 'unicode61 remove_diacritics 2');
 CREATE TABLE IF NOT EXISTS pairs (slide_id INTEGER, other_id INTEGER, score REAL, PRIMARY KEY (slide_id, other_id));
+CREATE TABLE IF NOT EXISTS notes_kb (path TEXT, idx INTEGER, variant TEXT, lang TEXT, text TEXT, source TEXT, written_back INTEGER DEFAULT 0, at INTEGER, PRIMARY KEY (path, idx, variant, lang));
 CREATE TABLE IF NOT EXISTS slide_links (slide_id INTEGER, other_id INTEGER, score REAL, kind TEXT, reasons TEXT, PRIMARY KEY (slide_id, other_id));
 CREATE TABLE IF NOT EXISTS file_views (file_id INTEGER, kind TEXT, at INTEGER);
 CREATE INDEX IF NOT EXISTS idx_views_file ON file_views(file_id);
@@ -139,8 +140,9 @@ class Store {
     return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id = ? ORDER BY tf.rowid`).all(taskId).map(this.fileRow);
   }
 
-  history({ limit = 5000, action, q } = {}) {
+  history({ limit = 5000, action, q, taskId } = {}) {
     const where = [], args = [];
+    if (taskId) { where.push('tf.task_id = ?'); args.push(taskId); }
     if (action) { where.push('tf.action = ?'); args.push(action); }
     if (q) { where.push('tf.path LIKE ?'); args.push(`%${q}%`); }
     return this.db.prepare(`SELECT tf.rowid AS hid, tf.task_id, tf.file_id, tf.path, tf.action, tf.message, tf.at, t.name AS task_name,
@@ -156,8 +158,8 @@ class Store {
     this.q('INSERT INTO file_views(file_id, kind, at) VALUES (?, ?, ?)').run(fileId, kind, Date.now());
   }
   viewStats() { return this.q("SELECT file_id, SUM(kind = 'view') views, SUM(kind = 'open') opens, MAX(at) last FROM file_views GROUP BY file_id").all(); }
-  viewDaily(since) { return this.q('SELECT at FROM file_views WHERE at >= ?').all(since).map((r) => r.at); }
-  historyDaily(since) { return this.q('SELECT at, action FROM task_files WHERE at >= ?').all(since); }
+  viewDaily(since) { return this.q('SELECT at, file_id FROM file_views WHERE at >= ?').all(since); }
+  historyDaily(since) { return this.q('SELECT at, action, file_id FROM task_files WHERE at >= ?').all(since); }
 
   // ---------- 回收站 ----------
   addRecycle(r) { return Number(this.q('INSERT INTO recycle(file_id, name, orig_path, bin_path, moved, prev_status, size, kind, slide_count, reason, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(r.file_id, r.name, r.orig_path, r.bin_path, r.moved ? 1 : 0, r.prev_status, r.size, r.kind, r.slide_count, r.reason || '', Date.now()).lastInsertRowid); }
@@ -290,6 +292,12 @@ class Store {
   linksOf(slideId) {
     return this.q('SELECT other_id, score, kind, reasons FROM slide_links WHERE slide_id = ? ORDER BY score DESC').all(slideId).map((r) => ({ ...r, reasons: J(r.reasons, []) }));
   }
+  // ---------- 讲解词翻译知识库（按文件路径 + 页码保存，重新解析后仍保留） ----------
+  kbGet(p, idx, variant, lang) { return this.q('SELECT * FROM notes_kb WHERE path = ? AND idx = ? AND variant = ? AND lang = ?').get(p, idx, variant, lang) || null; }
+  kbList(p, idx) { return this.q('SELECT * FROM notes_kb WHERE path = ? AND idx = ? ORDER BY at DESC').all(p, idx); }
+  kbPut(r) { this.q('INSERT OR REPLACE INTO notes_kb(path, idx, variant, lang, text, source, written_back, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(r.path, r.idx, r.variant, r.lang, r.text, r.source || '', r.written_back ? 1 : 0, Date.now()); }
+  kbMarkWritten(p, idx, variant, lang) { this.q('UPDATE notes_kb SET written_back = 1 WHERE path = ? AND idx = ? AND variant = ? AND lang = ?').run(p, idx, variant, lang); }
+  kbCount() { return this.q('SELECT COUNT(*) n FROM notes_kb').get().n; }
   linkStats() { return this.q('SELECT kind, COUNT(*) n, COUNT(DISTINCT slide_id) pages FROM slide_links GROUP BY kind').all(); }
 
   replacePairs(pairs) {

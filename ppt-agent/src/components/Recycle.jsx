@@ -17,7 +17,7 @@ export function RecycleButton({ ids, done, label = '🗑 移到回收站' }) {
 
 function RecycleDialog({ ids, onClose }) {
   const app = useApp();
-  const [moveFile, setMoveFile] = useState(true);
+  const [moveFile, setMoveFile] = useState(false);
   const [busy, setBusy] = useState(false);
   const go = async () => {
     setBusy(true);
@@ -33,8 +33,8 @@ function RecycleDialog({ ids, onClose }) {
       <div className="modal" style={{ width: 'min(560px, 92vw)' }} onClick={(e) => e.stopPropagation()}>
         <div className="detail-head"><div className="dh-title">🗑 移到回收站（{ids.length} 个文档）</div></div>
         <div className="pad">
-          <label className="radio-row"><input type="radio" checked={moveFile} onChange={() => setMoveFile(true)} /> <div><b>连同原文件一起移入回收站</b><div className="muted small">原文件从所在目录移动到本工具的回收站目录，可随时还原到原位置；在回收站中“彻底删除”后才真正删除。</div></div></label>
           <label className="radio-row"><input type="radio" checked={!moveFile} onChange={() => setMoveFile(false)} /> <div><b>仅从资料库移除</b><div className="muted small">原文件保持不动，只把它的解析结果移出资料库与检索；彻底删除时也只清理解析数据。</div></div></label>
+          <label className="radio-row"><input type="radio" checked={moveFile} onChange={() => setMoveFile(true)} /> <div><b>连同原文件一起移入回收站</b><div className="muted small">原文件从所在目录移动到本工具的回收站目录，可随时还原到原位置；在回收站中“彻底删除”后才真正删除。</div></div></label>
           <div className="muted small">若移除的是一组重复文件中的“主文件”，其重复副本会自动接替成为主文件，解析结果不丢失。</div>
         </div>
         <div className="detail-head"><div className="spacer" /><button className="btn" onClick={() => onClose(false)}>取消</button><button className="btn primary" disabled={busy} onClick={go}>{busy ? '处理中…' : '移到回收站'}</button></div>

@@ -38,6 +38,13 @@ function client(cfg) {
         { role: 'user', content: `文件：${fileName}\n标题：${title}\n页面内容：\n${String(text || '').slice(0, 2500)}\n${notes ? '原讲解词（可参考）：' + String(notes).slice(0, 800) : ''}` },
       ], { maxTokens: 800, timeoutMs: 60000 });
     },
+    async translate(text, langName) {
+      return (await chat([
+        { role: 'system', content: `你是专业的演讲稿翻译。把用户给出的 PPT 讲解词翻译成${langName}，保持口语化与原有分段，专业术语准确，不要增删内容，不要解释。只输出译文。` },
+        { role: 'user', content: String(text).slice(0, 8000) },
+      ], { maxTokens: 2000, timeoutMs: 90000 })).trim();
+    },
+    async ping() { return chat([{ role: 'user', content: '只回复 OK' }], { maxTokens: 5, timeoutMs: 20000 }); },
     async convertRules(current, request) {
       const out = await chat([
         { role: 'system', content: '你是 PPT 配色转换规则助手。根据用户要求修改给定的 JSON 规则，只输出修改后的完整 JSON。颜色使用 6 位十六进制（不带#），null 表示无/透明。' },

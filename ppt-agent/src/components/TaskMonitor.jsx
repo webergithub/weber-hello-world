@@ -8,20 +8,21 @@ import DataTable from './DataTable';
 const SUB_TITLE = { queue: '任务队列', live: '解析动态（实时）', history: '解析历史' };
 
 // 解析任务：子视图（任务队列 / 解析动态 / 解析历史）由左侧子菜单切换；添加目录等入口统一在左侧
-export default function TaskMonitor({ tab = 'queue', taskId, setTab }) {
+// scoped：只显示所选任务（任务详情 → 解析过程）；否则为全部任务（总览分析 → 全部任务与历史）
+export default function TaskMonitor({ tab = 'queue', taskId, setTab, scoped = false }) {
   const app = useApp();
+  const t = scoped && app.tasks.find((x) => x.id === taskId);
   return (
     <div className="view">
       <div className="view-head">
-        <div className="vh-title">⚙️ 解析任务 <span className="crumb">› {SUB_TITLE[tab]}</span></div>
-        <span className="muted small">{tab === 'queue' ? '添加目录后手动开始；多个任务排队依次解析；可暂停与继续' : tab === 'live' ? '实时展示扫描读取、生成 Markdown 与标签标注的过程' : '每个文件每次被处理的完整记录'}</span>
+        <div className="vh-title">{scoped ? <>⚙️ 解析过程 <span className="crumb">› {t ? `#${t.id} ${t.name}` : ''} › {SUB_TITLE[tab]}</span></> : <>🗂 全部任务与历史 <span className="crumb">› {SUB_TITLE[tab]}</span></>}</div>
         <div className="spacer" />
         {tab === 'queue' && <button className="btn primary" onClick={async () => { const n = await api.startAll(); app.refreshTasks(); app.toast(n ? `已将 ${n} 个任务加入解析队列` : '没有待解析的任务'); }}>▶ 全部开始</button>}
       </div>
       <div className="tab-body">
         {tab === 'queue' && <QueuePanel initial={taskId} onLive={(id) => setTab('live', id)} />}
-        {tab === 'live' && <LiveScan taskId={taskId} onPick={(id) => setTab('live', id)} />}
-        {tab === 'history' && <HistoryPanel />}
+        {tab === 'live' && <LiveScan taskId={taskId} lock={scoped} onPick={(id) => setTab('live', id)} />}
+        {tab === 'history' && <HistoryPanel taskId={scoped ? taskId : undefined} />}
       </div>
     </div>
   );
@@ -181,17 +182,17 @@ export function ReparseDialog({ files, onClose }) {
   );
 }
 
-function HistoryPanel() {
+function HistoryPanel({ taskId }) {
   const app = useApp();
   const [rows, setRows] = useState([]);
   const [action, setAction] = useState('');
   const [q, setQ] = useState('');
   const [sel, setSel] = useState(() => new Set());
   const [dlg, setDlg] = useState(null);
-  useEffect(() => { api.history({ action: action || undefined, q: q || undefined, limit: 5000 }).then(setRows); }, [action, q, app.taskTick]);
+  useEffect(() => { api.history({ action: action || undefined, q: q || undefined, limit: 5000, taskId }).then(setRows); }, [action, q, app.taskTick, taskId]);
   // 正在解析的文件：来自实时进度，作为“解析中”记录显示在历史中
   const STAGE = { file: '读取文件', parse: '解析中', slide: '逐页解析', thumb: '生成页面截图', store: '写入数据库', parsed: '解析完成', tag: '计算标签', scanning: '扫描目录' };
-  const live = useMemo(() => app.tasks.filter((t) => t.status === 'running').map((t) => {
+  const live = useMemo(() => app.tasks.filter((t) => t.status === 'running' && (!taskId || t.id === taskId)).map((t) => {
     const p = app.progress[t.id] || {};
     const lt = app.liveTasks[t.id] || {};
     const file = p.file || (lt.current && /[\\/]/.test(lt.current) && !lt.current.startsWith('扫描中') ? lt.current : '');
@@ -199,7 +200,7 @@ function HistoryPanel() {
     const unit = p.unit || '页';
     return { hid: `live-${t.id}`, live: true, task_id: t.id, task_name: t.name, action: 'running', path: file, at: Date.now(), name: file.split(/[\\/]/).pop(),
       message: `第 ${p.index || (lt.done || 0) + 1}/${p.total || t.total || '?'} 个文件${p.slideTotal ? ` · 第 ${p.slide}/${p.slideTotal} ${unit}` : ''} · ${STAGE[p.stage] || '解析中'}` };
-  }).filter((r) => r && (!action || action === 'running') && (!q || r.path.includes(q))), [app.tasks, app.progress, app.liveTasks, action, q]);
+  }).filter((r) => r && (!action || action === 'running') && (!q || r.path.includes(q))), [app.tasks, app.progress, app.liveTasks, action, q, taskId]);
   const all = useMemo(() => (action === 'running' ? live : [...live, ...rows]), [live, rows, action]);
   const [follow, setFollow] = useState(true);
   const locate = () => { const el = document.querySelector('.files-stats .row-live'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return !!el; };

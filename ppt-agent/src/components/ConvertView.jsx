@@ -103,9 +103,16 @@ export default function ConvertView() {
         </div>
         {result && (
           <div className="cv-result">
-            <div className="side-title">③ 转换结果：{result.path}（{fmtSize(result.size)}；文字 {result.stats.text} 处、图形 {result.stats.shapes} 个、表格 {result.stats.tables} 个、logo {result.stats.logos} 个）
+            <div className="side-title">③ 转换结果：{result.path}（{fmtSize(result.size)}；文字 {result.stats.text} 处、图形 {result.stats.shapes} 个、表格 {result.stats.tables} 个、图表 {result.stats.charts || 0} 个、SmartArt {result.stats.diagrams || 0} 个、logo {result.stats.logos} 个）
               {result.fileId && <button className="btn tiny primary" onClick={() => app.openSlide(result.slideIds[0], [result.fileId])}>⛶ 逐页浏览转换结果</button>}
               <button className="btn tiny" onClick={() => api.openPath(result.path)}>用 PowerPoint 打开</button><button className="btn tiny" onClick={() => api.showItem(result.path)}>位置</button></div>
+            {result.verify && result.verify.total > 0 && (
+              <div className={`notice ${result.verify.failed.length ? 'danger' : 'ok'}`} style={{ margin: '0 0 8px' }}>
+                {result.verify.failed.length
+                  ? <>转换校验：{result.verify.ok}/{result.verify.total} 页达到目标底色；第 {result.verify.failed.map((c) => c.idx).join('、')} 页未达到（常见原因：页面由整张图片构成、图表或文字是图片、背景来自未识别的图片）。可在“⚙ 转换规则设置”中调整整页背景图阈值后重试。</>
+                  : <>✅ 转换校验通过：{result.verify.ok}/{result.verify.total} 页均已转换为目标底色。</>}
+              </div>
+            )}
             {result.fileId && <div className="muted small" style={{ margin: '0 0 8px' }}>转换结果已加入资料库（解析任务“黑白底转换结果”），可在资料库与检索中找到。</div>}
             <div className="cv-grid big">
               {result.preview.map((p, i) => {

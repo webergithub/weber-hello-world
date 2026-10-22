@@ -26,7 +26,7 @@ function preload(urls) {
 }
 
 // 解析动态：用扫描线动画逐页展示正在解析的页面、提取的文字、生成的 Markdown 与标签标注
-export default function LiveScan({ taskId, onPick }) {
+export default function LiveScan({ taskId, onPick, lock = false }) {
   const app = useApp();
   const running = app.tasks.find((t) => t.status === 'running');
   const id = taskId || (running && running.id) || (app.tasks[0] && app.tasks[0].id);
@@ -67,9 +67,9 @@ export default function LiveScan({ taskId, onPick }) {
   return (
     <div className="livescan">
       <div className="ls-top">
-        <select className="input" value={id} onChange={(e) => onPick(Number(e.target.value))}>
+        {lock ? <b>#{t.id} {t.name}</b> : <select className="input" value={id} onChange={(e) => onPick(Number(e.target.value))}>
           {app.tasks.map((x) => <option key={x.id} value={x.id}>#{x.id} {x.name}（{STATUS_LABEL[x.status] || x.status}）</option>)}
-        </select>
+        </select>}
         <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>
         <div className="ls-prog"><div className="progress big"><div style={{ width: `${t.status === 'done' ? 100 : filePct}%` }} /></div></div>
         <span className="small">文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
