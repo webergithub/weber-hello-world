@@ -192,6 +192,8 @@ export default function App() {
     setModal(null);
     setCompare({ fileIds: ids.slice(0, COMPARE_MAX), starts });
   };
+  // 帮助按钮：第一次点击打开帮助指南，再次点击收起并回到智能搜索
+  const toggleHelp = () => setViewState(view.type === 'help' ? { type: 'search' } : { type: 'help' });
   const startTour = () => { setModal(null); setCompare(null); setWelcome(false); setTour(true); };
   const onWelcomeClose = async ({ again, next }) => {
     setWelcome(false);
@@ -261,7 +263,7 @@ export default function App() {
         <aside className="sidebar">
           <div className="sb-head">
             {!collapsed && <div className="logo" title={version ? `PPT智能体 v${version}` : ''}>PPT<span>智能体</span>{version && <sup className="sb-ver">v{version}</sup>}</div>}
-            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南：功能详解、快捷键、新手指引" onClick={() => setViewState({ type: 'help' })}>❓ 帮助</button>}
+            {!collapsed && <button className={`sb-helpbtn ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title={view.type === 'help' ? '收起帮助指南，回到智能搜索' : '帮助指南：功能详解、快捷键、新手指引'} onClick={toggleHelp}>{view.type === 'help' ? '✕ 收起帮助' : '❓ 帮助'}</button>}
             <div className="spacer" />
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
@@ -330,7 +332,7 @@ export default function App() {
           </div>
           <div className="spacer" />
           <div className="sb-foot">
-            {collapsed && <button className={`sb-gear ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={() => setViewState({ type: 'help' })}>❓</button>}
+            {collapsed && <button className={`sb-gear ${view.type === 'help' ? 'active' : ''}`} data-tour="help" title="帮助指南" onClick={toggleHelp}>❓</button>}
             <div className="sb-user" title="用户信息（预留）">
               <span className="sb-avatar">👤</span>
               {!collapsed && <div className="sb-user-main"><div className="sb-user-name">本地用户</div><div className="sb-user-sub">用户信息（预留）</div></div>}
