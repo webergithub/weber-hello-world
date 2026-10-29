@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api, on, STATUS_LABEL, fmtSize } from './api';
+import { api, on, STATUS_LABEL, isActive, fmtSize } from './api';
 import { AppCtx } from './ctx';
 import TaskView from './components/TaskView';
 import TaskMonitor from './components/TaskMonitor';
@@ -36,6 +36,9 @@ const readBasket = () => { try { return JSON.parse(localStorage.getItem(BASKET_K
 const readLS = (k, d) => { try { return localStorage.getItem(k) || d; } catch { return d; } };
 const base = (p) => String(p || '').split(/[\\/]/).pop();
 
+// 解析动态只保留最近的文件记录（上万个文件时完整列表会让每次更新都复制整个数组，界面假死）
+const FILES_KEEP = 500;
+const pushFile = (list, item) => (list.length >= FILES_KEEP ? [...list.slice(-(FILES_KEEP - 1)), item] : [...list, item]);
 // 把主进程推送的解析进度事件归并为每个任务的实时状态
 function reduceProgress(prev, e) {
   const cur = { feed: [], files: [], ...(prev[e.taskId] || {}) };
@@ -49,9 +52,9 @@ function reduceProgress(prev, e) {
     case 'slide': Object.assign(cur, { stage: 'slide', slide: e.slide, slideTotal: e.slideTotal, slideTitle: e.slideTitle, unit: e.unit });
       cur.scans = [...(cur.scans || []).slice(-200), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, index: cur.index, total: cur.total, slide: e.slide, slideTotal: e.slideTotal, title: e.slideTitle, unit: e.unit, kind: e.kind, detail: e.detail }];
       feed(`${t}    第 ${e.slide}/${e.slideTotal} ${e.unit || '页'}：${e.slideTitle || '（无标题）'}`); break;
-    case 'parsed': cur.stage = 'parsed'; cur.files = [...cur.files, { file: e.file, kind: e.kind, slides: e.slides, unit: e.unit, dark: e.dark, notes: e.notes, videos: e.videos, ms: e.ms, titles: e.titles, action: 'parsed' }];
+    case 'parsed': cur.stage = 'parsed'; cur.files = pushFile(cur.files, { file: e.file, kind: e.kind, slides: e.slides, unit: e.unit, dark: e.dark, notes: e.notes, videos: e.videos, ms: e.ms, titles: e.titles, action: 'parsed' });
       feed(`${t}    ✅ 解析完成：${e.slides} ${e.unit || '页'}，${e.ms}ms`); break;
-    case 'result': cur.files = [...cur.files, { file: e.file, action: e.action }]; feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
+    case 'result': cur.files = pushFile(cur.files, { file: e.file, action: e.action }); feed(`${t}    ${e.action === 'failed' ? '❌ 解析失败' : e.action === 'skipped' ? '⏭ 已解析过，跳过' : '♻️ 重复文件，未重复解析'}`); break;
     case 'tag': cur.stage = 'tag'; cur.files = cur.files.map((f) => (f.file === e.file ? { ...f, tags: e.tags, category: e.category } : f));
       cur.tagFeed = [...(cur.tagFeed || []).slice(-60), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, tags: e.tags, category: e.category }]; feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
     case 'relate': cur.relate = e; feed(`${t} 🔗 页面关联：${e.pages} 页已打页面标签，${e.linked} 页有相似推荐（相似 PPT 页 ${e.ppt} 条${e.withWord ? `，文档（Word / PDF）↔ PPT ${e.word} 条` : ''}）`); break;
@@ -170,6 +173,8 @@ export default function App() {
     setNotices((n) => [{ id: `${Date.now()}-${Math.round(id * 1e6)}`, at: Date.now(), msg, kind, link, label: action && action.label, cat: (action && action.cat) || noticeCat(msg), read: false }, ...n].slice(0, 500));
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
+  const tasksRef = useRef([]);
+  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
   useEffect(() => { if (tasks.length && !tasks.some((t) => t.id === curTask)) setCurTask(tasks[0].id); if (!tasks.length && curTask) setCurTask(null); }, [tasks]);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
   const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
@@ -183,18 +188,38 @@ export default function App() {
     const onMq = () => setSysTheme(mq.matches ? 'light' : 'dark');
     if (mq) mq.addEventListener('change', onMq);
     const off0 = on('systemTheme', setSysTheme);
-    const off1 = on('task', (t) => {
+    // 任务状态：主进程每 120ms 合并推送一批；直接合并进任务列表，侧栏、任务概览、解析动态等各处用同一份状态
+    const prevStatus = {};
+    const onTask = (t) => {
       setLiveTasks((m) => ({ ...m, [t.id]: t }));
-      if (t.status !== 'running' || t.done === undefined || t.done % 5 === 0) refreshTasks();
-      if (['done', 'failed', 'cancelled'].includes(t.status) && t.finished_at && !t.quiet) {
+      const known = tasksRef.current.find((x) => x.id === t.id);
+      const before = prevStatus[t.id] !== undefined ? prevStatus[t.id] : known && known.status;
+      prevStatus[t.id] = t.status;
+      if (before === t.status) return;
+      // 状态变为结束时提示一次（之前是排队 / 解析中 / 暂停中）
+      if (['done', 'failed', 'cancelled', 'paused'].includes(t.status) && t.finished_at && !t.quiet && ['pending', 'running', 'pausing'].includes(before)) {
         bump();
         const repeat = /增量扫描|补扫/.test(t.message || '') ? 0 : (t.skipped || 0) + (t.duplicate || 0);
         toast(`任务「${t.name}」${STATUS_LABEL[t.status]}：${t.message || ''}${repeat ? `（${repeat} 个文件已解析过，可在“解析任务”中选择是否重新解析）` : ''}`, t.status === 'failed' ? 'error' : 'info', { label: '查看任务', link: { type: 'task', id: t.id }, cat: '解析任务' });
       }
+    };
+    // 状态变化（开始 / 排队 / 暂停 / 结束）时再整体刷新一次，更新其他任务的排队位置等；解析中的进度更新不刷新
+    let softTimer = null;
+    const softRefresh = () => { clearTimeout(softTimer); softTimer = setTimeout(refreshTasks, 400); };
+    const off1 = on('taskBatch', (list) => {
+      if (list.some((t) => t.status !== 'running' || (tasksRef.current.find((x) => x.id === t.id) || {}).status !== 'running')) softRefresh();
+      setTasks((ts) => {
+        const byId = new Map(list.map((t) => [t.id, t]));
+        const known = new Set(ts.map((t) => t.id));
+        if (list.some((t) => !known.has(t.id))) setTimeout(refreshTasks, 0);
+        return ts.map((t) => (byId.has(t.id) ? { ...t, ...byId.get(t.id) } : t));
+      });
+      for (const t of list) onTask(t);
     });
+    const offLib = on('library', () => bump());
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
-    const off3 = on('progress', (e) => setProgress((p) => reduceProgress(p, e)));
-    return () => { off0(); off1(); off2(); off3(); if (mq) mq.removeEventListener('change', onMq); };
+    const off3 = on('progressBatch', (list) => setProgress((p) => list.reduce(reduceProgress, p)));
+    return () => { off0(); off1(); off2(); off3(); offLib(); if (mq) mq.removeEventListener('change', onMq); };
   }, []);
   useEffect(() => { try { localStorage.setItem(BASKET_KEY, JSON.stringify(basket)); } catch { /* ignore */ } }, [basket]);
 
@@ -326,7 +351,7 @@ export default function App() {
     { key: 'search', icon: '🔍', label: '智能搜索' },
     { key: 'analytics', icon: '📈', label: '总览分析' },
     { key: 'alllib', icon: '🗂', label: '所有资料库' },
-    { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => t.status === 'running') ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
+    { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => isActive(t)) ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
     { key: 'groups', icon: '🧩', label: '相似分组' },
     { key: 'notesreview', icon: '✍', label: '完善讲解词' },
   ];
@@ -345,7 +370,7 @@ export default function App() {
   const selectTask = (t) => {
     if (t.id === curTask && SCOPED.includes(view.type)) { setTaskMenu((v) => !v); return; }
     setCurTask(t.id); setTaskMenu(true);
-    if (['running', 'pending'].includes(t.status)) setViewState({ type: 'tmonitor', tab: 'live' });
+    if (['running', 'pending', 'pausing'].includes(t.status)) setViewState({ type: 'tmonitor', tab: 'live' });
     else if (!SCOPED.includes(view.type)) setViewState({ type: 'task' });
   };
   // 有子菜单的菜单项：首次点击打开并展开子菜单，再次点击折叠 / 展开子菜单
@@ -409,8 +434,8 @@ export default function App() {
                   {!collapsed && (
                     <div className="sbt-main">
                       <div className="sbt-name">{t.name}{t.watch ? <span className="watch-dot" title={`已开启定时监测更新（每天 ${(config && config.watch && config.watch.time) || ''}）`}> 📡</span> : null}</div>
-                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{t.status === 'running' ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析`}</div>
-                      {t.status === 'running' && <div className="sbt-bar"><div style={{ width: `${pct}%` }} /></div>}
+                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{isActive(t) ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析`}</div>
+                      {isActive(t) && <div className="sbt-bar"><div style={{ width: `${pct}%` }} /></div>}
                     </div>
                   )}
                   {!collapsed && <div className="sbt-ops">

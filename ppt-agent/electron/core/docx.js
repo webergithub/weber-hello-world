@@ -186,11 +186,8 @@ async function extractImage(zip, abs, mediaDir, key) {
   if (!mediaDir) return null;
   const ext = posix.extname(abs).toLowerCase();
   if (!WEB_IMAGES.has(ext) || !zip.has(abs) || zip.size(abs) > 30 * 1024 * 1024) return null;
-  const dir = path.join(mediaDir, key);
-  const name = posix.basename(abs);
-  const dest = path.join(dir, name);
-  if (!fs.existsSync(dest)) { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(dest, await zip.buffer(abs)); }
-  return `${key}/${name}`;
+  // 不复制图片：记录“文件 key + 部件路径”，显示时从原文件读取
+  return `${key}/${abs.replace(/^\//, '').replace(/\//g, '~')}`;
 }
 
 module.exports = { parseDocx };

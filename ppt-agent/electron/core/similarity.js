@@ -1,6 +1,7 @@
 'use strict';
 // 相似 PPT 分组（先比较标题，再比较内容向量）与 黑底/白底 页面对应关系。
 const path = require('path');
+const { ticker } = require('./yieldy');
 const { cosine } = require('./vectors');
 
 const VARIANT_RE = [
@@ -32,7 +33,8 @@ class DSU {
  * 计算相似分组。返回 [{id, key, title, members:[{file, reasons:[], score}], reasons}]
  * files: 文件行（含 duplicate），vecs: Map(id -> Float32Array)，slideTitles: Map(fileId -> Set(normTitle))
  */
-function computeGroups(files, vecs, slideTitles, { threshold = 0.82 } = {}) {
+async function computeGroups(files, vecs, slideTitles, { threshold = 0.82 } = {}) {
+  const tk = ticker();
   const dsu = new DSU();
   const edges = new Map();
   const edge = (a, b, reason, score) => {
@@ -61,27 +63,32 @@ function computeGroups(files, vecs, slideTitles, { threshold = 0.82 } = {}) {
       edge(list[0].id, list[i].id, '标题相同', s);
     }
   }
-  // 3) 内容相似：小规模全量两两比较；大规模仅比较共享页标题的候选对
+  // 3) 内容相似：小规模全量两两比较；大规模仅比较共享页标题的候选对（分片计算，期间让出事件循环）
   const ids = parsed.map((f) => f.id).filter((id) => vecs.get(id));
-  const candidates = new Set();
-  if (ids.length <= 2000) {
-    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) candidates.add(`${ids[i]}-${ids[j]}`);
-  } else {
-    const inv = new Map();
-    for (const [fid, set] of slideTitles) for (const t of set) { if (t.length < 4) continue; if (!inv.has(t)) inv.set(t, []); inv.get(t).push(fid); }
-    for (const list of inv.values()) {
-      if (list.length > 50) continue;
-      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) candidates.add(list[i] < list[j] ? `${list[i]}-${list[j]}` : `${list[j]}-${list[i]}`);
-    }
-  }
-  for (const k of candidates) {
-    const [a, b] = k.split('-').map(Number);
+  const check = (a, b) => {
     const s = cosine(vecs.get(a), vecs.get(b));
     if (s >= threshold) {
       const ta = slideTitles.get(a) || new Set(), tb = slideTitles.get(b) || new Set();
       let shared = 0; for (const t of ta) if (tb.has(t)) shared++;
       const titleOverlap = shared / Math.max(1, Math.min(ta.size, tb.size));
       if (s >= 0.9 || titleOverlap >= 0.5) edge(a, b, titleOverlap >= 0.5 ? `内容相似(页标题重合${Math.round(titleOverlap * 100)}%)` : '内容相似', s);
+    }
+  };
+  if (ids.length <= 2000) {
+    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) { const p = tk(); if (p) await p; check(ids[i], ids[j]); }
+  } else {
+    const inv = new Map();
+    for (const [fid, set] of slideTitles) for (const t of set) { if (t.length < 4) continue; if (!inv.has(t)) inv.set(t, []); inv.get(t).push(fid); }
+    const done = new Set();
+    for (const list of inv.values()) {
+      if (list.length > 50) continue;
+      for (let i = 0; i < list.length; i++) for (let j = i + 1; j < list.length; j++) {
+        const a = Math.min(list[i], list[j]), b = Math.max(list[i], list[j]), k = a * 4194304 + b;
+        if (done.has(k)) continue;
+        done.add(k);
+        const p = tk(); if (p) await p;
+        check(a, b);
+      }
     }
   }
   const groups = new Map();
@@ -116,18 +123,24 @@ function computeGroups(files, vecs, slideTitles, { threshold = 0.82 } = {}) {
 }
 
 /** 黑底/白底页面对应：同组或同标题的异底色页面，标题相同 + 内容相似 */
-function computePairs(allSlides, fileGroups) {
+async function computePairs(allSlides, fileGroups) {
+  const tk = ticker();
   const slides = allSlides.filter((s) => (s.kind || 'ppt') === 'ppt');
   const pairs = [];
   const byFile = new Map();
   for (const s of slides) { if (!byFile.has(s.file_id)) byFile.set(s.file_id, []); byFile.get(s.file_id).push(s); }
   const seen = new Set();
-  const tryMatch = (A, B) => {
+  const tryMatch = async (A, B) => {
     const dark = [...A, ...B].filter((s) => s.theme === 'dark');
     const light = [...A, ...B].filter((s) => s.theme !== 'dark');
+    // 同标题的白底页优先；候选过多时只比较同标题页 + 少量其他页，避免大分组退化成两两比较
+    const byNt = new Map();
+    for (const l of light) { if (!byNt.has(l.nt)) byNt.set(l.nt, []); byNt.get(l.nt).push(l); }
     for (const d of dark) {
+      { const p = tk(); if (p) await p; }
       let best = null;
-      for (const l of light) {
+      const cands = light.length <= 200 ? light : [...(byNt.get(d.nt) || []).slice(0, 200), ...light.slice(0, 50)];
+      for (const l of cands) {
         if (l.file_id === d.file_id) continue;
         const sameTitle = d.nt && d.nt === l.nt;
         const sim = cosine(d.vec, l.vec);
@@ -144,14 +157,16 @@ function computePairs(allSlides, fileGroups) {
   // 1) 相似分组内的文件两两匹配
   for (const g of fileGroups) {
     const ids = g.members.map((m) => m.file.id).filter((id) => byFile.has(id));
-    for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) tryMatch(byFile.get(ids[i]), byFile.get(ids[j]));
+    // 组内文件不多时两两匹配；成员很多（几十上百个相似版本）时整组一起匹配一次
+    if (ids.length <= 12) { for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) await tryMatch(byFile.get(ids[i]), byFile.get(ids[j])); }
+    else await tryMatch(ids.flatMap((id) => byFile.get(id)), []);
   }
   // 2) 全库按页标题完全相同的异底色页面
   const byTitle = new Map();
   for (const s of slides) { if (s.nt.length < 4) continue; if (!byTitle.has(s.nt)) byTitle.set(s.nt, []); byTitle.get(s.nt).push(s); }
   for (const list of byTitle.values()) {
     if (list.length > 40 || !list.some((s) => s.theme === 'dark') || !list.some((s) => s.theme !== 'dark')) continue;
-    tryMatch(list, []);
+    await tryMatch(list, []);
   }
   return pairs;
 }

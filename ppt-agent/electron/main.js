@@ -6,6 +6,7 @@ const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeT
 const { pathToFileURL } = require('url');
 
 process.env.NODE_NO_WARNINGS = '1';
+const MEDIA_TYPES = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.bmp': 'image/bmp', '.svg': 'image/svg+xml', '.webp': 'image/webp' };
 protocol.registerSchemesAsPrivileged([{ scheme: 'ppta', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, corsEnabled: true } }]);
 
 let win = null;
@@ -168,18 +169,48 @@ app.whenReady().then(async () => {
     }
     const base = u.host === 'thumb' ? service.thumbDir : u.host === 'media' ? service.mediaDir : null;
     if (!base) return new Response('not found', { status: 404 });
-    const p = path.normalize(path.join(base, decodeURIComponent(u.pathname)));
-    if (!p.startsWith(base) || !fs.existsSync(p)) return new Response('not found', { status: 404 });
-    return net.fetch(pathToFileURL(p).toString());
+    const rel = decodeURIComponent(u.pathname);
+    const p = path.normalize(path.join(base, rel));
+    if (!p.startsWith(base)) return new Response('not found', { status: 404 });
+    if (fs.existsSync(p)) return net.fetch(pathToFileURL(p).toString());
+    // 页面图片不再复制到数据目录：按“文件 key / 部件路径”直接从原 PPT / Word 中读取（只读）
+    if (u.host === 'media') {
+      const [, key, name] = rel.split('/');
+      if (key && name) {
+        return service.readMedia(key, name).then((buf) => (buf ? new Response(buf, { headers: { 'content-type': MEDIA_TYPES[path.extname(name).toLowerCase()] || 'application/octet-stream', 'cache-control': 'max-age=3600' } })
+          : new Response('not found', { status: 404 }))).catch(() => new Response('not found', { status: 404 }));
+      }
+    }
+    return new Response('not found', { status: 404 });
   });
 
   // 日志批量推送
   let pending = [];
   logger.on('line', (l) => { pending.push(l); });
   setInterval(() => { if (pending.length) { send('log', pending); pending = []; } }, 400);
-  service.on('task', (t) => { send('task', t); updateTrayMenu(); });
+  // 任务 / 进度事件合并后每 120ms 推送一次：上万个文件时逐个推送会让界面来不及处理而假死。
+  // 同一任务只推最新状态；逐页预览事件（slide）每批每个任务最多保留最近 12 条，其余事件全部保留。
+  let taskBuf = new Map(), progBuf = [], flushTimer = null, trayRunning;
+  const flushEvents = () => {
+    flushTimer = null;
+    if (taskBuf.size) { send('taskBatch', [...taskBuf.values()]); taskBuf = new Map(); }
+    if (progBuf.length) {
+      const keep = new Map();
+      for (let i = progBuf.length - 1; i >= 0; i--) {
+        const e = progBuf[i];
+        if (e.stage !== 'slide') continue;
+        const n = keep.get(e.taskId) || 0;
+        if (n >= 12) e.drop = true; else keep.set(e.taskId, n + 1);
+      }
+      send('progressBatch', progBuf.filter((e) => !e.drop));
+      progBuf = [];
+    }
+  };
+  const scheduleFlush = () => { if (!flushTimer) flushTimer = setTimeout(flushEvents, 120); };
+  service.on('task', (t) => { taskBuf.set(t.id, t); scheduleFlush(); if (service.running !== trayRunning) { trayRunning = service.running; updateTrayMenu(); } });
   service.on('embedding', (e) => send('embedding', e));
-  service.on('progress', (p) => send('progress', p));
+  service.on('progress', (p) => { progBuf.push(p); scheduleFlush(); });
+  service.on('library', (e) => send('library', e));
   service.on('watch', (w) => send('watch', w));
   service.startScheduler();
   createTray();
@@ -332,9 +363,14 @@ app.whenReady().then(async () => {
   ipcMain.handle('api', async (_e, method, args) => {
     const fn = api[method];
     if (!fn) throw new Error('未知接口 ' + method);
+    const t0 = Date.now();
     try { return await fn(...(args || [])); } catch (e) {
       logger.child('ipc').error(`接口 ${method} 出错`, e);
       throw e;
+    } finally {
+      // 记录慢接口，便于定位“卡顿”（大批量文件时）
+      const ms = Date.now() - t0;
+      if (ms > 1000 && !['selectDir', 'selectFiles', 'saveFile', 'confirm'].includes(method)) logger.child('ipc').warn(`接口 ${method} 耗时 ${ms}ms`);
     }
   });
 

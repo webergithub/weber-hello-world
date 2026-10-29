@@ -41,7 +41,8 @@ function DocPage({ slide, full, className, highlight }) {
 }
 
 function MiniCard({ slide, style, className }) {
-  const bg = (slide.bg && slide.bg.color) || (slide.theme === 'dark' ? '#111' : '#fff');
+  // 整页图片当背景的页面（source = full-picture）记录的底色无意义，按黑白底判断结果填充
+  const bg = slide.bg && slide.bg.source === 'full-picture' ? (slide.theme === 'dark' ? '#16181d' : '#fff') : (slide.bg && slide.bg.color) || (slide.theme === 'dark' ? '#111' : '#fff');
   const fg = slide.theme === 'dark' ? '#f2f2f2' : '#222';
   const img = slide.bg && slide.bg.image;
   const lines = String(slide.text || '').split('\n').filter(Boolean).slice(0, 5);

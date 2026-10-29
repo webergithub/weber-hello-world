@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, KIND_LABEL, unitOf } from '../api';
+import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, isActive, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
 import LogView from './LogView';
@@ -34,25 +34,27 @@ export default function TaskView({ taskId, back, onBack }) {
   const { task, stats } = data;
   const files = dedupe(data.files);
   const live = app.liveTasks[taskId];
+  // 状态以全局任务列表（实时事件合并）为准，与侧栏、解析动态保持一致
+  const cur = { ...task, ...(app.tasks.find((x) => x.id === taskId) || {}) };
   return (
     <div className="view">
       <div className="view-head">
         {back && <button className="btn vh-back" title={`返回${BACK_LABEL[back.type] || '上一个界面'}`} onClick={onBack}>← 返回</button>}
         <div>
-          <div className="vh-title">📁 {task.name} <span className={`status s-${task.status}`}>{STATUS_LABEL[task.status] || task.status}</span></div>
-          <div className="muted small">{task.dir} · 创建于 {fmtTime(task.created_at)}{task.message ? ' · ' + task.message : ''}</div>
-          {live && live.status === 'running' && (
+          <div className="vh-title">📁 {task.name} <span className={`status s-${cur.status}`}>{STATUS_LABEL[cur.status] || cur.status}</span></div>
+          <div className="muted small">{task.dir} · 创建于 {fmtTime(task.created_at)}{cur.message ? ' · ' + cur.message : ''}</div>
+          {isActive(cur) && (
             <div className="progress-wrap">
-              <div className="progress"><div style={{ width: `${task.total ? ((live.done || 0) / task.total) * 100 : 5}%` }} /></div>
-              <span className="small muted">{live.done || 0}/{task.total} {live.current ? '· ' + live.current : ''}</span>
+              <div className="progress"><div style={{ width: `${cur.total ? (((live && live.done) || 0) / cur.total) * 100 : 5}%` }} /></div>
+              <span className="small muted">{(live && live.done) || 0}/{cur.total} {live && live.current ? '· ' + live.current : ''}</span>
             </div>
           )}
         </div>
         <div className="spacer" />
-        {task.status === 'running' || task.status === 'pending'
+        {cur.status === 'pausing' ? <button className="btn" disabled>⏸ 暂停中…</button> : cur.status === 'running' || cur.status === 'pending'
           ? <><button className="btn primary" onClick={() => api.pauseTask(taskId).then(app.refreshTasks)} title="暂停后可从断点继续">⏸ 暂停</button><button className="btn" onClick={() => api.cancelTask(taskId)}>取消任务</button></>
-          : <>{['paused', 'interrupted'].includes(task.status) && <button className="btn primary" onClick={() => app.startParse(taskId, 'resume')}>▶ 从断点继续</button>}<button className={`btn ${task.status === 'draft' ? 'primary' : ''}`} onClick={() => app.startParse(taskId)}>{task.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button></>}
-        {task.watch && task.run_started && !['running', 'pending'].includes(task.status) ? <button className="btn" title="只解析新增和修改过的文档，原文件已删除的移入回收站" onClick={() => app.startParse(taskId, 'watch')}>↻ 增量扫描</button> : null}
+          : <>{['paused', 'interrupted'].includes(cur.status) && <button className="btn primary" onClick={() => app.startParse(taskId, 'resume')}>▶ 从断点继续</button>}<button className={`btn ${cur.status === 'draft' ? 'primary' : ''}`} onClick={() => app.startParse(taskId)}>{cur.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button></>}
+        {task.watch && task.run_started && !['running', 'pending', 'pausing'].includes(cur.status) ? <button className="btn" title="只解析新增和修改过的文档，原文件已删除的移入回收站" onClick={() => app.startParse(taskId, 'watch')}>↻ 增量扫描</button> : null}
         <button className={`btn ${task.watch ? 'primary' : ''}`} title={`每天 ${(app.config && app.config.watch && app.config.watch.time) || ''} 定时增量扫描该任务（时间在“设置 → 定时监测更新”中修改）`}
           onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>
         <button className="btn ghost" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId })}>⚙️ 解析动态</button>

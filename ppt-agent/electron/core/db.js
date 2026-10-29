@@ -126,6 +126,13 @@ class Store {
   updateTask(id, f) { this.update('tasks', id, f); }
   getTask(id) { return this.q('SELECT * FROM tasks WHERE id = ?').get(id) || null; }
   listTasks() { return this.q('SELECT * FROM tasks WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC').all(); }
+  // 给界面用的任务行：不含 scan_list（上万个文件时有数 MB，逐文件推送会拖垮主进程与界面）
+  taskCols() {
+    if (!this._taskCols) this._taskCols = this.db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name).filter((n) => n !== 'scan_list').map((n) => `"${n}"`).join(', ');
+    return this._taskCols;
+  }
+  getTaskLite(id) { return this.q(`SELECT ${this.taskCols()}, scan_list IS NOT NULL AS has_scan FROM tasks WHERE id = ?`).get(id) || null; }
+  listTasksLite() { return this.q(`SELECT ${this.taskCols()}, scan_list IS NOT NULL AS has_scan FROM tasks WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC`).all(); }
   // 软删除：任务从列表移除，但解析历史保留
   deleteTask(id) { this.q('UPDATE tasks SET deleted = 1 WHERE id = ?').run(id); }
 
@@ -290,12 +297,53 @@ class Store {
   // ---------- 黑白底对应 ----------
   // ---------- 页面标签与页面关联 ----------
   /** 参与关联计算的页面（已解析文件）：向量、词项、标签 */
+  relationRow(r) { return ((r) => ({ id: r.id, file_id: r.file_id, title: r.title, text: r.text, notes: r.notes, theme: r.theme, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb), kw: r.kw ? JSON.parse(r.kw) : null, tags: r.tags ? JSON.parse(r.tags) : null }))(r); }
   relationRows() {
     return this.q(`SELECT s.id, s.file_id, s.title, s.text, s.notes, s.theme, s.vec, s.emb, s.kw, s.tags, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'`).all()
-      .map((r) => ({ id: r.id, file_id: r.file_id, title: r.title, text: r.text, notes: r.notes, theme: r.theme, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb), kw: r.kw ? JSON.parse(r.kw) : null, tags: r.tags ? JSON.parse(r.tags) : null }));
+      .map((r) => this.relationRow(r));
+  }
+  // ---------- 大批量分页读取：按 id 每次读 2000 行，页与页之间让出事件循环（上万个文件时一次性读取会卡住界面） ----------
+  async paged(sql, params, map, idCol = 'id', size = 2000) {
+    const stmt = this.db.prepare(`${sql} AND ${idCol} > ? ORDER BY ${idCol} LIMIT ?`);
+    const out = [];
+    let last = -1;
+    for (;;) {
+      const rows = stmt.all(...params, last, size);
+      for (const r of rows) out.push(map(r));
+      if (rows.length < size) break;
+      last = rows[rows.length - 1].id;
+      await new Promise((r) => setImmediate(r));
+    }
+    return out;
+  }
+  async listAllFilesAsync() { return (await this.paged('SELECT * FROM files WHERE 1 = 1', [], this.fileRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
+  listFilesAsync(status) { return this.paged('SELECT * FROM files WHERE status = ?', [status], this.fileRow); }
+  fileTermsAsync() { return this.paged("SELECT id, terms FROM files WHERE status = 'parsed'", [], (r) => ({ id: r.id, terms: J(r.terms, {}) })); }
+  fileVectorsAsync() { return this.paged("SELECT id, vec, emb FROM files WHERE status = 'parsed'", [], (r) => ({ id: r.id, vec: fromBlob(r.vec), emb: fromBlob(r.emb) })); }
+  slideVectorsAsync() {
+    return this.paged("SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'", [],
+      (r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb) }), 's.id');
+  }
+  async relationRowsAsync() {
+    return this.paged("SELECT s.id, s.file_id, s.title, s.text, s.notes, s.theme, s.vec, s.emb, s.kw, s.tags, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'", [], (r) => this.relationRow(r), 's.id');
   }
   setSlideKwTags(rows) {
     this.tx(() => { for (const r of rows) this.q('UPDATE slides SET kw = COALESCE(?, kw), tags = ? WHERE id = ?').run(r.kw ? JSON.stringify(r.kw) : null, JSON.stringify(r.tags || []), r.id); });
+  }
+  /** 分批写入（每批 5000 行一个事务，批与批之间让出事件循环），十几万条关联时不会卡住界面 */
+  async replaceLinksAsync(links) {
+    this.q('DELETE FROM slide_links').run();
+    const ins = this.q('INSERT OR REPLACE INTO slide_links(slide_id, other_id, score, kind, reasons) VALUES (?, ?, ?, ?, ?)');
+    for (let i = 0; i < links.length; i += 5000) {
+      this.tx(() => { for (const l of links.slice(i, i + 5000)) ins.run(l.a, l.b, l.score, l.kind, JSON.stringify(l.reasons || [])); });
+      await new Promise((r) => setImmediate(r));
+    }
+  }
+  async setSlideKwTagsAsync(rows) {
+    for (let i = 0; i < rows.length; i += 5000) {
+      this.setSlideKwTags(rows.slice(i, i + 5000));
+      await new Promise((r) => setImmediate(r));
+    }
   }
   replaceLinks(links) {
     this.tx(() => {

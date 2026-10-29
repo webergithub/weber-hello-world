@@ -306,14 +306,8 @@ async function extractImage(pkg, abs, mediaDir, key) {
   if (!WEB_IMAGES.has(ext) || !pkg.zip.has(abs)) return null;
   const size = pkg.zip.size(abs);
   if (size > 30 * 1024 * 1024) return null;
-  const dir = path.join(mediaDir, key);
-  const name = posix.basename(abs);
-  const dest = path.join(dir, name);
-  if (!fs.existsSync(dest)) {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(dest, await pkg.zip.buffer(abs));
-  }
-  return `${key}/${name}`;
+  // 不再把图片复制到数据目录：只记录“文件 key + 部件路径”，界面显示时由主进程直接从原文件中读取（只读）
+  return `${key}/${abs.replace(/^\//, '').replace(/\//g, '~')}`;
 }
 
 async function readSubtitleFile(p) {

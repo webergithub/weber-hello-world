@@ -8,6 +8,7 @@ const { keywordCandidates, HAS_CJK } = require('./textproc');
 const { cosine } = require('./vectors');
 const { normSlideTitle } = require('./similarity');
 const { GENERIC } = require('./tagger');
+const { ticker } = require('./yieldy');
 
 const PAGE_TAGS = 8;
 const isDoc = (s) => s.kind === 'word' || s.kind === 'pdf';
@@ -47,7 +48,8 @@ function pageTags(kw, df, N) {
  * withWord：同时关联 Word 章节与 PPT 页（设置中同时选择了 PPT 与 Word）
  * 返回 [{ a, b, score, kind: 'ppt' | 'word'（b 的类型）, reasons }]，a 为推荐给谁
  */
-function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore = 0.32, preK = 60 } = {}) {
+async function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore = 0.32, preK = 60 } = {}) {
+  const tk = ticker();
   const N = slides.length;
   const tagIdx = new Map();
   const titleIdx = new Map();
@@ -57,10 +59,12 @@ function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore 
     s._nt = normSlideTitle(s.title);
     if (s._nt.length >= 4) { if (!titleIdx.has(s._nt)) titleIdx.set(s._nt, []); titleIdx.get(s._nt).push(i); }
   });
-  const cap = Math.max(300, Math.round(N * 0.05));
+  // 过于常见的标签 / 页标题（如“目录”“谢谢”）不参与召回：上万页时会退化成两两比较
+  const cap = Math.min(2000, Math.max(300, Math.round(N * 0.05)));
   const idf = (t) => Math.log(1 + N / (tagIdx.get(t).length));
   const out = [];
   for (let i = 0; i < N; i++) {
+    { const p = tk(); if (p) await p; }
     const s = slides[i];
     // Word / PDF 都算“文档”：文档之间不互相推荐，文档 ↔ PPT 仅在同时启用两类时关联
     const sDoc = isDoc(s);
@@ -72,7 +76,8 @@ function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore 
       const w = idf(t);
       for (const j of post) if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + w);
     }
-    if (s._nt.length >= 4) for (const j of titleIdx.get(s._nt) || []) if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + 3);
+    const sameT = s._nt.length >= 4 ? titleIdx.get(s._nt) || [] : [];
+    if (sameT.length <= cap) for (const j of sameT) if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + 3);
     const pre = [...cand.entries()].sort((a, b) => b[1] - a[1]).slice(0, preK);
     const scored = [];
     for (const [j] of pre) {

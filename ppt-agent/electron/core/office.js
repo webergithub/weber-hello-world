@@ -135,8 +135,9 @@ try {
       try {
         // 使用独立的用户配置目录，避免与正在运行的 LibreOffice 冲突
         const profile = 'file:///' + path.join(tmp, 'profile').replace(/\\/g, '/').replace(/^\//, '');
+        // 不复制原文件：同一磁盘用硬链接（不占空间），否则符号链接；都不行时才临时复制（转换完立即删除）
         const input = path.join(tmp, 'in' + path.extname(src));
-        fs.copyFileSync(src, input);
+        try { fs.linkSync(src, input); } catch { try { fs.symlinkSync(src, input); } catch { fs.copyFileSync(src, input); } }
         const r = await run(d.soffice, [`-env:UserInstallation=${profile}`, '--headless', '--norestore', '--convert-to', 'pdf', '--outdir', tmp, input], { timeout: 600000 });
         const pdf = path.join(tmp, 'in.pdf');
         if (!fs.existsSync(pdf)) { this.log.warn(`LibreOffice 转 PDF 失败: ${src}`, r.stderr.slice(0, 300)); return null; }

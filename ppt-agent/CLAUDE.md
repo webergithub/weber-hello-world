@@ -28,6 +28,9 @@
 - 从列表进入详情再返回，要回到原来的界面与条目：`DataTable` 按 `sessionKey`（默认 `id`）在会话内记住筛选、关键字、滚动位置与上次点击的行（`row-last` 高亮）；视图内的页签 / 筛选用模块级缓存保存；`app.openFile` 会记住当前视图与打开的下钻清单，返回时恢复。
 - 涉及文件的列表都提供“📂 在资源管理器中显示”（`api.showItem`）。
 - 提示一律用 `app.toast(msg, kind, { label, link, cat })`：每条都会记入“维护 → 通知管理”（localStorage `ppta.notices`，最多 500 条）；`link` 必须可序列化（`{type:'task'|'tmonitor'|'search'|'open'|'reveal'|'view', ...}`），由 `App.openLink` 解析跳转，不要在通知里放函数。
+- 大批量（v3.3）：任务事件只带 `getTaskLite`（不含 `scan_list`）；`main.js` 把 task / progress 事件合并为 `taskBatch` / `progressBatch` 每 120ms 推送（slide 事件每批每任务最多 12 条）；全库计算（`afterLibraryChange`、`computeGroups/computePairs/computeLinks`）是 async 并用 `yieldy.ticker()` 分片让出主进程，新的全库循环也必须分片；常见标签 / 页标题 / 大分组要设上限，不要写两两比较。渲染端进度只保留最近 `FILES_KEEP` 条。
+- 任务状态单一来源：暂停写入状态 `pausing`（“暂停中…”），各视图读 `app.tasks`（由 `taskBatch` 实时合并），“是否在执行”用 `isActive(t)`；暂停 / 取消后不做全库重算，置 `libraryDirty`，空闲时 `kickLibraryRefresh` 后台补算，完成后推 `library` 事件刷新界面。
+- 不复制原文件（v3.3）：页面图片只记录 `<mediaKey>/<部件路径用 ~ 分隔>`，`ppta://media` 由 `service.readMedia` 从原文件（旧版 .ppt 为转换后的 .pptx）读取；不要再把原文件内容写入数据目录；需要临时文件时优先硬链接 / 符号链接。
 - 开始 / 继续解析统一调用 `app.startParse(id, 'start'|'resume'|'watch')`，调用后自动跳到该任务的“解析动态”。
 - 解析动态按事件序号（`seq`）播放，不按数组下标；每页停留时间从显示时起算，积压时缩短停留时间平滑追赶，不整段跳过。
 - 智能搜索每次检索都记录到 `search_history`（结果存 `cache/search/<id>.json`，保留最近 300 条）；搜索队列在 `src/searchQueue.js`（前端依次执行，可排序 / 暂停）。智能生成等内部调用传 `record: false`。

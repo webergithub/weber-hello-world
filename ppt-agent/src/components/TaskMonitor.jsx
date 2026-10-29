@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { api, fmtSize, fmtTime, STATUS_LABEL, ACTION_LABEL, KIND_LABEL } from '../api';
+import { api, fmtSize, fmtTime, STATUS_LABEL, ACTION_LABEL, KIND_LABEL, isActive } from '../api';
 import { useApp } from '../ctx';
 import LiveScan from './LiveScan';
 import DataTable from './DataTable';
@@ -37,7 +37,7 @@ const LAST_SEL = { id: null }; // 任务队列中上次选中的任务（从任�
 function QueuePanel({ initial, onLive }) {
   const app = useApp();
   const { tasks } = app;
-  const runningId = (tasks.find((t) => t.status === 'running') || {}).id;
+  const runningId = (tasks.find((t) => isActive(t)) || {}).id;
   const [sel, setSelState] = useState(initial || LAST_SEL.id || null);
   const setSel = (id) => { LAST_SEL.id = id; setSelState(id); };
   const cur = sel || runningId || (tasks[0] && tasks[0].id);
@@ -45,7 +45,7 @@ function QueuePanel({ initial, onLive }) {
   const others = tasks.filter((t) => !(t.queuePos > 0));
   // 任务删除统一在这里：多选后删除（解析中 / 排队中的任务不能删除），删除前确认
   const [checked, setChecked] = useState(() => new Set());
-  const deletable = (t) => !['running', 'pending'].includes(t.status) && !(t.queuePos > 0);
+  const deletable = (t) => !['running', 'pending', 'pausing'].includes(t.status) && !(t.queuePos > 0);
   const picked = tasks.filter((t) => checked.has(t.id) && deletable(t));
   const toggleCheck = (id) => setChecked((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   const allOn = tasks.some(deletable) && tasks.filter(deletable).every((t) => checked.has(t.id));
@@ -73,7 +73,7 @@ function QueuePanel({ initial, onLive }) {
           <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status] || t.status}{t.queuePos > 0 ? ` · 第 ${t.queuePos} 位` : ''}</span>
         </div>
         <div className="muted small ellipsis" title={t.dir}>{t.dir}</div>
-        {t.status === 'running' && (
+        {isActive(t) && (
           <div className="progress-wrap">
             <div className="progress"><div style={{ width: `${t.total ? ((live && live.index ? live.index - 1 : done) / t.total) * 100 : 3}%` }} /></div>
             <span className="small muted">{live && live.index ? live.index : done}/{t.total || '?'}</span>
@@ -86,7 +86,8 @@ function QueuePanel({ initial, onLive }) {
           {['paused', 'interrupted'].includes(t.status) && <button className="btn tiny primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 继续</button>}
           {['done', 'cancelled', 'interrupted', 'paused', 'failed'].includes(t.status) && <button className="btn tiny" onClick={() => app.startParse(t.id)}>↻ 重新扫描</button>}
           {(t.status === 'running' || t.status === 'pending') && <button className="btn tiny" onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>⏸ 暂停</button>}
-          {t.status === 'running' && <button className="btn tiny" onClick={() => onLive(t.id)}>解析动态</button>}
+          {t.status === 'pausing' && <button className="btn tiny" disabled>⏸ 暂停中…</button>}
+          {isActive(t) && <button className="btn tiny" onClick={() => onLive(t.id)}>解析动态</button>}
           {t.queuePos > 0 && <><button className="btn tiny" onClick={() => api.moveTask(t.id, -1).then(app.refreshTasks)}>上移</button><button className="btn tiny" onClick={() => api.moveTask(t.id, 1).then(app.refreshTasks)}>下移</button></>}
           <button className="btn tiny" onClick={() => { setSel(t.id); app.go({ type: 'task', id: t.id, back: true }); }}>查看结果</button>
         </div>
@@ -122,13 +123,11 @@ function LivePanel({ taskId }) {
   const [dupes, setDupes] = useState(null);
   if (!t) return null;
   const files = p.files || [];
-  const pct = t.total ? Math.round(((p.index ? p.index - (t.status === 'running' ? 1 : 0) : t.parsed + t.skipped + t.duplicate + t.failed) / t.total) * 100) : 0;
-  // 运行中使用实时事件统计，避免任务行计数刷新滞后
-  const liveCount = (a) => files.filter((f) => (f.action || 'parsed') === a).length;
-  const running = t.status === 'running' && files.length;
-  const nParsed = running ? liveCount('parsed') : t.parsed;
-  const nFailed = running ? liveCount('failed') : t.failed;
-  const repeat = running ? liveCount('skipped') + liveCount('duplicate') : t.skipped + t.duplicate;
+  const pct = t.total ? Math.round(((p.index ? p.index - (isActive(t) ? 1 : 0) : t.parsed + t.skipped + t.duplicate + t.failed) / t.total) * 100) : 0;
+  // 计数直接用任务行（每处理一个文件都会随状态事件更新），不再遍历上万条事件
+  const nParsed = t.parsed || 0;
+  const nFailed = t.failed || 0;
+  const repeat = (t.skipped || 0) + (t.duplicate || 0);
   return (
     <div className="live">
       <div className="live-head">
@@ -145,11 +144,11 @@ function LivePanel({ taskId }) {
         <div className="card drill" onClick={() => drillTask(app, t, '已解析过 / 重复', ['skipped', 'duplicate'])}><div className="card-v">{repeat}</div><div className="card-k">已解析过 / 重复</div></div>
         <div className="card drill" onClick={() => drillTask(app, t, '失败', ['failed'])}><div className="card-v">{nFailed}</div><div className="card-k">失败</div></div>
       </div>
-      {(t.status === 'running' || p.index) && (
+      {(isActive(t) || p.index) && (
         <div className="live-progress">
           <div className="lp-row"><span>总进度</span><div className="progress big"><div style={{ width: `${Math.min(100, pct)}%` }} /></div><span>{pct}%</span></div>
           {p.stage === 'scanning' && p.scan && <div className="small muted">扫描目录中：已检查 {p.scan.dirs} 个目录，发现 {p.scan.found} 个文档 · {p.scan.current}</div>}
-          {p.file && t.status === 'running' && (
+          {p.file && isActive(t) && (
             <>
               <div className="lp-file">📄 正在处理：<b>{p.file.split(/[\\/]/).pop()}</b> <span className="tag">{STAGE[p.stage] || p.stage}</span></div>
               {p.slideTotal ? <div className="lp-row"><span>逐{p.unit || '页'}扫描</span><div className="progress"><div style={{ width: `${(p.slide / p.slideTotal) * 100}%` }} /></div><span>{p.slide}/{p.slideTotal}</span></div> : null}
@@ -234,7 +233,7 @@ function HistoryPanel({ taskId }) {
   useEffect(() => { api.history({ action: action || undefined, q: q || undefined, limit: 5000, taskId }).then(setRows); }, [action, q, app.taskTick, taskId]);
   // 正在解析的文件：来自实时进度，作为“解析中”记录显示在历史中
   const STAGE = { file: '读取文件', parse: '解析中', slide: '逐页解析', thumb: '生成页面截图', store: '写入数据库', parsed: '解析完成', tag: '计算标签', scanning: '扫描目录' };
-  const live = useMemo(() => app.tasks.filter((t) => t.status === 'running' && (!taskId || t.id === taskId)).map((t) => {
+  const live = useMemo(() => app.tasks.filter((t) => isActive(t) && (!taskId || t.id === taskId)).map((t) => {
     const p = app.progress[t.id] || {};
     const lt = app.liveTasks[t.id] || {};
     const file = p.file || (lt.current && /[\\/]/.test(lt.current) && !lt.current.startsWith('扫描中') ? lt.current : '');

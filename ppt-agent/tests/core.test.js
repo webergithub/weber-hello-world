@@ -116,7 +116,7 @@ test('服务：去重（已解析过 / 重复文件）、标签 20 个、分组�
   const ok = d.files.filter((f) => f.action === 'parsed' && f.slide_count >= 3);
   assert.ok(ok.length >= 7);
   assert.ok(ok.every((f) => f.tags.length === 20), ok.map((f) => f.name + ':' + f.tags.length).join(','));
-  const groups = svc.groups();
+  const groups = await svc.groups();
   assert.ok(groups.some((g) => g.hasThemeVariants));
   const r = await svc.searchQuery('机航 turnaround');
   assert.strictEqual(r.files[0].tier, 1);
@@ -201,6 +201,30 @@ test('单机版：不创建大模型 / 语义向量客户端；搜索推荐词�
   assert.ok(sg.every((x) => !/^(白底|黑底|黑白混合|含视频|含表格|含图表|中文|英文|中英双语)$|页/.test(x.tag)), '不含底色 / 页数 / 语言等属性标签: ' + sg.map((x) => x.tag).join(','));
   for (let i = 1; i < sg.length; i++) assert.ok(sg[i - 1].files >= sg[i].files, '按覆盖文档数排序');
   assert.deepStrictEqual(svc.searchSuggestions({ taskIds: [999] }), []);
+  svc.store.close();
+});
+
+test('不复制原文件：页面图片不写入数据目录，按需从原 PPT 读取；暂停后不阻塞地补算', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'data-media'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const lib = path.join(tmp, 'lib-media');
+  fs.mkdirSync(lib, { recursive: true });
+  fs.copyFileSync(P('技术方案', '数字孪生机场_图片背景.pptx'), path.join(lib, '图片背景.pptx'));
+  const id = svc.addTask(lib);
+  const done = new Promise((res) => svc.on('task', (t) => { if (t.id === id && ['done', 'failed'].includes(t.status)) res(t); }));
+  svc.startTask(id);
+  await done;
+  const files = fs.existsSync(svc.mediaDir) ? fs.readdirSync(svc.mediaDir, { recursive: true }).filter((f) => /\.(png|jpe?g|gif|bmp|webp)$/i.test(f)) : [];
+  assert.strictEqual(files.length, 0, '解析后数据目录中不应有页面图片副本');
+  const f = svc.store.listFiles({ status: 'parsed' })[0];
+  const refs = [...new Set(JSON.stringify(svc.store.slidesOf(f.id, true)).match(/[0-9a-f]{16}\/[^"\\]+~[^"\\]+/g) || [])];
+  assert.ok(refs.length > 0, '应记录图片引用');
+  const [key, name] = refs[0].split('/');
+  const buf = await svc.readMedia(key, name);
+  assert.ok(buf && buf.length > 100, '应能从原文件读取图片');
+  // 任务状态行不带扫描清单（上万个文件时有数 MB）
+  assert.ok(!('scan_list' in svc.store.getTaskLite(id)) && svc.tasks().every((t) => !('scan_list' in t)));
   svc.store.close();
 });
 
@@ -295,10 +319,10 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   assert.strictEqual(first, 3, '暂停时正在解析的第 3 个文件应在继续时重新解析');
   assert.ok(t2.parsed >= 8);
   // 回收站
-  const f = svc.library().find((x) => x.name.includes('A-CDM'));
+  const f = (await svc.library()).find((x) => x.name.includes('A-CDM'));
   await svc.recycleFiles([f.id], { moveFile: true });
   assert.ok(!fs.existsSync(f.path));
-  assert.ok(!svc.library().some((x) => x.id === f.id));
+  assert.ok(!(await svc.library()).some((x) => x.id === f.id));
   const bin = svc.recycleList();
   await svc.restoreRecycled([bin[0].id]);
   assert.ok(fs.existsSync(f.path));
@@ -307,7 +331,7 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   assert.ok(fs.existsSync(f.path), '仅移出资料库时彻底删除不应删除原文件');
   assert.strictEqual(svc.recycleList().length, 0);
   // 讲解词编辑；Agent 生成未配置接口时提示去设置（不再使用内置模板）
-  const any = svc.library().find((x) => x.status === 'parsed' && x.slide_count > 2);
+  const any = (await svc.library()).find((x) => x.status === 'parsed' && x.slide_count > 2);
   const sl = svc.store.slidesOf(any.id)[1];
   await assert.rejects(svc.generateNotes(sl.id), /单机版（不联网）/);
   const e = svc.updateSlideText(sl.id, { notes: '唯一测试讲解词XYZ' });
@@ -361,18 +385,18 @@ test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料�
   assert.match(t.message, /新增 1，更新 1，移除 1/);
   assert.strictEqual(JSON.parse(t.watch_summary).added, 1);
   assert.strictEqual(svc.store.getTask(draft).status, 'draft', '从未开始过的任务不自动开始');
-  assert.ok(svc.library().some((f) => f.name === '新增文档_增量测试.pptx'));
-  assert.ok(!svc.library().some((f) => f.name === pptx[2]));
+  assert.ok((await svc.library()).some((f) => f.name === '新增文档_增量测试.pptx'));
+  assert.ok(!(await svc.library()).some((f) => f.name === pptx[2]));
   assert.ok(svc.recycleList().some((r) => r.name === pptx[2] && !r.moved));
   assert.strictEqual(await svc.checkSchedule(), false, '同一时间点只扫描一次');
   // 用户移出资料库的文档，再次扫描不自动加回
-  const keep = svc.library().find((f) => f.name === pptx[3]);
+  const keep = (await svc.library()).find((f) => f.name === pptx[3]);
   await svc.recycleFiles([keep.id], { moveFile: false });
   const p2 = done(id);
   svc.runWatch('手动增量扫描');
   const t2 = await p2;
   assert.match(t2.message, /新增 0，更新 0，移除 0/);
-  assert.ok(!svc.library().some((f) => f.id === keep.id));
+  assert.ok(!(await svc.library()).some((f) => f.id === keep.id));
   assert.ok(svc.watchInfo().tasks.some((x) => x.id === id && x.last_watch_at));
   svc.close();
 });
@@ -391,7 +415,7 @@ test('页面标签与页面关联：相似 PPT 页推荐；同时选择 Word 时
   svc.startTask(id);
   await done(id);
   assert.ok(relate.length && relate[0].ppt > 0 && relate[0].withWord === false);
-  const lib0 = svc.library();
+  const lib0 = (await svc.library());
   assert.ok(!lib0.some((f) => f.kind === 'word'), '只选 PPT 时不解析 Word');
   // 页面标签
   const f = lib0.find((x) => x.name.includes('白底') && x.slide_count > 3);
@@ -407,7 +431,7 @@ test('页面标签与页面关联：相似 PPT 页推荐；同时选择 Word 时
   svc.setConfig({ docTypes: ['ppt', 'word'] });
   svc.startTask(id);
   await done(id);
-  assert.ok(svc.library().some((x) => x.kind === 'word'));
+  assert.ok((await svc.library()).some((x) => x.kind === 'word'));
   const last = relate[relate.length - 1];
   assert.strictEqual(last.withWord, true);
   assert.ok(last.word > 0, 'Word 与 PPT 之间应有关联');
@@ -432,7 +456,7 @@ test('讲解词译文：保存到知识库、写回 PPT 备注（同语言再次
   svc.setConfig({ thumbnails: 'off' });
   const id = svc.addTask(lib);
   await new Promise((res) => { svc.on('task', (t) => { if (t.id === id && t.status === 'done' && t.finished_at) res(); }); svc.startTask(id); });
-  const f = svc.library()[0];
+  const f = (await svc.library())[0];
   const s = svc.store.slidesOf(f.id).find((x) => x.notes);
   // 单机版不联网：调用大模型的功能给出明确提示
   await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /单机版（不联网）/);

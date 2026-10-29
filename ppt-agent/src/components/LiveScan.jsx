@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, assetUrl, STATUS_LABEL, THEME_LABEL } from '../api';
+import { api, assetUrl, STATUS_LABEL, THEME_LABEL, isActive } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
 import { HtmlSlide } from './SlidePreview';
@@ -29,7 +29,7 @@ function preload(urls) {
 // 解析动态：用扫描线动画逐页展示正在解析的页面、提取的文字、生成的 Markdown 与标签标注
 export default function LiveScan({ taskId, onPick, lock = false }) {
   const app = useApp();
-  const running = app.tasks.find((t) => t.status === 'running');
+  const running = app.tasks.find((t) => isActive(t));
   const id = taskId || (running && running.id) || (app.tasks[0] && app.tasks[0].id);
   const t = app.tasks.find((x) => x.id === id);
   const p = (id && app.progress[id]) || {};
@@ -84,13 +84,14 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
         <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>
         <div className="ls-prog"><div className="progress big"><div style={{ width: `${t.status === 'done' ? 100 : filePct}%` }} /></div></div>
         <span className="small num-link" onClick={() => drillTask(app, t, '已处理文档')}>文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
-        {t.status === 'running' && <button className="btn small" disabled={!!(app.liveTasks[t.id] && app.liveTasks[t.id].pausing)} onClick={() => api.pauseTask(t.id).then(app.refreshTasks)}>{app.liveTasks[t.id] && app.liveTasks[t.id].pausing ? '正在暂停…' : '⏸ 暂停'}</button>}
+        {t.status === 'running' && <button className="btn small" onClick={() => api.pauseTask(t.id)}>⏸ 暂停</button>}
+        {t.status === 'pausing' && <button className="btn small" disabled>⏸ 暂停中…</button>}
         {['paused', 'interrupted'].includes(t.status) && <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 继续</button>}
         {t.status === 'draft' && <button className="btn small primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button>}
       </div>
       {!cur ? (
-        t.status === 'running' || t.status === 'pending' || t.status === 'draft' ? (
-          <div className="empty-tip">{t.status === 'running' ? (p.stage === 'scanning' && p.scan ? `正在扫描目录：已检查 ${p.scan.dirs} 个目录，发现 ${p.scan.found} 个文档…` : '等待解析开始…') : t.status === 'pending' ? `排队中：第 ${t.queuePos || '?'} 位，前面的任务完成后自动开始。` : '开始解析后，这里会以动画实时展示每一页的扫描读取过程、生成的 Markdown 与标签标注结果。'}</div>
+        isActive(t) || t.status === 'pending' || t.status === 'draft' ? (
+          <div className="empty-tip">{isActive(t) ? (p.stage === 'scanning' && p.scan ? `正在扫描目录：已检查 ${p.scan.dirs} 个目录，发现 ${p.scan.found} 个文档…` : '等待解析开始…') : t.status === 'pending' ? `排队中：第 ${t.queuePos || '?'} 位，前面的任务完成后自动开始。` : '开始解析后，这里会以动画实时展示每一页的扫描读取过程、生成的 Markdown 与标签标注结果。'}</div>
         ) : (
           <div className="ls-summary">
             <div className="lss-title"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span> <b>#{t.id} {t.name}</b></div>
@@ -118,7 +119,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
                 {cur.detail && cur.detail.thumb ? <img className="ls-shot" src={assetUrl('thumb', cur.detail.thumb)} alt={cur.title} draggable={false} />
                   : cur.detail && cur.detail.layout ? <HtmlSlide layout={cur.detail.layout} />
                   : <div className="ls-doc"><div className="ls-doc-title">{cur.title}</div>{String((cur.detail && cur.detail.text) || '').split('\n').slice(0, 14).map((l, i) => <div key={i}>{l}</div>)}</div>}
-                <div className={`scanline ${t.status === 'running' || cursor < scans.length - 1 ? 'on' : ''}`} />
+                <div className={`scanline ${isActive(t) || cursor < scans.length - 1 ? 'on' : ''}`} />
                 <div className="ls-badge">扫描第 {cur.slide} {cur.unit || '页'}{cur.detail && cur.detail.thumb ? ' · 真实页面' : cur.kind === 'pdf' ? ' · PDF 文字' : cur.kind !== 'word' ? ' · 版式预览' : ''}</div>
                 {!ready && <div className="ls-loading">页面加载中…</div>}
               </div>

@@ -26,6 +26,7 @@ const { Office } = require('./office');
 const { imageLuminance } = require('./image');
 const llm = require('./llm');
 const { OFFLINE_ONLY, OFFLINE_MSG } = require('./offline');
+const { ticker } = require('./yieldy');
 
 // 支持的文档类型（设置中多选启用）
 const DOC_TYPES = {
@@ -102,7 +103,7 @@ class AgentService extends EventEmitter {
     this.groupsCache = null;
     // 上次异常退出时未完成的任务标记为中断
     for (const t of this.store.listTasks()) {
-      if (t.status === 'running' || t.status === 'pending') this.store.updateTask(t.id, { status: 'interrupted', message: t.status === 'running' ? '程序关闭（或异常退出）时任务未完成，可点击“继续”从断点继续' : '程序关闭时仍在排队，可点击“继续”' });
+      if (t.status === 'running' || t.status === 'pending' || t.status === 'pausing') this.store.updateTask(t.id, { status: 'interrupted', message: t.status !== 'pending' ? '程序关闭（或异常退出）时任务未完成，可点击“继续”从断点继续' : '程序关闭时仍在排队，可点击“继续”' });
     }
     this.resumeFlags = new Map();
     this.incrementalRuns = new Map();
@@ -182,6 +183,8 @@ class AgentService extends EventEmitter {
   /** 每 30 秒检查一次是否到了定时扫描时间（由主进程启动；测试中可直接调用 checkSchedule） */
   startScheduler() {
     this.schedStart = Date.now();
+    // 清理旧版本复制到数据目录的页面图片（改为直接读原文件）
+    setTimeout(() => { if (!this.running) this.cleanupCopiedMedia().catch((e) => this.log.warn('清理页面图片副本失败', e)); }, 15000);
     // 旧版本升级：已有解析结果但还没有页面标签 / 关联时，后台补算一次
     setTimeout(() => {
       try {
@@ -284,7 +287,11 @@ class AgentService extends EventEmitter {
     this.cancelled.add(id);
     const i = this.queue.indexOf(id);
     if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'paused', message: '已暂停，可点击“继续”' }); this.emitTask(id); }
-    else if (this.running === id) this.emitTask(id, { pausing: true, current: '正在暂停…（当前文件会在下次继续时重新解析）' });
+    else if (this.running === id) {
+      // 状态统一写入数据库，界面各处显示同一个“暂停中…”，直到当前文件停下
+      this.store.updateTask(id, { status: 'pausing', message: '正在暂停…（当前文件会在下次继续时重新解析）' });
+      this.emitTask(id);
+    }
     this.log.info(`[任务#${id}] 请求暂停`);
   }
 
@@ -331,7 +338,8 @@ class AgentService extends EventEmitter {
    */
   searchSuggestions({ taskIds = [], limit = 12 } = {}) {
     const ATTR = /^(白底|黑底|黑白混合|含视频|含字幕|含表格|含图表|含批注|含讲解词|全页讲解词|大文件|中文|英文|中英双语|Word文档|PDF文档|目录:.*|\d.*(页|节).*)$/;
-    let files = this.store.listFiles({ status: 'parsed' });
+    // 只读 id 与 tags 两列（上万个文件时读整行很慢）
+    let files = this.store.db.prepare("SELECT id, tags FROM files WHERE status = 'parsed'").all().map((r) => { let tags = []; try { tags = JSON.parse(r.tags || '[]'); } catch { /* ignore */ } return { id: r.id, tags }; });
     if (taskIds && taskIds.length) {
       const ids = new Set(taskIds.flatMap((t) => this.store.taskFiles(t).map((f) => f.id)));
       files = files.filter((f) => ids.has(f.id));
@@ -361,6 +369,8 @@ class AgentService extends EventEmitter {
     if (this.running || !this.queue.length) return;
     const id = this.queue.shift();
     this.running = id;
+    // 后台重算还在进行时先等它完成，避免两次全库计算交叉
+    if (this.refreshing) await this.refreshing.catch(() => {});
     try { await this.runTask(id); } catch (e) {
       this.log.error(`[任务#${id}] 任务异常终止`, e);
       this.store.updateTask(id, { status: 'failed', finished_at: Date.now(), message: e.message });
@@ -368,10 +378,91 @@ class AgentService extends EventEmitter {
       this.running = null;
       this.emitTask(id);
       setImmediate(() => this.pump());
+      if (this.libraryDirty) this.kickLibraryRefresh();
     }
   }
 
-  emitTask(id, extra = {}) { this.emit('task', { ...(this.store.getTask(id) || { id }), ...extra }); }
+  /** 暂停后在空闲时补算标签 / 分组 / 关联（分片执行，不阻塞界面）；有任务在跑就等它结束 */
+  kickLibraryRefresh(delay = 3000) {
+    clearTimeout(this.refreshTimer);
+    this.refreshTimer = setTimeout(() => {
+      if (!this.libraryDirty || this.running || this.queue.length || this.refreshing) return;
+      this.libraryDirty = false;
+      this.log.info('[资料库] 空闲时补算标签、相似分组与页面关联');
+      this.refreshing = this.afterLibraryChange(this.log, '[资料库]').then(() => this.emit('library', { at: Date.now() }))
+        .catch((e) => { this.libraryDirty = true; this.log.warn('后台补算失败', e); })
+        .finally(() => { this.refreshing = null; });
+    }, delay);
+  }
+
+  // ================= 页面图片：按需从原文件读取（不复制到数据目录） =================
+  /** 图片 key → 原文件（旧版 .ppt 为转换后的 .pptx）；正在解析的文件先登记在内存中 */
+  mediaSource(key) {
+    if (!this.mediaSrc) this.mediaSrc = new Map();
+    if (this.mediaSrc.has(key)) return this.mediaSrc.get(key);
+    let src = null;
+    try {
+      const row = this.store.db.prepare('SELECT path, meta FROM files WHERE meta LIKE ? LIMIT 1').get(`%"mediaKey":"${String(key).replace(/[^0-9a-z]/gi, '')}"%`);
+      if (row) {
+        let meta = {};
+        try { meta = JSON.parse(row.meta || '{}'); } catch { /* ignore */ }
+        src = meta.legacy && meta.convertedFrom ? meta.convertedFrom : row.path;
+      }
+    } catch { /* ignore */ }
+    this.mediaSrc.set(key, src); // 找不到也记下，避免每次请求都查库
+    return src;
+  }
+  /** 打开的原文件句柄短暂缓存（逐页浏览时连续读取同一个文件的多张图片），空闲 20 秒后关闭 */
+  async mediaZip(src) {
+    if (!this.mediaZips) this.mediaZips = new Map();
+    let z = this.mediaZips.get(src);
+    if (!z) {
+      if (this.mediaZips.size >= 6) { const [k, old] = this.mediaZips.entries().next().value; this.mediaZips.delete(k); clearTimeout(old.timer); old.p.then((zz) => zz.close()).catch(() => {}); }
+      const { openZip } = require('./zip');
+      z = { p: openZip(src) };
+      this.mediaZips.set(src, z);
+    }
+    clearTimeout(z.timer);
+    z.timer = setTimeout(() => { this.mediaZips.delete(src); z.p.then((zz) => zz.close()).catch(() => {}); }, 20000);
+    try { return await z.p; } catch (e) { this.mediaZips.delete(src); throw e; }
+  }
+  /** 读取一张页面图片：name 为“部件路径（/ 写作 ~）”；旧版本只记文件名的，按 ppt/media、word/media 查找 */
+  async readMedia(key, name) {
+    const src = this.mediaSource(key);
+    if (!src || !fs.existsSync(src)) return null;
+    const zip = await this.mediaZip(src);
+    const parts = name.includes('~') ? [name.replace(/~/g, '/')] : [`ppt/media/${name}`, `word/media/${name}`];
+    for (const part of parts) if (zip.has(part)) return zip.buffer(part);
+    return null;
+  }
+
+  /**
+   * 旧版本把页面图片复制到 cache/media；现在改为直接读原文件。启动后在后台清理这些副本：
+   * 只删除原文件仍然存在的那部分（删除后界面照样从原文件读取），原文件已不在的保留。
+   */
+  async cleanupCopiedMedia() {
+    if (!fs.existsSync(this.mediaDir)) return;
+    const tk = ticker();
+    let freed = 0, dirs = 0;
+    for (const key of fs.readdirSync(this.mediaDir)) {
+      { const p = tk(); if (p) await p; }
+      const dir = path.join(this.mediaDir, key);
+      const src = this.mediaSource(key);
+      if (!src || !fs.existsSync(src)) continue;
+      try {
+        for (const f of fs.readdirSync(dir)) { try { freed += fs.statSync(path.join(dir, f)).size; } catch { /* ignore */ } }
+        fs.rmSync(dir, { recursive: true, force: true });
+        dirs++;
+      } catch { /* ignore */ }
+    }
+    if (dirs) this.log.info(`[资料库] 已清理旧版本复制的页面图片 ${dirs} 个文件夹，释放 ${(freed / 1048576).toFixed(1)} MB（页面图片改为直接读取原文件）`);
+  }
+
+  // 任务状态事件只带轻量字段（不含 scan_list），并附上队列信息，界面各处用同一份数据
+  emitTask(id, extra = {}) {
+    const t = this.store.getTaskLite(id) || { id };
+    this.emit('task', { ...t, running: this.running === id, queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, ...extra });
+  }
 
   /** 异步扫描（不阻塞界面），按目录名顺序深度优先；跳过系统目录、符号链接、本工具数据目录 */
   async scan(roots, log, { onProgress, isCancelled, fullDisk = false, tag = '' } = {}) {
@@ -495,10 +586,14 @@ class AgentService extends EventEmitter {
       this.store.updateTask(id, counts);
       await new Promise((r) => setImmediate(r));
     }
-    if (changed) {
+    // 暂停 / 取消：立即结束，不在此时做全库重算（上万个文件时要很久，界面会一直停在“解析中”）；
+    // 资料库变化记下来，空闲时在后台分片重算
+    const stopping = this.cancelled.has(id);
+    if (changed && !stopping) {
+      this.store.updateTask(id, { message: '正在计算标签、相似分组与黑白底对应关系…' });
       this.emitTask(id, { current: '正在计算标签、相似分组与黑白底对应关系…', done: files.length });
       await this.afterLibraryChange(log, tag, id);
-    }
+    } else if (changed) this.libraryDirty = true;
     const cancelled = this.cancelled.delete(id);
     const paused = this.pausing.delete(id);
     const ms = Date.now() - t0;
@@ -578,6 +673,8 @@ class AgentService extends EventEmitter {
     }
     // 截图 / 图片缓存按“路径 + 大小 + 修改时间”区分版本：文件修改或重新生成后不会显示旧截图
     const mediaKey = crypto.createHash('sha1').update(`${file}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 16);
+    if (!this.mediaSrc) this.mediaSrc = new Map();
+    this.mediaSrc.set(mediaKey, src); // 解析动态中即可显示页面图片（从原文件读取）
     // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
     // PDF 不生成截图：界面直接用 pdf.js 只读渲染原文件的页面（ppta://src/<文件 id>）
     let preview = kind === 'pdf' ? { engine: 'pdf', src: true } : null;
@@ -681,13 +778,17 @@ class AgentService extends EventEmitter {
   /** 资料库变化后：重算标签/分类、相似分组、黑白底对应 */
   async afterLibraryChange(log = this.log, tag = '', taskId = null) {
     const t0 = Date.now();
-    const files = this.store.listFiles({ status: 'parsed' });
-    const termRows = this.store.fileTerms();
+    const files = await this.store.listFilesAsync('parsed');
+    const termRows = await this.store.fileTermsAsync();
     const df = new Map();
     for (const r of termRows) for (const t of Object.keys((r.terms && r.terms.terms) || {})) df.set(t, (df.get(t) || 0) + 1);
     const client = this.config.llm.enabled && this.config.llm.useForTags ? llm.client(this.config.llm) : null;
     const termMap = new Map(termRows.map((r) => [r.id, r.terms || { terms: {}, concepts: {} }]));
+    // 分片计算：每 25ms 让出一次事件循环，上万个文件时界面仍可操作
+    const tk = ticker();
+    let tagEmitAt = 0;
     for (const f of files) {
+      { const p = tk(); if (p) await p; }
       const slides = this.store.slidesOf(f.id);
       let llmTags = (f.meta && f.meta.llmTags) || [];
       if (client && !llmTags.length) {
@@ -698,17 +799,19 @@ class AgentService extends EventEmitter {
       }
       const { tags, category } = computeTags(f, slides, termMap.get(f.id) || { terms: {}, concepts: {} }, df, files.length, llmTags);
       this.store.updateFile(f.id, { tags, category });
-      if (taskId && f.task_id === taskId) this.emitProgress(taskId, { stage: 'tag', file: f.path, tags, category });
+      // 解析动态只需要最近的标签：限制推送频率，避免上万个事件涌向界面
+      if (taskId && f.task_id === taskId && Date.now() - tagEmitAt > 80) { tagEmitAt = Date.now(); this.emitProgress(taskId, { stage: 'tag', file: f.path, tags, category }); }
     }
     for (const d of this.store.listFiles({ status: 'duplicate' })) {
+      { const p = tk(); if (p) await p; }
       const o = d.dup_of && this.store.getFile(d.dup_of);
       if (o) this.store.updateFile(d.id, { tags: o.tags, category: o.category, theme: o.theme, slide_count: o.slide_count });
     }
     log.info(`${tag} 已为 ${files.length} 个文件生成标签与分类（${Date.now() - t0}ms）`);
     const t1 = Date.now();
-    const groups = this.computeGroupsNow();
-    const slideVecs = this.store.slideVectors();
-    const pairs = computePairs(slideVecs, groups);
+    const groups = await this.computeGroupsNow();
+    const slideVecs = await this.store.slideVectorsAsync();
+    const pairs = await computePairs(slideVecs, groups);
     this.store.replacePairs(pairs);
     log.info(`${tag} 相似分组 ${groups.length} 组，黑白底对应页 ${pairs.length} 对（${Date.now() - t1}ms）`);
     await this.computeRelations(log, tag, taskId);
@@ -718,7 +821,7 @@ class AgentService extends EventEmitter {
   /** 页面级标签（每页 8 个）+ 页面相互关联（相似 PPT 页；同时选择 Word 时关联 Word 章节与 PPT 页） */
   async computeRelations(log = this.log, tag = '', taskId = null) {
     const t0 = Date.now();
-    const rows = this.store.relationRows();
+    const rows = await this.store.relationRowsAsync();
     let fresh = 0;
     for (let i = 0; i < rows.length; i++) {
       if (!rows[i].kw) { rows[i].kw = slideKeywords(rows[i]); rows[i].newKw = true; fresh++; if (fresh % 200 === 0) await new Promise((r) => setImmediate(r)); }
@@ -726,16 +829,18 @@ class AgentService extends EventEmitter {
     const df = new Map();
     for (const r of rows) for (const t of Object.keys(r.kw.t || {})) df.set(t, (df.get(t) || 0) + 1);
     const changed = [];
+    const tk = ticker();
     for (const r of rows) {
+      { const p = tk(); if (p) await p; }
       const tags = pageTags(r.kw, df, rows.length);
       if (r.newKw || JSON.stringify(tags) !== JSON.stringify(r.tags)) changed.push({ id: r.id, kw: r.newKw ? r.kw : null, tags });
       r.tags = tags;
     }
-    if (changed.length) this.store.setSlideKwTags(changed);
+    if (changed.length) await this.store.setSlideKwTagsAsync(changed);
     const types = this.config.docTypes || ['ppt'];
     const withWord = types.includes('ppt') && (types.includes('word') || types.includes('pdf'));
-    const links = computeLinks(rows, { withWord });
-    this.store.replaceLinks(links);
+    const links = await computeLinks(rows, { withWord });
+    await this.store.replaceLinksAsync(links);
     const nPpt = links.filter((l) => l.kind === 'ppt').length, nWord = links.length - nPpt;
     const pages = new Set(links.map((l) => l.a)).size;
     log.info(`${tag} 页面标签 ${rows.length} 页（更新 ${changed.length}）；页面关联：${pages} 页有推荐，相似 PPT 页 ${nPpt} 条${withWord ? `，文档（Word / PDF）↔ PPT ${nWord} 条` : '（未同时选择 Word / PDF，不关联文档内容）'}（${Date.now() - t0}ms）`);
@@ -763,16 +868,16 @@ class AgentService extends EventEmitter {
     return { tags: s.tags || [], kind: (own && own.kind) || 'ppt', withWord: types.includes('ppt') && (types.includes('word') || types.includes('pdf')), ppt: items.filter((x) => x.linkKind === 'ppt'), word: items.filter((x) => x.linkKind === 'word') };
   }
 
-  computeGroupsNow() {
-    const files = [...this.store.listFiles({ status: 'parsed' }), ...this.store.listFiles({ status: 'duplicate' })];
-    const vecs = new Map(this.store.fileVectors().map((v) => [v.id, v.vec]));
+  async computeGroupsNow() {
+    const files = [...await this.store.listFilesAsync('parsed'), ...await this.store.listFilesAsync('duplicate')];
+    const vecs = new Map((await this.store.fileVectorsAsync()).map((v) => [v.id, v.vec]));
     const titles = new Map();
-    for (const v of this.store.slideVectors()) {
+    for (const v of await this.store.slideVectorsAsync()) {
       if (!titles.has(v.file_id)) titles.set(v.file_id, new Set());
       const t = normSlideTitle(v.title);
       if (t) titles.get(v.file_id).add(t);
     }
-    this.groupsCache = computeGroups(files, vecs, titles, { threshold: this.config.similarityThreshold });
+    this.groupsCache = await computeGroups(files, vecs, titles, { threshold: this.config.similarityThreshold });
     return this.groupsCache;
   }
 
@@ -793,7 +898,7 @@ class AgentService extends EventEmitter {
   }
 
   // ================= 查询接口 =================
-  tasks() { return this.store.listTasks().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
+  tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
 
   taskDetail(id) {
     const task = this.store.getTask(id);
@@ -832,8 +937,8 @@ class AgentService extends EventEmitter {
     return ids;
   }
   /** 资料库文件；taskId：只返回该任务解析到的文件 */
-  library({ taskId } = {}) {
-    const all = this.store.listFiles().filter((f) => f.status !== 'recycled');
+  async library({ taskId } = {}) {
+    const all = (await this.store.listAllFilesAsync()).filter((f) => f.status !== 'recycled');
     if (!taskId) return all;
     const own = new Set(this.store.taskFiles(taskId).map((f) => f.id).filter(Boolean));
     return all.filter((f) => own.has(f.id));
@@ -873,8 +978,8 @@ class AgentService extends EventEmitter {
     return { categories: Object.entries(cats).map(([name, list]) => ({ name, files: list })).sort((a, b) => b.files.length - a.files.length), tags };
   }
 
-  groups({ sort = 'name', order = 'asc', taskId } = {}) {
-    let groups = this.groupsCache || this.computeGroupsNow();
+  async groups({ sort = 'name', order = 'asc', taskId } = {}) {
+    let groups = this.groupsCache || await this.computeGroupsNow();
     if (taskId) {
       const own = new Set(this.store.taskFiles(taskId).map((f) => f.id).filter(Boolean));
       groups = groups.map((g) => ({ ...g, members: g.members.filter((m) => own.has(m.file.id)) })).filter((g) => g.members.length > 1)
@@ -1037,6 +1142,8 @@ class AgentService extends EventEmitter {
     fs.rmSync(tmp, { force: true });
     // 转换后预览：解析输出文件；有 PowerPoint/LibreOffice 时生成真实截图
     const key = 'conv-' + crypto.createHash('sha1').update(outPath + Date.now()).digest('hex').slice(0, 10);
+    if (!this.mediaSrc) this.mediaSrc = new Map();
+    this.mediaSrc.set(key, outPath);
     const back = await parsePptx(outPath, { mediaDir: this.mediaDir, mediaKey: key, log });
     let thumbs = null;
     if (this.config.thumbnails !== 'off') {
@@ -1553,9 +1660,9 @@ class AgentService extends EventEmitter {
   }
 
   /** 资料库总览：每个任务及全部任务识别到的文档 */
-  overview() {
-    const files = this.store.listFiles();
-    const tasks = this.store.listTasks().map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: [...new Set(this.store.taskFiles(t.id).map((f) => f.id).filter(Boolean))] }));
+  async overview() {
+    const files = await this.store.listAllFilesAsync();
+    const tasks = this.store.listTasksLite().map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: [...new Set(this.store.taskFiles(t.id).map((f) => f.id).filter(Boolean))] }));
     return { tasks, files: files.filter((f) => f.status !== 'recycled') };
   }
 
