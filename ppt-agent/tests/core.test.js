@@ -191,6 +191,19 @@ test('PDF：字符映射 / 标准字体由程序自行读取（Windows 反斜杠
   await assert.rejects(() => f.fetch({ kind: 'other', filename: 'x' }));
 });
 
+test('Windows：只去掉程序自身 exe 的下载标记（Zone.Identifier），其他平台不处理', () => {
+  const { clearDownloadMark } = require('../electron/core/winmark');
+  const calls = [];
+  const fake = (code) => ({ unlinkSync: (p) => { calls.push(p); if (code) { const e = new Error(code); e.code = code; throw e; } } });
+  assert.deepStrictEqual(clearDownloadMark('C:\\a\\PPT.exe', 'win32', fake()), { result: 'cleared', file: 'C:\\a\\PPT.exe' });
+  assert.strictEqual(calls[0], 'C:\\a\\PPT.exe:Zone.Identifier');
+  assert.strictEqual(clearDownloadMark('C:\\a\\PPT.exe', 'win32', fake('ENOENT')).result, 'none');
+  assert.strictEqual(clearDownloadMark('C:\\a\\PPT.exe', 'win32', fake('EPERM')).result, 'failed');
+  calls.length = 0;
+  assert.strictEqual(clearDownloadMark('/opt/ppt', 'linux', fake()).result, 'none');
+  assert.strictEqual(calls.length, 0);
+});
+
 test('单机版：不创建大模型 / 语义向量客户端；搜索推荐词来自文档标签', async () => {
   const llm = require('../electron/core/llm');
   const { embedder } = require('../electron/core/vectors');

@@ -217,6 +217,10 @@ app.whenReady().then(async () => {
   const { AgentService } = require('./core/service');
   service = new AgentService(dataDir);
   logger.child('app').info(`PPT智能体 v${app.getVersion()} 启动（Electron ${process.versions.electron}，${process.platform}）`);
+  // 去掉程序 exe 的下载标记，以后启动不再每次弹出 SmartScreen（便携版为外层 exe）
+  const mark = require('./core/winmark').clearDownloadMark(process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
+  if (mark.result === 'cleared') logger.child('app').info(`已去掉程序文件的下载标记（等同于“属性 → 解除锁定”），以后启动不再弹出 SmartScreen：${mark.file}`);
+  else if (mark.result === 'failed') logger.child('app').warn(`无法去掉程序文件的下载标记（SmartScreen 可能每次启动都会询问，可右键 exe → 属性 → 勾选“解除锁定”）：${mark.error}`);
   setTimeout(() => service.flushFeedback().catch(() => {}), 15000);
 
   protocol.handle('ppta', (req) => {

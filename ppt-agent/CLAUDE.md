@@ -63,6 +63,7 @@
 - 3.0 设计系统在 `src/styles.css` 末尾“v3.0 设计系统”段：颜色只用变量（`--bg/--bg2/--bg3/--bg4/--line/--fg*/--accent*/--ok/--warn/--danger`、模块色 `--m-detail/--m-over/--m-smart/--m-maint`、阴影 `--sh-sm/md/lg`、圆角 `--radius/--radius-lg`），浅色 / 深色两套都要定义；新组件不要写死颜色，主操作用 `.btn.primary`，次要用 `.btn`，弱操作用 `.btn.ghost`。
 - 黑白底互转“按文件 / 文件夹”：`listPptx` 递归列出 PPT，`convertFile(src, { direction, outMode: 'suffix'|'dir', outDir })` 只读原文件、另存（同名加序号），记入 `convert_history`。
 - PDF（v3.1）：`electron/core/pdf.js` 用 pdf.js 标准版（`pdfjs-dist/build/pdf.mjs`，legacy 版在 Electron 的 Node 中会崩溃）只读提取每页文字与底色；不生成截图，界面用 `ppta://src/<文件 id>` 直接渲染原 PDF（主进程只提供 `kind = 'pdf'` 的资料库文件），cMap / 标准字体经 `ppta://pdfjs/...` 提供；主进程解析时由 `LocalDataFactory`（`BinaryDataFactory`）按本地路径读取 cMap / 字体，不要再把文件系统路径当作 `cMapUrl`（Windows 反斜杠路径会被 pdf.js 拒绝，v3.3.1）。PDF 与 Word 一样属于“文档”：搜索单独 `slides.pdf` 页签、关联归入“相关文档内容”、不导出为 PPT 页 / 不参与黑白底互转与相似分组 / 讲解词不写回。新增文档类型时按 `DOC_TYPES`、`KIND_LABEL / KIND_ICON`、搜索分组、`relations.isDoc` 依次补齐。
+- SmartScreen（v3.4.1）：启动时 `winmark.clearDownloadMark` 删除程序自身 exe（便携版为 `PORTABLE_EXECUTABLE_FILE`）的 `:Zone.Identifier` 下载标记，避免未签名 exe 每次启动都被 SmartScreen 询问；只处理程序自己的 exe，结果写运行日志。
 - 通用 UI / 列表规范见仓库根目录 `.claude/skills/desktop-app-ui-conventions/SKILL.md`。
 - 文档删除一律先进回收站（可还原），彻底删除需二次确认，且只删除移入回收站的那份文件。
 - 任务状态颜色：解析中浅蓝底黑字、已完成绿色、待解析浅橙底。
