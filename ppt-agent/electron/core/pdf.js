@@ -45,6 +45,23 @@ function pageBackground(lib, ops, view) {
   return { color: bg || '#ffffff', lum: lum === null ? 1 : Math.round(lum * 1000) / 1000, source: 'pdf' };
 }
 
+const DATA_DIRS = { cMapUrl: 'cmaps', standardFontDataUrl: 'standard_fonts', wasmUrl: 'wasm' };
+let dataRoot = null;
+/**
+ * pdf.js 的字符映射 / 标准字体由我们自己读取：pdf.js 要求这些目录以“/”结尾，
+ * 而 Windows 路径是反斜杠，且打包后位于 app.asar 内；这里用 Electron 的 fs 按 path.join 读取，与平台无关。
+ */
+class LocalDataFactory {
+  constructor() { dataRoot = dataRoot || path.dirname(path.dirname(require.resolve('pdfjs-dist/build/pdf.mjs'))); }
+  async fetch({ kind, filename }) {
+    const dir = DATA_DIRS[kind];
+    if (!dir || /[\\/]|\.\./.test(filename)) throw new Error(`不支持的 pdf.js 数据：${kind} ${filename}`);
+    return new Uint8Array(await fs.promises.readFile(path.join(dataRoot, dir, filename)));
+  }
+}
+// 目录参数只用于通过 pdf.js 的格式检查（必须以“/”结尾），实际读取走 LocalDataFactory
+const dataFiles = () => ({ BinaryDataFactory: LocalDataFactory, cMapUrl: 'pdfjs/cmaps/', standardFontDataUrl: 'pdfjs/standard_fonts/', wasmUrl: 'pdfjs/wasm/' });
+
 /** 文字项 → 行（按基线 y 聚合，同一行按 x 排序），保留字号用于识别标题 */
 function textLines(items) {
   const rows = [];
@@ -75,9 +92,7 @@ function textLines(items) {
 async function parsePdf(file, opts = {}) {
   const lib = await loadLib();
   const data = new Uint8Array(fs.readFileSync(file));
-  const root = path.dirname(path.dirname(require.resolve('pdfjs-dist/build/pdf.mjs')));
-  const dirUrl = (d) => path.join(root, d) + path.sep;
-  const doc = await lib.getDocument({ data, cMapUrl: dirUrl('cmaps'), cMapPacked: true, standardFontDataUrl: dirUrl('standard_fonts'), isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0, stopAtErrors: false }).promise;
+  const doc = await lib.getDocument({ data, ...dataFiles(), cMapPacked: true, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0, stopAtErrors: false }).promise;
   try {
     let info = {};
     try { info = ((await doc.getMetadata()) || {}).info || {}; } catch { /* ignore */ }
@@ -133,11 +148,11 @@ async function quickPdfProps(file) {
     if (!head.subarray(0, n).toString('latin1').includes('%PDF-')) throw new Error('缺少 PDF 文件头');
   } finally { fs.closeSync(fd); }
   const lib = await loadLib();
-  const doc = await lib.getDocument({ data: new Uint8Array(fs.readFileSync(file)), isEvalSupported: false, disableFontFace: true, verbosity: 0 }).promise;
+  const doc = await lib.getDocument({ data: new Uint8Array(fs.readFileSync(file)), ...dataFiles(), isEvalSupported: false, disableFontFace: true, verbosity: 0 }).promise;
   try {
     const info = ((await doc.getMetadata().catch(() => null)) || {}).info || {};
     return { author: String(info.Author || '').trim(), title: String(info.Title || '').trim(), pages: doc.numPages };
   } finally { try { await doc.destroy(); } catch { /* ignore */ } }
 }
 
-module.exports = { parsePdf, quickPdfProps };
+module.exports = { parsePdf, quickPdfProps, LocalDataFactory };

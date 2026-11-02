@@ -180,6 +180,17 @@ test('PDF：逐页提取文字与标题、黑底识别；服务解析入库并�
   svc.store.close && svc.store.close();
 });
 
+test('PDF：字符映射 / 标准字体由程序自行读取（Windows 反斜杠路径、打包后的 app.asar 也可用）', async () => {
+  const { LocalDataFactory } = require('../electron/core/pdf');
+  const f = new LocalDataFactory();
+  const cmap = await f.fetch({ kind: 'cMapUrl', filename: 'UniGB-UCS2-H.bcmap' });
+  assert.ok(cmap instanceof Uint8Array && cmap.length > 100);
+  const font = await f.fetch({ kind: 'standardFontDataUrl', filename: 'FoxitFixed.pfb' });
+  assert.ok(font.length > 1000);
+  await assert.rejects(() => f.fetch({ kind: 'cMapUrl', filename: '../package.json' }));
+  await assert.rejects(() => f.fetch({ kind: 'other', filename: 'x' }));
+});
+
 test('单机版：不创建大模型 / 语义向量客户端；搜索推荐词来自文档标签', async () => {
   const llm = require('../electron/core/llm');
   const { embedder } = require('../electron/core/vectors');
