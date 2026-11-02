@@ -9,7 +9,6 @@ import SearchView from './components/SearchView';
 import { searchQueue } from './searchQueue';
 import NoticesView from './components/NoticesView';
 import NotesReviewView from './components/NotesReviewView';
-import DataDirDialog from './components/DataDirDialog';
 import FeedbackDialog from './components/FeedbackDialog';
 import GroupsView from './components/GroupsView';
 import BasketView from './components/BasketView';
@@ -77,8 +76,6 @@ export default function App() {
   );
   const [view, setViewState] = useState({ type: 'search' });
   const [subOpen, setSubOpen] = useState({});
-  const [askDir, setAskDir] = useState(null); // 启动时选择数据目录
-  const pendingWelcome = useRef(false);
   const [feedback, setFeedback] = useState(false);
   // 设置按钮：第一次点击打开设置，再次点击收起并还原打开前的界面
   const prevView = useRef(null);
@@ -182,7 +179,7 @@ export default function App() {
   useEffect(() => {
     refreshTasks(); reloadLogs();
     // 启动时先询问数据目录（未勾选“记住选择”时），关闭后再显示启动简介
-    Promise.all([api.getConfig(), api.dataDirInfo().catch(() => null)]).then(([c, dd]) => { setConfig(c); if (dd && dd.askNow) { setAskDir(dd); pendingWelcome.current = c.welcome !== 'never'; } else if (c.welcome !== 'never') setWelcome(true); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
+    api.getConfig().then((c) => { setConfig(c); if (c.welcome !== 'never') setWelcome(true); if (c.uiTheme && c.uiTheme !== readLS('ppta.theme', '')) { setThemeMode(c.uiTheme); try { localStorage.setItem('ppta.theme', c.uiTheme); } catch { /* ignore */ } } });
     api.systemTheme().then(setSysTheme).catch(() => {});
     const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: light)') : null;
     const onMq = () => setSysTheme(mq.matches ? 'light' : 'dark');
@@ -516,7 +513,6 @@ export default function App() {
           </div>
         )}
         {drill && <DrillDialog spec={drill} onClose={() => setDrill(null)} />}
-        {askDir && <DataDirDialog info={askDir} onClose={() => { setAskDir(null); if (pendingWelcome.current) setWelcome(true); }} />}
         {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
         {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
         {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setAllLibMode} onHelp={() => setView({ type: 'help' })} />}

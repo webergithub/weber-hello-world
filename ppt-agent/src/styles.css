@@ -1395,3 +1395,31 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .status.s-pausing { background: #fef9c3 !important; color: #854d0e !important; animation: pulse-pausing 1.2s ease-in-out infinite; }
 .dot.s-pausing { background: #f2c94c; animation: pulse-pausing 1.2s ease-in-out infinite; }
 @keyframes pulse-pausing { 50% { opacity: .55; } }
+
+/* ---- v3.4 启动时选择数据目录（单独的启动窗口） ---- */
+.boot-dd { height: 100vh; box-sizing: border-box; display: flex; flex-direction: column; gap: 12px; padding: 22px 26px 18px; background: var(--bg); color: var(--fg); }
+.boot-head { display: flex; align-items: center; }
+.boot-title { font-size: 16px; font-weight: 650; }
+.boot-list { flex: 1; min-height: 0; max-height: none; margin-bottom: 0; }
+.boot-err { color: var(--danger-fg); font-size: 13px; }
+.boot-foot { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+
+/* ---- v3.4 帮助：版本记录 / 需求文档 ---- */
+.ver-list { display: flex; flex-direction: column; gap: 10px; }
+.ver-group h4 { margin: 14px 0 6px; font-size: 14px; color: var(--fg2); }
+.ver-item { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); padding: 10px 14px; }
+.ver-item.latest { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.ver-item .vi-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+.ver-item .vi-ver { font-weight: 700; font-size: 14px; }
+.ver-item ul { margin: 4px 0 0; padding-left: 18px; }
+.ver-item li { margin: 2px 0; line-height: 1.6; }
+.md-doc { line-height: 1.7; max-width: 1100px; }
+.md-doc h1 { font-size: 22px; margin: 4px 0 12px; }
+.md-doc h2 { font-size: 18px; margin: 22px 0 8px; padding-bottom: 4px; border-bottom: 1px solid var(--line); }
+.md-doc h3 { font-size: 15px; margin: 16px 0 6px; }
+.md-doc table { border-collapse: collapse; width: 100%; margin: 8px 0 12px; font-size: 13px; }
+.md-doc th, .md-doc td { border: 1px solid var(--line); padding: 5px 8px; vertical-align: top; text-align: left; }
+.md-doc th { background: var(--bg3); white-space: nowrap; }
+.md-doc td:first-child { white-space: nowrap; }
+.md-doc code { background: var(--bg3); border-radius: 4px; padding: 0 4px; font-size: 12.5px; word-break: break-all; }
+.md-doc blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--line); color: var(--fg2); }

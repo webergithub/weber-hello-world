@@ -2,6 +2,8 @@ import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApp } from '../ctx';
 import { api } from '../api';
 import { useKeymap, keysLabel } from '../keymap';
+import { changelog, mdBlocks } from '../docs';
+import Markdown, { Inline, headingId } from './Markdown';
 
 // ================= 新手指引（每个大版本随功能更新） =================
 // 每步：切换到对应视图 → 高亮目标区域 → 说明“做什么”和“能看到什么”
@@ -75,6 +77,11 @@ export const TOUR_STEPS = [
     title: '设置页签与单机版', view: { type: 'settings' }, target: '.settings-tabs', fallback: '.main .view-head',
     todo: '设置分为 常规 / 界面与快捷键 / 反馈邮件 / 大模型与语义向量 / 目录与数据 五个页签，点击切换。',
     see: '本应用为单机版、不联网：“大模型与语义向量”页签置灰锁定，所有解析、检索与转换都在本机完成，数据不上传。',
+  },
+  {
+    title: '帮助、版本记录与需求文档', view: { type: 'help' }, target: '.help-tabs', fallback: '.main .view-head',
+    todo: '帮助指南分为 使用说明 / 版本记录 / 需求文档 三个页签：使用说明是各功能的操作方法；版本记录列出每个版本更新了什么；需求文档可查看并另存为 Word。',
+    see: '每次启动程序时会先让你选择数据保存目录（可勾选“记住选择”），选定后直接进入。',
   },
 ];
 
@@ -195,8 +202,67 @@ export function WelcomeDialog({ onClose }) {
   );
 }
 
+// ================= 版本记录 / 需求文档（内置 docs/需求文档.md，随版本更新） =================
+const HELP_TABS = [['guide', '📖 使用说明'], ['versions', '📜 版本记录'], ['reqdoc', '📄 需求文档']];
+let helpTabCache = 'guide';
+
+function VersionLog() {
+  const [q, setQ] = useState('');
+  const all = React.useMemo(() => changelog(), []);
+  const kw = q.trim().toLowerCase();
+  const list = kw ? all.filter((v) => (v.ver + v.date + v.items.join('')).toLowerCase().includes(kw)) : all;
+  const groups = [];
+  for (const v of list) {
+    const major = v.ver.replace(/^v/, '').split('.')[0];
+    let g = groups.find((x) => x.major === major);
+    if (!g) groups.push(g = { major, items: [] });
+    g.items.push(v);
+  }
+  return (
+    <div className="help-body ver-body">
+      <div className="row"><input className="input" style={{ width: 320 }} placeholder="搜索版本记录" value={q} onChange={(e) => setQ(e.target.value)} /><span className="muted small">{list.length} / {all.length} 个版本</span></div>
+      <div className="ver-list">
+        {groups.map((g) => (
+          <div key={g.major} className="ver-group">
+            <h4>{g.major}.x</h4>
+            {g.items.map((v) => (
+              <div key={v.ver} className={`ver-item ${v === all[0] ? 'latest' : ''}`} id={`ver-${v.ver}`}>
+                <div className="vi-head"><span className="vi-ver">{v.ver}</span><span className="muted small">{v.date}</span>{v === all[0] && <span className="tag accent">最新</span>}</div>
+                {v.items.length > 1 ? <ul>{v.items.map((x, i) => <li key={i}><Inline text={x} /></li>)}</ul> : <div><Inline text={v.items[0]} /></div>}
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RequirementsDoc({ app }) {
+  const blocks = React.useMemo(() => mdBlocks(), []);
+  const body = useRef(null);
+  const toc = blocks.filter((b) => b.t === 'h' && b.level >= 2 && b.level <= 3);
+  const save = async (kind) => {
+    try { const r = await api.saveRequirementsDoc(kind); if (r) app.toast(`已保存需求文档：${r}`, 'ok', { label: '在资源管理器中显示', link: { type: 'reveal', path: r } }); } catch (e) { app.toast(e.message, 'error'); }
+  };
+  return (
+    <div className="help">
+      <nav className="help-toc">
+        <div className="row"><button className="btn small" onClick={() => save('docx')}>💾 另存为 Word</button></div>
+        <div className="row"><button className="btn small ghost" onClick={() => save('md')}>另存为 Markdown</button></div>
+        {toc.map((h, i) => <div key={i} className="link" style={{ paddingLeft: h.level === 3 ? 12 : 0 }} onClick={() => { const el = body.current && body.current.querySelector(`#${CSS.escape(headingId(h.text))}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>{h.text}</div>)}
+      </nav>
+      <div className="help-body" ref={body}><Markdown blocks={blocks} /></div>
+    </div>
+  );
+}
+
 // ================= 帮助指南（详细介绍） =================
 export function HelpView({ onTour, onWelcome, focus }) {
+  const tabFor = (f) => (f === 'versions' || f === 'reqdoc' ? f : f ? 'guide' : helpTabCache);
+  const [tab, setTabState] = useState(() => tabFor(focus));
+  const setTab = (t) => { helpTabCache = t; setTabState(t); };
+  useEffect(() => { if (focus) setTab(tabFor(focus)); }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
   const [appVersion, setAppVersion] = useState('');
   useEffect(() => { api.appVersion().then(setAppVersion).catch(() => {}); }, []);
   const app = useApp();
@@ -208,6 +274,8 @@ export function HelpView({ onTour, onWelcome, focus }) {
     ['whatsnew', `本版本新增（v${appVersion || ''}）`, <>
       <ul>
         <li><b>大批量解析不卡顿（3.3）</b>：上万个文件时解析与暂停都保持流畅——全库标签、相似分组、页面关联改为分片计算，进度事件合并推送，界面只保留最近的解析记录；暂停后各处统一显示“暂停中… → 已暂停”。</li>
+        <li><b>📜 版本记录 / 📄 需求文档（3.4）</b>：帮助指南顶部新增两个页签——“版本记录”列出全部历史版本的更新内容（按大版本分组、最新在前、可搜索），“需求文档”显示最新的需求文档（左侧目录跳转，可另存为 Word / Markdown）。</li>
+        <li><b>启动时选择数据目录（3.4）</b>：打开程序时先弹出“选择数据目录”窗口，选定后直接进入，不再需要切换后重启；以前勾选过“记住选择”的，升级后会再询问一次。</li>
         <li><b>Windows 上 PDF 解析修复（3.3.1）</b>：此前在 Windows 上 PDF 会全部解析失败（提示“Invalid factory url … must include trailing slash”）；升级后在对应任务中点击“↻ 重新扫描”，已解析的文件会自动跳过，只重新解析失败的 PDF。</li>
         <li><b>不再复制 PPT 内容（3.3）</b>：页面里的图片不再复制到数据目录，显示时直接从原文件读取（只读，相当于指向原文件的快捷方式）；旧版本复制的图片会在原文件仍存在时自动清理。用 LibreOffice 生成截图时对原文件建立硬链接而不是复制。</li>
         <li><b>小语种统一在设置中配置（3.2.1）</b>：在“设置 → 常规 → 讲解词小语种”勾选需要的语言，讲解词模块直接列出这些语言供选用，不再有小语种下拉框。</li>
@@ -227,7 +295,7 @@ export function HelpView({ onTour, onWelcome, focus }) {
         <li><b>黑白底按文件 / 文件夹批量转换</b>：选择 PPT 文件或文件夹，指定方向，输出到原目录（加后缀）或统一的新目录，原文件不改。</li>
         <li><b>黑白底互转历史</b>、<b>导出篮多选导出</b>、<b>通知管理</b>、<b>意见反馈</b>、启动时选择数据目录、文件详情键盘 / 滚轮翻页、列表列宽拖动、双击页面进入逐页浏览、对比窗口按窗格同步翻页。</li>
       </ul>
-      <div className="row"><button className="btn primary" onClick={onTour}>🧭 播放新手指引（含新功能）</button></div>
+      <div className="row"><button className="btn primary" onClick={onTour}>🧭 播放新手指引（含新功能）</button><button className="btn" onClick={() => setTab('versions')}>📜 查看全部版本记录</button><button className="btn ghost" onClick={() => setTab('reqdoc')}>📄 需求文档</button></div>
     </>],
     ['start', '快速开始', <>
       <ol>
@@ -320,19 +388,22 @@ export function HelpView({ onTour, onWelcome, focus }) {
       <p>设置分为 5 个页签：<b>常规</b>（解析文档类型 PPT / Word / PDF、定时监测更新、页面截图引擎、相似分组）、<b>界面与快捷键</b>（主题、快捷键、鼠标滚轮、关闭窗口时的行为）、<b>反馈邮件</b>（意见反馈的发件邮箱）、<b>大模型与语义向量</b>、<b>目录与数据</b>（数据保存目录、迁移 / 切换、启动时询问）。</p>
       <p><b>🔒 单机版，不联网</b>：当前版本只作为单机应用使用，解析、检索（本地 RAG）、黑白底互转、智能生成都在本机完成，数据不上传。“大模型与语义向量”页签置灰锁定（预置了 DeepSeek、通义千问、Kimi、智谱、OpenAI GPT、Anthropic Claude、Google Gemini、xAI Grok、Mistral、本地 Ollama 等服务商，供以后开放联网时使用），依赖大模型的功能（生成讲解词、自动翻译、大模型查询解析、RAG 回答）暂不可用。唯一会联网的是你主动发送的意见反馈邮件（使用你自己配置的发件邮箱）。</p>
       <p>运行日志只保留一份（“运行日志”菜单），完整记录工作过程。</p>
-      <p><b>启动时选择数据目录</b>：程序打开时可先选择保存解析数据的目录（当前目录、使用过的历史目录或新目录）；勾选“记住选择”后下次不再询问，可在 <b>设置 → 目录与数据</b> 中重新开启。</p>
+      <p><b>启动时选择数据目录</b>：每次启动程序时，先弹出“选择数据目录”窗口（上次使用的目录、使用过的历史目录，或“📁 选择其他目录…”），点击“开始使用 →”（或双击目录、按回车）后直接用该目录打开资料库，不需要重启；关闭该窗口即退出程序。勾选“记住选择”后下次不再询问，可在 <b>设置 → 目录与数据</b> 中重新开启。</p>
       <p><b>意见反馈</b>：左下角 💬 填写问题或建议后发送，在后台发送给开发者；需先在 <b>设置 → 反馈邮件</b> 配置发件邮箱（SMTP 与授权码），未配置时反馈先保存在本机，配置后自动补发。</p>
       <p><b>鼠标滚轮</b>：在 PPT 页面上滚动滚轮翻页，Ctrl + 滚轮放大缩小；两项都可在 <b>设置 → 快捷键</b> 中关闭。左下角 ⚙ 再次点击收起设置并回到原来的界面。</p>
     </>],
   ];
   return (
     <div className="view">
-      <div className="view-head"><div className="vh-title">📖 帮助指南 <span className="muted small">功能详解与操作说明</span></div><div className="spacer" />
+      <div className="view-head"><div className="vh-title">📖 帮助指南</div><div className="spacer" />
         <button className="btn" onClick={onWelcome}>显示启动简介</button><button className="btn primary" onClick={onTour}>🧭 新手指引</button></div>
+      <div className="tabs attached help-tabs">{HELP_TABS.map(([k, label]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>{label}</button>)}</div>
+      {tab === 'versions' ? <VersionLog /> : tab === 'reqdoc' ? <RequirementsDoc app={app} /> : (
       <div className="help">
         <nav className="help-toc">{SECTIONS.map(([id, t]) => <div key={id} className="link" onClick={() => { const el = body.current && body.current.querySelector(`#help-${id}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); }}>{t}</div>)}</nav>
         <div className="help-body" ref={body}>{SECTIONS.map(([id, t, c]) => <section key={id} id={`help-${id}`}><h3>{t}</h3>{c}</section>)}</div>
       </div>
+      )}
     </div>
   );
 }

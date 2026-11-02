@@ -20,10 +20,11 @@ if (!app.requestSingleInstanceLock()) app.quit();
 else app.on('second-instance', () => showWindow());
 
 function showWindow() {
-  if (!win) return;
-  if (win.isMinimized()) win.restore();
-  win.show();
-  win.focus();
+  const w = win || BrowserWindow.getAllWindows()[0]; // 启动时还在“选择数据目录”窗口
+  if (!w) return;
+  if (w.isMinimized()) w.restore();
+  w.show();
+  w.focus();
 }
 
 /** 系统托盘图标（右下角图标栏）：单击 / 双击恢复窗口，右键菜单可彻底退出 */
@@ -132,18 +133,85 @@ async function confirmQuit(skipAsk = false) {
 
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 
-// 启动时是否询问数据目录：未勾选“记住选择”且不是刚刚主动切换目录后的重启；记录使用过的目录（最多 10 个）
-let askDataDirNow = false;
+// 记录使用过的数据目录（最多 10 个）；去掉“刚刚主动切换目录、本次不询问”的一次性标记
 function noteDataDir(dir) {
   const b = readBootstrap();
   const hist = [path.resolve(dir), ...(b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(dir))].slice(0, 10);
-  askDataDirNow = (!process.env.PPTA_DATA_DIR || process.env.PPTA_ASK_DIR === '1') && b.askDataDir !== false && !b.skipAskOnce;
   const { skipAskOnce, ...rest } = b; // eslint-disable-line no-unused-vars
   try { writeBootstrap({ ...rest, dataDirHistory: hist }); } catch { /* ignore */ }
 }
 
+const dirInfo = (d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')) });
+
+// 启动时是否先选择数据目录：未勾选“记住选择”、不是刚刚主动切换目录后的重启；使用环境变量 PPTA_DATA_DIR 时不询问（PPTA_ASK_DIR=1 强制询问）
+// v3.4 起选择在加载资料库之前进行；旧版本勾选过“记住选择”的，升级后重新询问一次
+function shouldAskDataDir() {
+  if (process.env.PPTA_DATA_DIR && process.env.PPTA_ASK_DIR !== '1') return false;
+  const b = readBootstrap();
+  if (!b.askReset34) {
+    b.askReset34 = true;
+    if (b.askDataDir === false) delete b.askDataDir;
+    try { writeBootstrap(b); } catch { /* ignore */ }
+  }
+  return b.askDataDir !== false && !b.skipAskOnce;
+}
+
+// 启动选择窗口：在创建资料库服务之前选定数据目录，选完直接进入主界面（不需要重启）；关闭窗口 = 退出程序
+let booting = false;
+function chooseDataDirAtStartup(current) {
+  booting = true;
+  return new Promise((resolve) => {
+    let done = false;
+    const bw = new BrowserWindow({
+      width: 760, height: 580, minWidth: 600, minHeight: 460, title: 'PPT智能体 · 选择数据目录', backgroundColor: nativeTheme.shouldUseDarkColors ? '#0f1115' : '#f5f6f8', autoHideMenuBar: true, show: false,
+      webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true },
+    });
+    bw.setMenu(null);
+    const finish = (dir) => {
+      if (done) return;
+      done = true;
+      ipcMain.removeHandler('boot');
+      resolve(dir);
+      if (!bw.isDestroyed()) bw.close();
+    };
+    ipcMain.handle('boot', async (_e, method, args = []) => {
+      if (method === 'info') {
+        const b = readBootstrap();
+        const hist = (b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(current));
+        return { version: app.getVersion(), current: { ...dirInfo(current), current: true }, history: hist.map(dirInfo), defaultDir: path.join(app.getPath('userData'), 'data') };
+      }
+      if (method === 'selectDir') {
+        const r = await dialog.showOpenDialog(bw, { title: '选择保存解析数据的目录', properties: ['openDirectory', 'createDirectory'] });
+        return r.canceled || !r.filePaths[0] ? null : dirInfo(r.filePaths[0]);
+      }
+      if (method === 'choose') {
+        const [dir, remember] = args;
+        if (!dir) throw new Error('请选择数据目录');
+        try { fs.mkdirSync(dir, { recursive: true }); fs.accessSync(dir, fs.constants.W_OK); } catch { throw new Error('该目录无法写入，请选择其他目录'); }
+        const b = readBootstrap();
+        if (!process.env.PPTA_DATA_DIR) b.dataDir = dir;
+        if (remember) b.askDataDir = false;
+        writeBootstrap(b);
+        finish(dir);
+        return true;
+      }
+      if (method === 'quit') { finish(null); return true; }
+      throw new Error('未知接口 ' + method);
+    });
+    bw.once('ready-to-show', () => bw.show());
+    bw.on('closed', () => finish(null));
+    const devUrl = process.env.VITE_DEV_SERVER_URL;
+    if (devUrl) bw.loadURL(devUrl + '#boot-datadir'); else bw.loadFile(path.join(__dirname, '..', 'dist', 'index.html'), { hash: 'boot-datadir' });
+  });
+}
+
 app.whenReady().then(async () => {
-  const dataDir = resolveDataDir();
+  let dataDir = resolveDataDir();
+  if (shouldAskDataDir()) {
+    dataDir = await chooseDataDirAtStartup(dataDir);
+    if (!dataDir) { app.quit(); return; }
+  }
+  booting = false;
   noteDataDir(dataDir);
   logger = require('./core/logger');
   const { AgentService } = require('./core/service');
@@ -271,10 +339,9 @@ app.whenReady().then(async () => {
     dataDirInfo: () => {
       const b = readBootstrap();
       const history = (b.dataDirHistory || []).map((d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')), current: path.resolve(d) === path.resolve(service.dataDir) }));
-      return { current: service.dataDir, bootstrap: b.dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null, history, ask: b.askDataDir !== false, askNow: askDataDirNow };
+      return { current: service.dataDir, bootstrap: b.dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null, history, ask: b.askDataDir !== false };
     },
-    setDataDirAsk: (ask) => { writeBootstrap({ ...readBootstrap(), askDataDir: !!ask }); askDataDirNow = false; return true; },
-    dataDirAsked: () => { askDataDirNow = false; return true; },
+    setDataDirAsk: (ask) => { writeBootstrap({ ...readBootstrap(), askDataDir: !!ask }); return true; },
     removeDataDirHistory: (dir) => { const b = readBootstrap(); writeBootstrap({ ...b, dataDirHistory: (b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(dir)) }); return true; },
     sendFeedback: (fb) => service.sendFeedback(fb, { version: app.getVersion() }),
     feedbackStatus: () => service.feedbackStatus(),
@@ -345,7 +412,7 @@ app.whenReady().then(async () => {
     },
     // 保存对话框：按用途（key）记住上一次选择的目录
     saveFile: async (defaultName, kind = 'pptx', key = 'export') => {
-      const filters = kind === 'md' ? [{ name: 'Markdown', extensions: ['md'] }] : kind === 'log' ? [{ name: '日志', extensions: ['log', 'txt'] }] : [{ name: 'PowerPoint', extensions: ['pptx'] }];
+      const filters = kind === 'md' ? [{ name: 'Markdown', extensions: ['md'] }] : kind === 'docx' ? [{ name: 'Word', extensions: ['docx'] }] : kind === 'log' ? [{ name: '日志', extensions: ['log', 'txt'] }] : [{ name: 'PowerPoint', extensions: ['pptx'] }];
       const b = readBootstrap();
       const last = (b.lastDirs || {})[key];
       const dir = last && fs.existsSync(last) ? last : app.getPath('documents');
@@ -353,6 +420,16 @@ app.whenReady().then(async () => {
       if (r.canceled) return null;
       writeBootstrap({ ...readBootstrap(), lastDirs: { ...(b.lastDirs || {}), [key]: path.dirname(r.filePath) } });
       return r.filePath;
+    },
+    // 帮助 → 需求文档：把内置的需求文档（随版本打包）另存一份
+    saveRequirementsDoc: async (kind = 'docx') => {
+      const ext = kind === 'md' ? 'md' : 'docx';
+      const src = path.join(__dirname, '..', 'docs', `需求文档.${ext}`);
+      if (!fs.existsSync(src)) throw new Error('未找到内置的需求文档');
+      const out = await api.saveFile(`PPT智能体需求文档_v${app.getVersion()}.${ext}`, ext, 'reqdoc');
+      if (!out) return null;
+      fs.copyFileSync(src, out);
+      return out;
     },
     openPath: (p) => { service.recordOpenPath(p); return shell.openPath(p); },
     analytics: (opts) => service.analytics(opts),
@@ -384,6 +461,7 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', () => { quitting = true; });
 app.on('window-all-closed', () => {
+  if (booting) return; // 启动选择数据目录的窗口关闭后才创建主窗口
   if (logger) logger.child('app').info('程序退出');
   if (service) service.close();
   app.quit();

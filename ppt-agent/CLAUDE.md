@@ -39,7 +39,8 @@
 - 浏览类快捷键的 `isTyping` 不把勾选框 / 单选框算作输入。
 - 文件详情（`SlideWorkspace`）在不进入逐页浏览时也支持键盘翻页（keymap 的翻页与切换文件动作都用于翻页）和滚轮翻页；滚轮翻页 / Ctrl + 滚轮缩放由 `config.wheel` 控制，`ZoomStage` 的 `onWheelPage` 负责翻页。
 - 反馈：接收地址只在主进程 `service.js` 中（`FEEDBACK_TO`），不得传给界面或写进前端代码；发件邮箱 `config.mail` 由用户在设置中配置，未配置 / 失败时存 `dataDir/feedback/*.json`，配置后或启动后自动补发（`electron/core/mailer.js` 为无依赖 SMTP 客户端）。
-- 启动选择数据目录：`bootstrap.json` 中 `dataDirHistory`（最多 10 个）、`askDataDir`（记住选择 = false）、`skipAskOnce`（主动切换目录后的重启不再询问）；使用环境变量 `PPTA_DATA_DIR` 时不询问（测试用 `PPTA_ASK_DIR=1` 强制询问）。
+- 启动选择数据目录（v3.4）：在创建资料库服务之前，`main.js` 的 `chooseDataDirAtStartup` 打开单独的启动窗口（同一渲染包，`#boot-datadir` → `DataDirDialog.jsx` 的 `StartupDataDir`，只用 `ppta.boot(...)` 通道：info / selectDir / choose / quit），选定后直接用该目录启动，不要再做“切换后重启”的应用内弹窗；启动窗口关闭时 `booting` 防止 `window-all-closed` 退出。`bootstrap.json` 中 `dataDirHistory`（最多 10 个）、`askDataDir`（记住选择 = false）、`skipAskOnce`（主动切换目录后的重启不再询问）、`askReset34`（旧版本的记住选择升级后重置一次）；使用环境变量 `PPTA_DATA_DIR` 时不询问（测试用 `PPTA_ASK_DIR=1` 强制询问，选中的目录只用于本次）。
+- 帮助指南三个页签（`HELP_TABS`：使用说明 / 版本记录 / 需求文档）：版本记录与需求文档由 `src/docs.js` 直接读取打包进程序的 `docs/需求文档.md`（`?raw`），所以每次迭代刷新需求文档即同步更新帮助；变更记录表格按版本从小到大追加新行，每行用顶层“；”分隔条目（界面上逐条显示）；另存 Word / Markdown 走 `saveRequirementsDoc`（electron-builder `files` 已包含 `docs/需求文档.*`）。
 - 侧栏左下角按钮（帮助、设置）以及“解析任务”标题右侧的“🗂 全部”（全部任务与历史）再次点击收起并还原打开前的界面（帮助指南不论从哪里打开都记在 `helpPrev`，不要固定回到智能搜索）；帮助按钮打开后只显示“收起”，两种状态宽度一致。
 - 侧栏任务列表超过 3 个任务时默认只占 3 个的高度、可滚动，底部拖动条调整高度（`ppta.sbTasksH`，上限窗口高度一半）。
 - 侧栏顶部冻结：`.sb-top`（logo、帮助、添加目录、解析任务模块）`position: sticky`，其余模块在下方滚动，底部 `.sb-foot` 固定；新加的侧栏模块放在 `.sb-top` 之后。

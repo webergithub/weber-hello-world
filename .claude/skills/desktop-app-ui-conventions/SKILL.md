@@ -20,6 +20,7 @@ Treat this as the checklist for a new app; each item was requested explicitly at
 
 **Help and onboarding**
 - A floating "?" in the bottom-left corner of every page and viewer window opens that page's operation guide (with the current shortcuts); never in the title bar.
+- The help page has tabs: 使用说明 (the guide), 版本记录 (every past release's changes, newest first, grouped by major version, searchable) and 需求文档 (the latest requirements document with its own table of contents, save as Word / Markdown). Both are read from the requirements document bundled into the build, so refreshing that document each iteration keeps help current.
 - A help guide with chapters per feature, a "本版本新增" chapter refreshed every major version, a welcome screen on first launch ("show next time" choice) and a step-by-step tour (≤ 12 steps) covering every main menu; extend both whenever a feature is added.
 - No permanent hint bars or long explanatory sentences in the UI; explanations live in the help.
 
@@ -30,7 +31,7 @@ Treat this as the checklist for a new app; each item was requested explicitly at
 
 **Settings and data**
 - Settings page sections: document types, scheduled jobs, theme (light / dark / system), shortcuts (fully remappable, presets) and mouse wheel options, close-window behaviour (tray / quit, remembered), data directory (move / switch / history, "ask on startup" with remember), external AI interfaces (user-provided keys only, test button), feedback mail sender.
-- On startup, optionally ask which data directory to use (current / previous / new), with "remember, don't ask again".
+- On startup, ask which data directory to use (last used / previously used / choose another) in a small startup window shown *before* the data layer is opened, so the choice takes effect immediately (no switch-and-restart); closing it quits the app; offer "remember, don't ask again" (re-enable in settings).
 - Originals are read-only by default: any change to user files happens only through an explicit, confirmed write-back with an automatic backup; deletions go to a recycle bin first.
 - Feedback: background sending with the recipient hidden from the UI and code shipped to the renderer; queue locally when the sender isn't configured.
 
@@ -91,7 +92,7 @@ Each table must support:
 - Long sidebar item lists (more than 3 items) take the height of 3 items by default, scroll, and have a drag grip at the bottom to resize (remembered; double-click resets); the selected item scrolls into view. A section header may carry a small shortcut button that opens the matching "all items" page in the main area (toggle).
 - Every jump from a list or overview page into an item's detail page remembers where it came from: the detail page shows "← 返回" at the top-left that restores the previous view, its tab and the selected row; opening the detail directly from the sidebar shows no back button.
 - Feedback: a "💬 反馈" button sends in the background; never show the recipient address in the UI or ship it in front-end code, never embed mail credentials — the sending mailbox is configured in settings and feedback is queued locally until it can be sent.
-- On startup, apps with a data directory let the user pick the current / a previously used / a new directory, with "remember, don't ask again" (re-enable in settings).
+- On startup, apps with a data directory let the user pick the last used / a previously used / a new directory before anything is loaded (startup window, no restart needed), with "remember, don't ask again" (re-enable in settings).
 - Detail views support keyboard and mouse-wheel paging even without opening the full viewer; wheel paging and Ctrl+wheel zoom are user options in settings.
 - AI-dependent features with no configured API key show a clear "去设置" prompt instead of silently falling back to a canned template; mark unfinished AI features "建设中".
 - Features still being built are marked "建设中" (a small tag on the menu item or button).

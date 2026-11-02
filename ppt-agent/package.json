@@ -1,7 +1,7 @@
 {
   "name": "ppt-agent",
   "productName": "PPT智能体",
-  "version": "3.3.1",
+  "version": "3.4.0",
   "description": "PPT 智能解析、归档、搜索与编排工具（Electron）",
   "author": "weber",
   "license": "MIT",
@@ -44,6 +44,8 @@
     "files": [
       "dist/**/*",
       "electron/**/*",
+      "docs/需求文档.docx",
+      "docs/需求文档.md",
       "package.json",
       "!**/*.map",
       "!node_modules/pdfjs-dist/{legacy,web,types,image_decoders}/**",
