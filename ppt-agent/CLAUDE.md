@@ -8,7 +8,7 @@
 2. `package.json` 的 `version` 递增，与需求文档版本一致。
 3. 运行 `npm test`，并用 Playwright 驱动界面验证改动（`xvfb-run`）。
 4. 打包 Windows exe：`npx vite build && npx electron-builder --win portable --x64 --publish never`，把产物复制到 `download/`（删除旧版本 exe，保持只有一个）。同步更新 README 中的下载文件名。
-5. 提交并推送到 GitHub，然后在对话中发送 exe 与需求文档给用户下载。
+5. 提交并推送到 GitHub，然后在对话中发送 exe 与需求文档给用户下载；同时给出 GitHub 直接下载链接（`https://github.com/webergithub/weber-hello-world/raw/claude/trusting-dijkstra-6yrvoy/ppt-agent/download/<exe 文件名>`，仓库为公开仓库，不需要登录），README 中的直接下载链接同步更新。对话中的大文件（约 92MB）可能下载失败，需要时可另外发送分段文件（`split` 成约 33MB 的 .bin + `合并.cmd` 用 `copy /b` 合并）。
 6. 新功能同步更新帮助：`PageHelp.jsx` 的页面操作指导、`Guide.jsx` 帮助指南对应章节；每个大版本（版本号前两位变化，或一次迭代新增多项功能）刷新帮助指南的“本版本新增”章节与新手指引 `TOUR_STEPS`（新菜单 / 新页面要有对应步骤）。
 
 ## 已确定的产品规则

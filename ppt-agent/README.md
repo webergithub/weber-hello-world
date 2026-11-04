@@ -3,6 +3,7 @@
 把电脑上的 PPT（以及 Word、PDF 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
 > 下载：[`download/PPT-Agent-3.6.0-win-x64-portable.exe`](download/PPT-Agent-3.6.0-win-x64-portable.exe)（免安装，双击运行）。
+> 直接下载链接：<https://github.com/webergithub/weber-hello-world/raw/claude/trusting-dijkstra-6yrvoy/ppt-agent/download/PPT-Agent-3.6.0-win-x64-portable.exe>
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
 
 ## v1.6 新增
