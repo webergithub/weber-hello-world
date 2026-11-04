@@ -68,6 +68,10 @@ CREATE TABLE IF NOT EXISTS recycle (
   id INTEGER PRIMARY KEY AUTOINCREMENT, file_id INTEGER, name TEXT, orig_path TEXT, bin_path TEXT, moved INTEGER,
   prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER
 );
+-- 智能总结插件（v3.5）：大模型为每个文档生成的 Markdown 总结（另存为单独的 .md 文件），供检索 / RAG 使用
+CREATE TABLE IF NOT EXISTS doc_summaries (
+  file_id INTEGER PRIMARY KEY, md_path TEXT, summary TEXT, model TEXT, at INTEGER, ms INTEGER
+);
 `;
 
 const toBlob = (v) => (v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : null);
@@ -96,6 +100,11 @@ class Store {
     if (!t.has('watch')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch INTEGER DEFAULT 0');
     if (!t.has('last_watch_at')) this.db.exec('ALTER TABLE tasks ADD COLUMN last_watch_at INTEGER');
     if (!t.has('watch_summary')) this.db.exec('ALTER TABLE tasks ADD COLUMN watch_summary TEXT');
+    // 子任务（v3.5）：大任务按盘符 / 文件夹拆分，parent_id 指向总任务
+    if (!t.has('parent_id')) this.db.exec('ALTER TABLE tasks ADD COLUMN parent_id INTEGER');
+    if (!t.has('part_no')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_no INTEGER');
+    if (!t.has('part_label')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_label TEXT');
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
     if (!cols('search_history').has('task_ids')) this.db.exec('ALTER TABLE search_history ADD COLUMN task_ids TEXT');
     if (!cols('search_history').has('pdf')) this.db.exec('ALTER TABLE search_history ADD COLUMN pdf INTEGER DEFAULT 0');
     const sl = cols('slides');
@@ -135,6 +144,10 @@ class Store {
   listTasksLite() { return this.q(`SELECT ${this.taskCols()}, scan_list IS NOT NULL AS has_scan FROM tasks WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC`).all(); }
   // 软删除：任务从列表移除，但解析历史保留
   deleteTask(id) { this.q('UPDATE tasks SET deleted = 1 WHERE id = ?').run(id); }
+  /** 子任务（按拆分顺序；不含已删除的旧拆分） */
+  children(pid) { return this.q(`SELECT ${this.taskCols()}, scan_list IS NOT NULL AS has_scan FROM tasks WHERE parent_id = ? AND (deleted IS NULL OR deleted = 0) ORDER BY part_no, id`).all(pid); }
+  /** 任务及其全部子任务（含重新拆分前的旧子任务，解析历史完整保留） */
+  familyIds(id) { return this.q('SELECT id FROM tasks WHERE id = ? OR parent_id = ?').all(id, id).map((r) => r.id); }
 
   update(table, id, f) {
     const keys = Object.keys(f);
@@ -158,12 +171,13 @@ class Store {
     return new Set(this.q('SELECT path FROM task_files WHERE task_id = ? AND at >= ?').all(taskId, since || 0).map((r) => r.path));
   }
   taskFiles(taskId) {
-    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id = ? ORDER BY tf.rowid`).all(taskId).map(this.fileRow);
+    // 总任务包含其全部子任务的处理记录
+    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) ORDER BY tf.rowid`).all(taskId, taskId).map(this.fileRow);
   }
 
   history({ limit = 5000, action, q, taskId } = {}) {
     const where = [], args = [];
-    if (taskId) { where.push('tf.task_id = ?'); args.push(taskId); }
+    if (taskId) { where.push('tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)'); args.push(taskId, taskId); }
     if (action) { where.push('tf.action = ?'); args.push(action); }
     if (q) { where.push('tf.path LIKE ?'); args.push(`%${q}%`); }
     return this.db.prepare(`SELECT tf.rowid AS hid, tf.task_id, tf.file_id, tf.path, tf.action, tf.message, tf.at, t.name AS task_name,

@@ -199,6 +199,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                 <button className={tab === 'dark' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'dark' })}>⬛ 黑底（{counts.dark}）</button>
                 <button className={tab === 'word' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'word' })}>📄 Word（{counts.word}）</button>
                 <button className={tab === 'pdf' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'pdf' })}>📕 PDF（{counts.pdf}）</button>
+                {(result.summaries || []).length > 0 && <button className={tab === 'summary' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'summary' })}>🧠 文档总结（{result.summaries.length}）</button>}
                 <button className={tab === 'viewer' ? 'on' : ''} onClick={() => setState({ ...state, tab: 'viewer' })}>⛶ 逐页浏览</button>
                 <div className="spacer" />
                 <span className="badge">已选 {sel.size}</span>
@@ -225,8 +226,18 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     initialSlideId={(viewerStart && viewerStart.slideId) || (!fileFilter && topHit ? topHit.id : null)} />
                 </div>
               )}
-              {tab !== 'viewer' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : tab === 'pdf' ? '没有匹配的 PDF 页面' : '没有匹配的白底页面'}{counts[tab === 'dark' ? 'light' : 'dark'] ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
-              {tab !== 'viewer' && <div className="card-grid">
+              {tab === 'summary' && (
+                <div className="sum-hits">{(result.summaries || []).map((h) => (
+                  <div key={h.file_id} className="sum-hit">
+                    <div className="sh-head"><span className="link" title={h.path} onClick={() => app.openFile(h.file_id)}>🧠 {h.name}</span><span className="spacer" />
+                      <button className="btn tiny" onClick={() => api.openPath(h.md_path)}>打开总结 MD</button><button className="btn tiny" onClick={() => api.showItem(h.md_path)}>📂</button></div>
+                    <div className="sc-snippet" dangerouslySetInnerHTML={{ __html: highlight(esc(h.snippet), terms) }} />
+                    <div className="sc-foot">{h.matched.map((m) => <span key={m} className="tag hit">{m}</span>)}</div>
+                  </div>
+                ))}</div>
+              )}
+              {tab !== 'viewer' && tab !== 'summary' && slides.length === 0 && <div className="empty-tip">{tab === 'dark' ? '没有匹配的黑底页面' : tab === 'word' ? '没有匹配的 Word 文档章节' : tab === 'pdf' ? '没有匹配的 PDF 页面' : '没有匹配的白底页面'}{counts[tab === 'dark' ? 'light' : 'dark'] ? `，可切换到${tab === 'dark' ? '白底' : '黑底'}页签查看` : ''}</div>}
+              {tab !== 'viewer' && tab !== 'summary' && <div className="card-grid">
                 {slides.map((s) => (
                   <div key={s.id} data-rid={s.id} className={`slide-card ${sel.has(s.id) ? 'sel' : ''} ${flash === s.id ? 'flash' : ''}`}>
                     <div className="sc-preview" data-noopen onClick={() => app.openSlide(s.id, viewerFiles, terms, allHits.map((x) => x.id), slidesFiltered, { max: true })}>
@@ -254,7 +265,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                   </div>
                 ))}
               </div>}
-              {tab !== 'viewer' && slidesFiltered.length > shown && <div className="more-row"><button className="btn" onClick={() => setShown((n) => n + PAGE)}>显示更多（已显示 {shown} / {slidesFiltered.length}）</button><button className="btn ghost" onClick={() => setShown(slidesFiltered.length)}>全部显示</button></div>}
+              {tab !== 'viewer' && tab !== 'summary' && slidesFiltered.length > shown && <div className="more-row"><button className="btn" onClick={() => setShown((n) => n + PAGE)}>显示更多（已显示 {shown} / {slidesFiltered.length}）</button><button className="btn ghost" onClick={() => setShown(slidesFiltered.length)}>全部显示</button></div>}
             </div>
           </div>
         </div>

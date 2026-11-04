@@ -283,6 +283,7 @@ app.whenReady().then(async () => {
   service.on('embedding', (e) => send('embedding', e));
   service.on('progress', (p) => { progBuf.push(p); scheduleFlush(); });
   service.on('library', (e) => send('library', e));
+  service.summary.on('update', (st) => send('plugin', st));
   service.on('watch', (w) => send('watch', w));
   service.startScheduler();
   createTray();
@@ -299,6 +300,15 @@ app.whenReady().then(async () => {
     watchInfo: () => service.watchInfo(),
     runWatch: (ids) => service.runWatch('手动增量扫描', ids || null),
     startTask: (id, opts) => service.startTask(id, opts),
+    subtaskFiles: (id) => service.subtaskFiles(id),
+    // 插件：智能总结
+    pluginState: () => service.summary.state(),
+    summaryStart: (opts) => service.summaryStart(opts),
+    summaryPause: () => service.summary.pause(),
+    summaryResume: () => service.summary.resume(),
+    summaryCancel: () => service.summary.cancel(),
+    summaryClear: () => service.summary.clearFinished(),
+    summaryList: () => service.summary.list(),
     resumeTask: (id) => service.resumeTask(id),
     pauseTask: (id) => service.pauseTask(id),
     startAll: () => service.startAll(),

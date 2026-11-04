@@ -1423,3 +1423,19 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .md-doc td:first-child { white-space: nowrap; }
 .md-doc code { background: var(--bg3); border-radius: 4px; padding: 0 4px; font-size: 12.5px; word-break: break-all; }
 .md-doc blockquote { margin: 8px 0; padding: 4px 12px; border-left: 3px solid var(--line); color: var(--fg2); }
+
+/* ---- v3.5 子任务 ---- */
+.subtasks .sub-prog { display: flex; align-items: center; gap: 6px; min-width: 120px; max-width: 200px; }
+.subtasks .sub-prog .progress { flex: 1; height: 6px; }
+.split-size { width: 110px; }
+.danger-fg { color: var(--danger-fg); }
+
+/* ---- v3.5 插件 · 智能总结 ---- */
+.wip.plugin { color: var(--accent-fg); border-color: var(--accent); }
+.plugin-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.plugin-tasks { display: flex; gap: 6px; flex-wrap: wrap; }
+.plugin-progress { display: flex; align-items: center; gap: 10px; padding: 8px 16px; }
+.plugin-progress .progress { flex: 1; max-width: 520px; }
+.sum-hits { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-y: auto; }
+.sum-hit { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); padding: 10px 14px; }
+.sum-hit .sh-head { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; }

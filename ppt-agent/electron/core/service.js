@@ -27,6 +27,8 @@ const { imageLuminance } = require('./image');
 const llm = require('./llm');
 const { OFFLINE_ONLY, OFFLINE_MSG } = require('./offline');
 const { ticker } = require('./yieldy');
+const { splitFiles } = require('./splitter');
+const { SummaryPlugin } = require('./plugins/summary');
 
 // 支持的文档类型（设置中多选启用）
 const DOC_TYPES = {
@@ -77,6 +79,8 @@ const DEFAULT_CONFIG = {
   wheel: { page: true, ctrlZoom: true },
   // 反馈邮件的发件邮箱（用户自行配置，应用不内置账号）；secure：true 为 SSL（465），false 为 STARTTLS（587 / 25）
   mail: { host: '', port: 465, secure: true, user: '', pass: '', from: '' },
+  // 大任务拆分（v3.5）：扫描到的文件超过 size 个时，按盘符 / 文件夹拆为多个子任务，每个子任务不超过 size 个文件
+  split: { enabled: true, size: 1000 },
 };
 // 反馈接收地址只在主进程中使用，不传给界面
 const FEEDBACK_TO = 'weber.liuweibo@huawei.com';
@@ -108,6 +112,9 @@ class AgentService extends EventEmitter {
     this.resumeFlags = new Map();
     this.incrementalRuns = new Map();
     this.pausing = new Set();
+    this.parentWatch = new Map(); // 总任务的增量扫描：子任务全部完成后汇总新增 / 更新 / 移除
+    this.summary = new SummaryPlugin(this); // 插件：智能总结（工作线程调用大模型）
+    for (const t of this.store.listTasks()) if (!t.parent_id && this.store.children(t.id).length) this.refreshParent(t.id, { quiet: true });
     this.log.info(`服务启动，数据目录 ${dataDir}`);
   }
 
@@ -116,7 +123,7 @@ class AgentService extends EventEmitter {
       const c = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
       // 3.1 新增 PDF：旧配置升级时默认一并启用 PDF（之后用户可在设置中取消）
       if (Array.isArray(c.docTypes) && (c.docTypesRev || 1) < 2) { if (!c.docTypes.includes('pdf')) c.docTypes = [...c.docTypes, 'pdf']; c.docTypesRev = 2; }
-      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) } };
+      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
   getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY }; }
@@ -126,7 +133,7 @@ class AgentService extends EventEmitter {
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) } };
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) } };
     if (patch.mail) setImmediate(() => this.flushFeedback().catch(() => {}));
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
@@ -221,11 +228,11 @@ class AgentService extends EventEmitter {
 
   /** 对所有开启监测的任务做增量扫描（排队执行）；从未手动开始过的任务不自动开始 */
   runWatch(reason = '手动增量扫描', ids = null) {
-    const list = this.store.listTasks().filter((t) => t.watch && (!ids || ids.includes(t.id)));
+    const list = this.store.listTasks().filter((t) => t.watch && !t.parent_id && (!ids || ids.includes(t.id)));
     const started = [];
     for (const t of list) {
       if (!t.run_started) { this.log.info(`[任务#${t.id}] ${reason}：该任务还没有手动开始过首次解析，跳过`); continue; }
-      if (this.running === t.id || this.queue.includes(t.id)) continue;
+      if (this.store.familyIds(t.id).some((x) => this.isTaskActive(x))) continue;
       this.startTask(t.id, { incremental: true, reason });
       started.push(t.id);
     }
@@ -266,6 +273,12 @@ class AgentService extends EventEmitter {
     const t = this.store.getTask(id);
     if (!t) throw new Error('任务不存在');
     if (this.running === id || this.queue.includes(id)) return id;
+    const kids = t.parent_id ? [] : this.store.children(id);
+    if (kids.length) {
+      // 已拆分的总任务：“继续”= 依次继续所有未完成的子任务；“重新扫描 / 增量扫描”= 重新扫描后重新拆分
+      if (resume) return this.resumeChildren(id);
+      if (kids.some((c) => this.isTaskActive(c.id))) throw new Error('有子任务正在执行或排队，请先暂停总任务');
+    }
     this.cancelled.delete(id);
     this.pausing.delete(id);
     this.resumeFlags.set(id, !!(resume && t.run_started && t.scan_list));
@@ -279,10 +292,69 @@ class AgentService extends EventEmitter {
   }
 
   rerunTask(id) { return this.startTask(id); }
+
+  isTaskActive(id) { return this.running === id || this.queue.includes(id); }
+
+  /** 总任务“继续”：按顺序把未完成的子任务加入队列（已暂停 / 中断的从断点继续） */
+  resumeChildren(pid) {
+    const kids = this.store.children(pid).filter((c) => c.status !== 'done' && !this.isTaskActive(c.id));
+    for (const c of kids) this.startTask(c.id, { resume: !!(c.run_started && c.has_scan) });
+    this.log.info(`[任务#${pid}] 继续总任务：${kids.length} 个未完成的子任务加入队列`);
+    this.refreshParent(pid);
+    return pid;
+  }
+
+  /** 汇总子任务的数量与状态到总任务（每个子任务状态 / 进度变化时调用） */
+  refreshParent(pid, { quiet = false } = {}) {
+    const kids = this.store.children(pid);
+    if (!kids.length) return;
+    const sum = { total: 0, parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
+    for (const c of kids) for (const k of Object.keys(sum)) sum[k] += c[k] || 0;
+    const st = (s) => kids.some((c) => c.status === s);
+    const running = (c) => this.running === c.id;
+    const done = kids.filter((c) => c.status === 'done').length;
+    let status;
+    if (this.running === pid) status = 'running';
+    else if (st('pausing')) status = 'pausing';
+    else if (kids.some(running) || st('running')) status = 'running';
+    else if (kids.some((c) => this.queue.includes(c.id)) || st('pending')) status = 'pending';
+    else if (done === kids.length) status = 'done';
+    else if (st('interrupted')) status = 'interrupted';
+    else if (st('paused') || st('draft')) status = 'paused';
+    else if (st('cancelled')) status = 'cancelled';
+    else status = 'failed';
+    const prev = this.store.getTaskLite(pid);
+    const msg = `子任务 ${done}/${kids.length} 已完成；解析 ${sum.parsed}，已解析过跳过 ${sum.skipped}，重复文件 ${sum.duplicate}，失败 ${sum.failed}`;
+    const patch = { ...sum, status, message: msg };
+    // 总任务从“执行中”变为结束 / 暂停时记录结束时间（界面据此提示一次并刷新统计）
+    const activeS = ['running', 'pending', 'pausing'];
+    if (!activeS.includes(status) && (activeS.includes(prev.status) || (status === 'done' && prev.status !== 'done'))) patch.finished_at = Date.now();
+    if (this.running !== pid) this.store.updateTask(pid, patch);
+    // 增量扫描的总任务：子任务全部结束后汇总一次
+    const w = this.parentWatch.get(pid);
+    if (w && !['running', 'pending', 'pausing'].includes(status)) {
+      this.parentWatch.delete(pid);
+      const inc = { added: 0, updated: 0, removed: w.removed || 0 };
+      for (const c of kids) { try { const x = JSON.parse(c.watch_summary || 'null'); if (x && x.at >= w.at) { inc.added += x.added || 0; inc.updated += x.updated || 0; } } catch { /* ignore */ } }
+      if (status === 'done') {
+        this.store.updateTask(pid, { last_watch_at: Date.now(), watch_summary: JSON.stringify({ ...inc, total: sum.total, at: Date.now(), reason: w.reason }) });
+        this.emit('watch', { taskId: pid, name: prev.name, ...inc, reason: w.reason });
+      }
+    }
+    if (!quiet) this.emitTask(pid);
+  }
   resumeTask(id) { return this.startTask(id, { resume: true }); }
 
   /** 中断正在运行或排队的任务（可继续） */
   pauseTask(id) {
+    const kids = this.store.children(id);
+    if (kids.length && this.running !== id) {
+      // 总任务：暂停所有正在执行 / 排队的子任务
+      for (const c of kids) if (this.isTaskActive(c.id) || c.status === 'pending') this.pauseTask(c.id);
+      this.log.info(`[任务#${id}] 请求暂停总任务（全部子任务）`);
+      this.refreshParent(id);
+      return;
+    }
     this.pausing.add(id);
     this.cancelled.add(id);
     const i = this.queue.indexOf(id);
@@ -296,7 +368,7 @@ class AgentService extends EventEmitter {
   }
 
   startAll() {
-    const ids = this.store.listTasks().filter((t) => ['draft', 'interrupted', 'paused', 'cancelled', 'failed'].includes(t.status)).map((t) => t.id).reverse();
+    const ids = this.store.listTasks().filter((t) => !t.parent_id && ['draft', 'interrupted', 'paused', 'cancelled', 'failed'].includes(t.status)).map((t) => t.id).reverse();
     for (const id of ids) { const t = this.store.getTask(id); this.startTask(id, { resume: ['interrupted', 'paused'].includes(t.status) }); }
     return ids.length;
   }
@@ -313,9 +385,29 @@ class AgentService extends EventEmitter {
 
   queueState() { return { running: this.running, queue: [...this.queue] }; }
 
-  emitProgress(taskId, data) { this.emit('progress', { taskId, at: Date.now(), ...data }); }
+  emitProgress(taskId, data) {
+    this.emit('progress', { taskId, at: Date.now(), ...data });
+    // 子任务的解析动态同时推给总任务（总任务的“解析动态”显示正在执行的子任务）
+    const pid = this.parentOf(taskId);
+    if (pid) {
+      const stage = data.stage === 'scanned' ? 'subscanned' : data.stage === 'done' ? 'subdone' : data.stage;
+      this.emit('progress', { taskId: pid, at: Date.now(), ...data, stage, sub: taskId, subLabel: this.partLabel(taskId) });
+    }
+  }
+  parentOf(id) {
+    if (!this.parentCache) this.parentCache = new Map();
+    if (!this.parentCache.has(id)) { const t = this.store.getTaskLite(id); this.parentCache.set(id, t ? t.parent_id || null : null); this.partCache = this.partCache || new Map(); if (t) this.partCache.set(id, `子任务 ${t.part_no || ''} · ${t.part_label || ''}`); }
+    return this.parentCache.get(id);
+  }
+  partLabel(id) { return (this.partCache && this.partCache.get(id)) || ''; }
 
   cancelTask(id) {
+    const kids = this.store.children(id);
+    if (kids.length && this.running !== id) {
+      for (const c of kids) if (this.isTaskActive(c.id) || c.status === 'pending') this.cancelTask(c.id);
+      this.refreshParent(id);
+      return;
+    }
     this.cancelled.add(id);
     const i = this.queue.indexOf(id);
     if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'cancelled' }); this.emitTask(id); }
@@ -323,12 +415,13 @@ class AgentService extends EventEmitter {
   }
 
   deleteTask(id, removeFiles = false) {
-    if (this.running === id) throw new Error('任务正在运行，请先取消');
+    const fam = this.store.familyIds(id);
+    if (fam.some((x) => this.running === x)) throw new Error('任务正在运行，请先取消');
     if (removeFiles) {
-      for (const f of this.store.taskFiles(id)) if (f.id && f.task_id === id) this.store.deleteFile(f.id);
+      for (const f of this.store.taskFiles(id)) if (f.id && fam.includes(f.task_id)) this.store.deleteFile(f.id);
       this.afterLibraryChange();
     }
-    this.store.deleteTask(id);
+    for (const x of fam) this.store.deleteTask(x);
     this.log.info(`[任务#${id}] 已删除${removeFiles ? '（同时移除其解析的文件）' : ''}`);
   }
 
@@ -355,9 +448,10 @@ class AgentService extends EventEmitter {
     for (const id of [...new Set(ids || [])]) {
       const t = this.store.getTask(id);
       if (!t) continue;
-      if (this.running === id || this.queue.includes(id)) { skipped.push(id); continue; }
-      if (removeFiles) for (const f of this.store.taskFiles(id)) if (f.id && f.task_id === id) this.store.deleteFile(f.id);
-      this.store.deleteTask(id);
+      const fam = this.store.familyIds(id);
+      if (fam.some((x) => this.isTaskActive(x))) { skipped.push(id); continue; }
+      if (removeFiles) for (const f of this.store.taskFiles(id)) if (f.id && fam.includes(f.task_id)) this.store.deleteFile(f.id);
+      for (const x of fam) this.store.deleteTask(x); // 子任务随总任务一起删除
       this.log.info(`[任务#${id}] 已删除${removeFiles ? '（同时移除其解析的文件）' : ''}`);
       done.push(id);
     }
@@ -462,6 +556,8 @@ class AgentService extends EventEmitter {
   emitTask(id, extra = {}) {
     const t = this.store.getTaskLite(id) || { id };
     this.emit('task', { ...t, running: this.running === id, queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, ...extra });
+    // 子任务变化时同步刷新总任务（数量合计与统一状态）
+    if (t.parent_id && !extra.noParent) this.refreshParent(t.parent_id);
   }
 
   /** 异步扫描（不阻塞界面），按目录名顺序深度优先；跳过系统目录、符号链接、本工具数据目录 */
@@ -502,7 +598,8 @@ class AgentService extends EventEmitter {
 
   async runTask(id) {
     const task = this.store.getTask(id);
-    const tag = `[任务#${id}]`;
+    // 子任务的日志同时带上总任务编号，总任务的“运行日志”可以看到全部子任务
+    const tag = task.parent_id ? `[任务#${id}][总任务#${task.parent_id}]` : `[任务#${id}]`;
     const log = logger.child('task');
     const t0 = Date.now();
     const resume = this.resumeFlags.get(id) && task.run_started && task.scan_list;
@@ -524,7 +621,8 @@ class AgentService extends EventEmitter {
       files = JSON.parse(task.scan_list);
       log.info(`${tag} 从断点继续：沿用上次扫描清单 ${files.length} 个文档`);
     } else {
-      log.info(`${tag} ${incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
+      if (task.parent_id) log.info(`${tag} 子任务 ${task.part_no}：${task.part_label}（${explicit.files.length} 个文档）`);
+      else log.info(`${tag} ${incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
       files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, { tag,
         fullDisk, isCancelled: () => this.cancelled.has(id),
         onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
@@ -560,6 +658,12 @@ class AgentService extends EventEmitter {
         log.info(`${tag} ${incremental}：${r.ok} 个文档的原文件已不存在，已移入回收站（仅从资料库移除，可还原）`);
       }
     }
+    // 文件太多：按盘符 / 文件夹拆分为子任务，依次执行（每个子任务可单独暂停、继续）
+    const split = this.config.split || DEFAULT_CONFIG.split;
+    if (!task.parent_id && !explicit && split.enabled && files.length > split.size && !this.cancelled.has(id)) {
+      this.splitIntoChildren(id, task, files, roots || [task.dir], { size: split.size, incremental, removed: inc.removed, log, tag });
+      return;
+    }
     for (let i = 0; i < files.length; i++) {
       if (this.cancelled.has(id)) { stoppedAt = i; log.warn(`${tag} 已${this.pausing.has(id) ? '中断' : '取消'}，处理到第 ${i}/${files.length} 个文件`); break; }
       const file = files[i];
@@ -589,7 +693,11 @@ class AgentService extends EventEmitter {
     // 暂停 / 取消：立即结束，不在此时做全库重算（上万个文件时要很久，界面会一直停在“解析中”）；
     // 资料库变化记下来，空闲时在后台分片重算
     const stopping = this.cancelled.has(id);
-    if (changed && !stopping) {
+    // 子任务：只有总任务的最后一个子任务结束时才全库重算，其余记下待算（避免每个子任务都重算一遍全库）
+    const morePartsQueued = task.parent_id && this.store.children(task.parent_id).some((c) => c.id !== id && this.queue.includes(c.id));
+    if (changed && !stopping && morePartsQueued) this.libraryDirty = true;
+    else if ((changed || (task.parent_id && this.libraryDirty)) && !stopping) {
+      this.libraryDirty = false;
       this.store.updateTask(id, { message: '正在计算标签、相似分组与黑白底对应关系…' });
       this.emitTask(id, { current: '正在计算标签、相似分组与黑白底对应关系…', done: files.length });
       await this.afterLibraryChange(log, tag, id);
@@ -604,8 +712,29 @@ class AgentService extends EventEmitter {
       ...(incremental && !cancelled ? { last_watch_at: Date.now(), watch_summary: JSON.stringify({ ...inc, total: files.length, at: Date.now(), reason: incremental }) } : {}) });
     log.info(`${tag} 任务结束：${msg}`);
     this.emitProgress(id, { stage: 'done', message: msg, counts: { ...counts }, total: files.length, inc: incremental ? inc : null });
-    if (incremental && !cancelled) this.emit('watch', { taskId: id, name: task.name, ...inc, reason: incremental });
+    if (incremental && !cancelled && !task.parent_id) this.emit('watch', { taskId: id, name: task.name, ...inc, reason: incremental });
     if (changed && !OFFLINE_ONLY && this.config.embedding.provider !== 'none') this.buildEmbeddings().catch((e) => log.warn('语义向量生成失败', e));
+  }
+
+  /** 总任务扫描后拆分为子任务：旧的子任务移除（解析历史保留），新子任务插到队列最前面依次执行 */
+  splitIntoChildren(id, task, files, roots, { size, incremental, removed = 0, log, tag }) {
+    for (const c of this.store.children(id)) this.store.deleteTask(c.id);
+    const groups = splitFiles(files, roots, size);
+    const ids = groups.map((g, i) => {
+      const cid = this.store.createTask(g.dir, `${task.name} · ${g.label}`);
+      this.store.updateTask(cid, { parent_id: id, part_no: i + 1, part_label: g.label, roots: JSON.stringify({ files: g.files, sub: true }), status: 'pending', total: g.files.length });
+      if (incremental) this.incrementalRuns.set(cid, incremental);
+      return cid;
+    });
+    this.queue.unshift(...ids);
+    if (incremental) this.parentWatch.set(id, { reason: incremental, removed, at: Date.now() });
+    log.info(`${tag} 共 ${files.length} 个文档，超过每个子任务 ${size} 个的上限，按盘符 / 文件夹拆分为 ${groups.length} 个子任务（#${ids[0]}–#${ids[ids.length - 1]}），依次执行`);
+    this.emitProgress(id, { stage: 'split', parts: groups.length, size, total: files.length });
+    this.store.updateTask(id, { status: 'pending' });
+    for (const cid of ids) this.emitTask(cid, { noParent: true });
+    this.running = null; // 让总任务的汇总状态按子任务计算
+    this.refreshParent(id);
+    this.running = id;
   }
 
   fingerprint(name, size, mtime, author) {
@@ -900,6 +1029,17 @@ class AgentService extends EventEmitter {
   // ================= 查询接口 =================
   tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
 
+  /** 子任务的文件清单：拆分时分到的全部文件 + 每个文件最近一次的处理结果（未处理的为“待处理”） */
+  subtaskFiles(id) {
+    const t = this.store.getTask(id);
+    if (!t) return [];
+    let list = [];
+    try { list = JSON.parse(t.scan_list || 'null') || (JSON.parse(t.roots || '{}').files || []); } catch { list = []; }
+    const latest = new Map();
+    for (const f of this.store.taskFiles(id)) if (f.link_task === id && f.at >= (t.run_started || 0)) latest.set(f.link_path, f);
+    return list.map((p) => latest.get(p) || { link_path: p, path: p, name: path.basename(p), dir: path.dirname(p), ext: path.extname(p).toLowerCase(), kind: KIND_OF.get(path.extname(p).toLowerCase()), action: 'pending', message: '待处理' });
+  }
+
   taskDetail(id) {
     const task = this.store.getTask(id);
     if (!task) return null;
@@ -1006,6 +1146,8 @@ class AgentService extends EventEmitter {
       throw e;
     }
     logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
+    // 智能总结插件生成的文档总结也参与检索（“文档总结”页签）
+    try { r.summaries = this.summary.search([...(r.analysis.zh || []), ...(r.analysis.en || [])], fileIds); } catch (e) { r.summaries = []; this.log.warn('检索文档总结失败', e); }
     if (opts.record !== false) r.historyId = this.recordSearch(q, opts, useLlm, r);
     return r;
   }
@@ -1673,7 +1815,15 @@ class AgentService extends EventEmitter {
     await this.afterLibraryChange();
   }
 
-  close() { clearInterval(this.schedTimer); clearInterval(this.statTimer); this.store.close(); }
+  /** 智能总结：fileIds / taskIds（取这些任务的文档）/ all（全部已解析文档） */
+  summaryStart({ fileIds = [], taskIds = [], all = false, force = false } = {}) {
+    let ids = [...fileIds];
+    if (all) ids = this.store.db.prepare("SELECT id FROM files WHERE status = 'parsed' ORDER BY id").all().map((r) => r.id);
+    else if (taskIds.length) ids = [...new Set(taskIds.flatMap((t) => [...this.taskFileIds(t)]))];
+    return this.summary.start(ids, { force });
+  }
+
+  close() { clearInterval(this.schedTimer); clearInterval(this.statTimer); if (this.summary) this.summary.close(); this.store.close(); }
 }
 
 /** 移动文件（跨磁盘时复制后删除） */

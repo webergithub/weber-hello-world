@@ -9,6 +9,7 @@ import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
 import { StatCards } from './DrillDialog';
 import TagList from './TagList';
+import SubtaskPanel from './SubtaskPanel';
 
 // 每个任务上次所在的页签：从文件详情等页面返回时恢复
 const TAB_MEMO = new Map();
@@ -35,28 +36,33 @@ export default function TaskView({ taskId, back, onBack }) {
   const files = dedupe(data.files);
   const live = app.liveTasks[taskId];
   // 状态以全局任务列表（实时事件合并）为准，与侧栏、解析动态保持一致
-  const cur = { ...task, ...(app.tasks.find((x) => x.id === taskId) || {}) };
+  const cur = { ...task, ...(app.allTasks.find((x) => x.id === taskId) || {}) };
+  // 子任务（v3.5）：总任务显示“子任务”页签；子任务显示所属总任务
+  const kids = app.allTasks.filter((x) => x.parent_id === taskId);
+  const parent = task.parent_id ? app.allTasks.find((x) => x.id === task.parent_id) : null;
+  const curTab = tab === 'subs' && !kids.length ? 'slides' : TAB_MEMO.has(taskId) || !kids.length ? tab : 'subs';
   return (
     <div className="view">
       <div className="view-head">
         {back && <button className="btn vh-back" title={`返回${BACK_LABEL[back.type] || '上一个界面'}`} onClick={onBack}>← 返回</button>}
         <div>
-          <div className="vh-title">📁 {task.name} <span className={`status s-${cur.status}`}>{STATUS_LABEL[cur.status] || cur.status}</span></div>
+          <div className="vh-title">{task.parent_id ? '🧩' : '📁'} {task.name} <span className={`status s-${cur.status}`}>{STATUS_LABEL[cur.status] || cur.status}</span>{kids.length ? <span className="tag accent">{kids.length} 个子任务</span> : null}</div>
+          {parent && <div className="small">所属总任务：<span className="link" onClick={() => app.go({ type: 'task', id: parent.id })}>#{parent.id} {parent.name}</span> · 子任务 {task.part_no}</div>}
           <div className="muted small">{task.dir} · 创建于 {fmtTime(task.created_at)}{cur.message ? ' · ' + cur.message : ''}</div>
           {isActive(cur) && (
             <div className="progress-wrap">
-              <div className="progress"><div style={{ width: `${cur.total ? (((live && live.done) || 0) / cur.total) * 100 : 5}%` }} /></div>
-              <span className="small muted">{(live && live.done) || 0}/{cur.total} {live && live.current ? '· ' + live.current : ''}</span>
+              <div className="progress"><div style={{ width: `${cur.total ? ((kids.length ? done(cur) : (live && live.done) || 0) / cur.total) * 100 : 5}%` }} /></div>
+              <span className="small muted">{kids.length ? done(cur) : (live && live.done) || 0}/{cur.total} {!kids.length && live && live.current ? '· ' + live.current : ''}</span>
             </div>
           )}
         </div>
         <div className="spacer" />
         {cur.status === 'pausing' ? <button className="btn" disabled>⏸ 暂停中…</button> : cur.status === 'running' || cur.status === 'pending'
           ? <><button className="btn primary" onClick={() => api.pauseTask(taskId).then(app.refreshTasks)} title="暂停后可从断点继续">⏸ 暂停</button><button className="btn" onClick={() => api.cancelTask(taskId)}>取消任务</button></>
-          : <>{['paused', 'interrupted'].includes(cur.status) && <button className="btn primary" onClick={() => app.startParse(taskId, 'resume')}>▶ 从断点继续</button>}<button className={`btn ${cur.status === 'draft' ? 'primary' : ''}`} onClick={() => app.startParse(taskId)}>{cur.status === 'draft' ? '▶ 开始解析' : '↻ 重新扫描'}</button></>}
-        {task.watch && task.run_started && !['running', 'pending', 'pausing'].includes(cur.status) ? <button className="btn" title="只解析新增和修改过的文档，原文件已删除的移入回收站" onClick={() => app.startParse(taskId, 'watch')}>↻ 增量扫描</button> : null}
-        <button className={`btn ${task.watch ? 'primary' : ''}`} title={`每天 ${(app.config && app.config.watch && app.config.watch.time) || ''} 定时增量扫描该任务（时间在“设置 → 定时监测更新”中修改）`}
-          onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>
+          : <>{['paused', 'interrupted'].includes(cur.status) && <button className="btn primary" onClick={() => app.startParse(taskId, 'resume')}>{kids.length ? '▶ 继续未完成的子任务' : '▶ 从断点继续'}</button>}<button className={`btn ${cur.status === 'draft' ? 'primary' : ''}`} onClick={() => app.startParse(taskId)}>{cur.status === 'draft' ? '▶ 开始解析' : task.parent_id ? '↻ 重新处理' : '↻ 重新扫描'}</button></>}
+        {!task.parent_id && task.watch && task.run_started && !['running', 'pending', 'pausing'].includes(cur.status) ? <button className="btn" title="只解析新增和修改过的文档，原文件已删除的移入回收站" onClick={() => app.startParse(taskId, 'watch')}>↻ 增量扫描</button> : null}
+        {!task.parent_id && <button className={`btn ${task.watch ? 'primary' : ''}`} title={`每天 ${(app.config && app.config.watch && app.config.watch.time) || ''} 定时增量扫描该任务（时间在“设置 → 定时监测更新”中修改）`}
+          onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>}
         <button className="btn ghost" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId })}>⚙️ 解析动态</button>
       </div>
       {task.status === 'draft' && <div className="notice">任务尚未开始：点击右上角“开始解析”加入解析队列。</div>}
@@ -66,18 +72,22 @@ export default function TaskView({ taskId, back, onBack }) {
       )}
       {dupes && <ReparseDialog files={dupes} onClose={() => setDupes(null)} />}
       <div className="tabs">
-        <button className={tab === 'slides' ? 'on' : ''} onClick={() => setTab('slides')}>页面视图（原始页 · 备注 · Markdown）</button>
-        <button className={tab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件清单与统计（{files.length}）</button>
-        <button className={tab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
+        {kids.length > 0 && <button className={curTab === 'subs' ? 'on' : ''} onClick={() => setTab('subs')}>🧩 子任务（{kids.length}）</button>}
+        <button className={curTab === 'slides' ? 'on' : ''} onClick={() => setTab('slides')}>页面视图（原始页 · 备注 · Markdown）</button>
+        <button className={curTab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件清单与统计（{files.length}）</button>
+        <button className={curTab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
       </div>
       <div className="tab-body">
-        {tab === 'slides' && <SlideWorkspace key={`ws-${taskId}`} files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
-        {tab === 'files' && <FilesStats files={files} stats={stats} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
-        {tab === 'log' && <LogView taskId={taskId} />}
+        {curTab === 'subs' && <SubtaskPanel task={task} />}
+        {curTab === 'slides' && <SlideWorkspace key={`ws-${taskId}`} files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
+        {curTab === 'files' && <FilesStats files={files} stats={stats} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
+        {curTab === 'log' && <LogView taskId={taskId} />}
       </div>
     </div>
   );
 }
+
+const done = (t) => (t.parsed || 0) + (t.skipped || 0) + (t.duplicate || 0) + (t.failed || 0);
 
 function dedupe(rows) {
   // 同一文件在一次任务中只显示最后一次处理结果

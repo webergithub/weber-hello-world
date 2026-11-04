@@ -15,6 +15,7 @@ import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
+import PluginView from './components/PluginView';
 import AnalyticsView from './components/AnalyticsView';
 import RecycleView from './components/Recycle';
 import SettingsView from './components/SettingsView';
@@ -58,6 +59,10 @@ function reduceProgress(prev, e) {
       cur.tagFeed = [...(cur.tagFeed || []).slice(-60), { seq: (cur.seq = (cur.seq || 0) + 1), file: e.file, tags: e.tags, category: e.category }]; feed(`${t} 🏷 ${base(e.file)}：${e.category} · ${e.tags.slice(0, 10).join('、')}…`); break;
     case 'relate': cur.relate = e; feed(`${t} 🔗 页面关联：${e.pages} 页已打页面标签，${e.linked} 页有相似推荐（相似 PPT 页 ${e.ppt} 条${e.withWord ? `，文档（Word / PDF）↔ PPT ${e.word} 条` : ''}）`); break;
     case 'done': cur.stage = 'done'; cur.message = e.message; feed(`${t} 🏁 任务结束：${e.message}`); break;
+    // 子任务（v3.5）：总任务的解析动态显示正在执行的子任务
+    case 'split': cur.parts = e.parts; feed(`${t} 🧩 共 ${e.total} 个文档，超过每个子任务 ${e.size} 个的上限，拆分为 ${e.parts} 个子任务依次执行`); break;
+    case 'subscanned': cur.total = e.total; cur.files = []; cur.index = 0; cur.sub = e.sub; cur.subLabel = e.subLabel; feed(`${t} ▶ ${e.subLabel}：${e.total} 个文档`); break;
+    case 'subdone': feed(`${t} ✔ ${e.subLabel} 结束：${e.message}`); break;
     default: break;
   }
   return { ...prev, [e.taskId]: cur };
@@ -117,12 +122,16 @@ export default function App() {
     const back = v && v.back === true ? view : v && v.back;
     if (v && v.type === 'help' && view.type !== 'help') helpPrev.current = view;
     if (v && v.type === 'settings' && view.type !== 'settings') prevView.current = view; // 从其他页面“去设置”后，收起设置回到原页面
-    if (v && v.type === 'monitor' && v.taskId) { setCurTask(v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live', back }); return; }
-    if (v && v.type === 'task' && v.id) { setCurTask(v.id); setTaskMenu(true); setViewState({ type: 'task', back }); return; }
+    // 子任务：侧栏选中其总任务；任务概览显示子任务本身（view.sub），解析动态 / 过程显示总任务
+    const parentOf = (id) => { const t = allTasks.find((x) => x.id === id); return t && t.parent_id ? t.parent_id : null; };
+    if (v && v.type === 'monitor' && v.taskId) { setCurTask(parentOf(v.taskId) || v.taskId); setViewState({ type: 'tmonitor', tab: v.tab === 'history' ? 'history' : 'live', back }); return; }
+    if (v && v.type === 'task' && v.id) { const pid = parentOf(v.id); setCurTask(pid || v.id); setTaskMenu(true); setViewState({ type: 'task', back, ...(pid ? { sub: v.id } : {}) }); return; }
     if (v && v.type === 'library') { setViewState({ type: 'alllib' }); return; }
     setViewState(v);
   };
-  const [tasks, setTasks] = useState([]);
+  const [allTasks, setTasks] = useState([]); // 含子任务
+  // 侧栏、任务队列等只显示总任务（子任务在总任务的“子任务”页签中）
+  const tasks = useMemo(() => allTasks.filter((t) => !t.parent_id), [allTasks]);
   // 默认高度 = 前 3 个任务（含展开在其下方的任务详情菜单）的高度
   useLayoutEffect(() => {
     const box = tasksBox.current;
@@ -171,7 +180,7 @@ export default function App() {
   }, []);
   const refreshTasks = useCallback(() => api.tasks().then(setTasks), []);
   const tasksRef = useRef([]);
-  useEffect(() => { tasksRef.current = tasks; }, [tasks]);
+  useEffect(() => { tasksRef.current = allTasks; }, [allTasks]);
   useEffect(() => { if (tasks.length && !tasks.some((t) => t.id === curTask)) setCurTask(tasks[0].id); if (!tasks.length && curTask) setCurTask(null); }, [tasks]);
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
   const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
@@ -193,6 +202,7 @@ export default function App() {
       const before = prevStatus[t.id] !== undefined ? prevStatus[t.id] : known && known.status;
       prevStatus[t.id] = t.status;
       if (before === t.status) return;
+      if (t.parent_id) return; // 子任务的完成 / 暂停不单独提示，由总任务汇总提示
       // 状态变为结束时提示一次（之前是排队 / 解析中 / 暂停中）
       if (['done', 'failed', 'cancelled', 'paused'].includes(t.status) && t.finished_at && !t.quiet && ['pending', 'running', 'pausing'].includes(before)) {
         bump();
@@ -333,7 +343,7 @@ export default function App() {
     else if (next === 'help') setView({ type: 'help' });
   };
   const ctx = {
-    tasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
+    tasks, allTasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
     exportSlides, openSlide, openCompare, startParse, notices, setNotices, openLink, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal,
   };
 
@@ -362,6 +372,7 @@ export default function App() {
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
     { key: 'merge', icon: '🧬', label: '智能合成', wip: true },
+    { key: 'plugins', icon: '🧠', label: '智能总结', plugin: true }, // 插件位（v3.5）
   ];
   // 点击任务：选中并在任务下方展开“任务详情”菜单（任务概览 / 解析过程）；再次点击已选中的任务收起菜单
   const selectTask = (t) => {
@@ -380,7 +391,7 @@ export default function App() {
     <React.Fragment key={n.key}>
       <div className={`sb-item ${view.type === n.key ? 'active' : ''} ${disabled ? 'disabled' : ''}`} data-tour={`nav-${n.key}`} title={n.label}
         onClick={() => !disabled && clickNav(n)}>
-        <span className="ic">{n.icon}</span>{!collapsed && <span className="lbl">{n.label}{n.wip && <span className="wip">建设中</span>}</span>}
+        <span className="ic">{n.icon}</span>{!collapsed && <span className="lbl">{n.label}{n.wip && <span className="wip">建设中</span>}{n.plugin && <span className="wip plugin">插件</span>}</span>}
         {n.badge ? <span className="sb-badge">{n.badge}</span> : null}
         {n.sub && !collapsed && <span className="sb-caret">{view.type === n.key && subOpen[n.key] !== false ? '▾' : '▸'}</span>}
       </div>
@@ -479,7 +490,7 @@ export default function App() {
         </aside>
         <main className="main">
           <div className="page-help-fab"><PageHelp page={view.type} /></div>
-          {view.type === 'task' && (cur ? <TaskView taskId={cur.id} back={view.back} onBack={() => setViewState(view.back)} /> : <NoTask />)}
+          {view.type === 'task' && (view.sub ? <TaskView key={`sub-${view.sub}`} taskId={view.sub} back={view.back} onBack={() => setViewState(view.back)} /> : cur ? <TaskView taskId={cur.id} back={view.back} onBack={() => setViewState(view.back)} /> : <NoTask />)}
           {view.type === 'tmonitor' && (cur ? <TaskMonitor scoped tab={view.tab || 'live'} taskId={cur.id} setTab={(tab) => setViewState({ type: 'tmonitor', tab, back: view.back })} back={view.back} onBack={() => setViewState(view.back)} /> : <NoTask />)}
           {view.type === 'search' && <SearchView defaultAll taskId={cur ? cur.id : undefined} taskName={cur ? cur.name : ''} state={searchState} setState={setSearchState} />}
           {view.type === 'groups' && <GroupsView />}
@@ -493,6 +504,7 @@ export default function App() {
           {view.type === 'notesreview' && <NotesReviewView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'merge' && <MergeView />}
+          {view.type === 'plugins' && <PluginView />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}
           {view.type === 'logs' && <div className="view"><div className="view-head"><div className="vh-title">📜 运行日志 <span className="muted small">工具只保留一份日志文件，记录全部工作过程</span></div></div><div className="tab-body"><LogView /></div></div>}

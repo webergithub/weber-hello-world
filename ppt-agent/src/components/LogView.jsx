@@ -10,7 +10,7 @@ export default function LogView({ taskId }) {
   const [q, setQ] = useState('');
   const [follow, setFollow] = useState(true);
   const box = useRef(null);
-  const lines = useMemo(() => logLines.filter((l) => (!onlyTask || !taskId || l.includes(`[任务#${taskId}]`))
+  const lines = useMemo(() => logLines.filter((l) => (!onlyTask || !taskId || (l.includes(`[任务#${taskId}]`) || l.includes(`[总任务#${taskId}]`)))
     && (!level || l.includes(`[${level}]`)) && (!q || l.toLowerCase().includes(q.toLowerCase()))).slice(-3000), [logLines, onlyTask, level, q, taskId]);
   useEffect(() => { if (follow && box.current) box.current.scrollTop = box.current.scrollHeight; }, [lines, follow]);
   const app = useApp();
@@ -21,7 +21,7 @@ export default function LogView({ taskId }) {
     const out = await api.saveFile(`PPT智能体运行日志${taskId && onlyTask ? `_任务${taskId}` : ''}_${stamp}.log`, 'log', 'log');
     if (!out) return;
     try {
-      const all = logLines.filter((l) => (!onlyTask || !taskId || l.includes(`[任务#${taskId}]`)) && (!level || l.includes(`[${level}]`)) && (!q || l.toLowerCase().includes(q.toLowerCase())));
+      const all = logLines.filter((l) => (!onlyTask || !taskId || (l.includes(`[任务#${taskId}]`) || l.includes(`[总任务#${taskId}]`))) && (!level || l.includes(`[${level}]`)) && (!q || l.toLowerCase().includes(q.toLowerCase())));
       const r = await api.exportLog(out, filtered ? all : null);
       app.toast(`日志已导出：${out}`, 'info', { label: '打开位置', link: { type: 'reveal', path: r.path }, cat: '运行日志' });
     } catch (e) { app.toast('导出失败：' + e.message, 'error'); }

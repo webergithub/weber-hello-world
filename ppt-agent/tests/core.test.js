@@ -374,6 +374,107 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   svc.close();
 });
 
+test('大任务拆分为子任务：按文件夹不超过上限；子任务单独暂停 / 继续，总任务汇总数量与状态', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const { splitFiles } = require('../electron/core/splitter');
+  // 拆分规则：小文件夹合并、大文件夹向下拆、同一目录文件过多分段、不同盘符分开
+  const fl = [];
+  const add = (d, n) => { for (let i = 0; i < n; i++) fl.push(path.join(d, `f${i}.pptx`)); };
+  add('/r/A', 3); add('/r/B', 1); add('/r/C', 7); add('/s', 2);
+  const g = splitFiles(fl, ['/r', '/s'], 4);
+  assert.ok(g.every((x) => x.files.length <= 4));
+  assert.deepStrictEqual(g.flatMap((x) => x.files), fl, '顺序与扫描一致、不重不漏');
+  assert.ok(g.some((x) => x.files.length === 4 && x.files.every((f) => f.startsWith('/r/A') || f.startsWith('/r/B'))), '相邻小文件夹合并');
+  assert.ok(g.filter((x) => x.dir === '/r/C').length === 2, '文件过多的目录分段');
+  assert.ok(g.some((x) => x.label === 's' && x.files.length === 2), '不同根目录分开');
+
+  const lib = path.join(tmp, 'libsplit');
+  for (const [i, d] of ['甲', '乙', '丙'].entries()) {
+    fs.mkdirSync(path.join(lib, d), { recursive: true });
+    const src = fs.readdirSync(P('机场运营')).filter((n) => n.endsWith('.pptx')).sort();
+    for (let k = 0; k < 2 + i; k++) fs.copyFileSync(P('机场运营', src[k]), path.join(lib, d, `${d}_${k}.pptx`));
+  }
+  const svc = new AgentService(path.join(tmp, 'datasplit'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'], split: { enabled: true, size: 3 } });
+  const until = (id, ok) => new Promise((res) => { const h = (t) => { if (t.id === id && ok(t)) { svc.off('task', h); res(t); } }; svc.on('task', h); });
+  const id = svc.addTask(lib);
+  const parentDone = until(id, (t) => t.status === 'done');
+  // 第一个子任务开始后暂停它：其余子任务继续执行，总任务显示“已暂停”（有未完成的子任务）
+  svc.startTask(id);
+  const kidsSeen = await until(id, () => svc.store.children(id).length > 0).then(() => svc.store.children(id));
+  // 甲 2 个、乙 3 个、丙 4 个，上限 3：按扫描顺序（拼音）丙分两段，甲、乙各一个子任务
+  assert.deepStrictEqual(kidsSeen.map((c) => [c.part_label, c.total]), [[path.join('libsplit', '丙') + '（本目录文件 第 1/2 段）', 3], [path.join('libsplit', '丙') + '（本目录文件 第 2/2 段）', 1], [path.join('libsplit', '甲'), 2], [path.join('libsplit', '乙'), 3]]);
+  assert.ok(kidsSeen.every((c) => c.total <= 3));
+  const first = kidsSeen[0].id;
+  await until(first, (t) => t.status === 'running');
+  svc.pauseTask(first);
+  const p1 = await until(first, (t) => t.status === 'paused');
+  assert.ok(p1.message.includes('已暂停'));
+  await until(id, (t) => !['running', 'pending', 'pausing'].includes(t.status));
+  let parent = svc.store.getTask(id);
+  assert.strictEqual(parent.status, 'paused', '有子任务暂停 → 总任务为已暂停');
+  assert.strictEqual(svc.store.children(id).filter((c) => c.status === 'done').length, 3);
+  // 子任务文件清单：拆分到的全部文件 + 处理结果（未处理的为“待处理”）
+  const sf = svc.subtaskFiles(first);
+  assert.strictEqual(sf.length, kidsSeen[0].total);
+  // 继续总任务 = 继续未完成的子任务
+  svc.startTask(id, { resume: true });
+  await parentDone;
+  parent = svc.store.getTask(id);
+  const kids = svc.store.children(id);
+  assert.ok(kids.every((c) => c.status === 'done'));
+  assert.strictEqual(parent.total, 9);
+  assert.strictEqual(parent.parsed + parent.skipped + parent.duplicate + parent.failed, kids.reduce((a, c) => a + c.parsed + c.skipped + c.duplicate + c.failed, 0));
+  assert.ok(parent.message.startsWith('子任务 4/4 已完成'), parent.message);
+  // 总任务的文件清单、资料库范围包含全部子任务
+  assert.strictEqual(new Set(svc.taskDetail(id).files.map((f) => f.link_path)).size, 9);
+  assert.ok(svc.subtaskFiles(first).every((f) => f.action !== 'pending'));
+  // 不拆分：文件数不超过上限时与以前一样
+  svc.setConfig({ split: { size: 1000 } });
+  const id2 = svc.addTask(path.join(lib, '甲'));
+  svc.startTask(id2);
+  await until(id2, (t) => t.status === 'done');
+  assert.strictEqual(svc.store.children(id2).length, 0);
+  // 删除总任务同时删除子任务
+  svc.deleteTasks([id], false);
+  assert.strictEqual(svc.store.children(id).length, 0);
+  svc.store.db.close();
+});
+
+test('插件·智能总结：单机版不可用；工作线程异步生成 Markdown 总结，另存 .md 并入库，可被检索', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'datasum'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const id = svc.addTask(P('机场运营'));
+  const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  // 单机版（不联网）：插件不可用，给出原因
+  delete process.env.PPTA_FAKE_LLM;
+  assert.strictEqual(svc.summary.state().available.ok, false);
+  assert.throws(() => svc.summaryStart({ all: true }), /单机版/);
+  // 测试替身：在工作线程中执行，主线程只排队与保存
+  process.env.PPTA_FAKE_LLM = '1';
+  const updates = [];
+  svc.summary.on('update', (st) => updates.push(st.counts));
+  const finished = new Promise((res) => svc.summary.on('update', (st) => { if (!st.counts.queued && !st.counts.running && st.counts.done) res(st); }));
+  const r = svc.summaryStart({ taskIds: [id] });
+  assert.ok(r.added >= 3);
+  const st = await finished;
+  assert.ok(updates.some((c) => c.running === 1 && c.queued > 0), '逐个处理并推送进度');
+  assert.strictEqual(st.counts.done, r.added);
+  const list = svc.summary.list();
+  assert.strictEqual(list.length, r.added);
+  for (const x of list) { assert.ok(fs.existsSync(x.md_path) && x.md_path.endsWith('_总结.md')); assert.ok(fs.readFileSync(x.md_path, 'utf8').includes('## 核心要点')); }
+  // 已有总结的再次加入时跳过
+  assert.strictEqual(svc.summaryStart({ taskIds: [id] }).skipped, r.added);
+  // 检索：智能搜索结果带“文档总结”命中
+  const q = await svc.searchQuery('航班过站', { record: false, useLlm: false });
+  assert.ok(q.summaries.length >= 1 && q.summaries[0].snippet.length > 0, '总结内容可被检索');
+  delete process.env.PPTA_FAKE_LLM;
+  svc.close();
+});
+
 test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料库的文档不自动加回', async () => {
   const { AgentService } = require('../electron/core/service');
   const lib = path.join(tmp, 'lib3');
