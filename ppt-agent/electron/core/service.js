@@ -82,6 +82,8 @@ const DEFAULT_CONFIG = {
   // 大任务拆分（v3.5）：扫描到的文件超过 size 个时，按盘符 / 文件夹拆为多个子任务，每个子任务不超过 size 个文件
   // parallel：同时执行的子任务数（解析页面并行；PowerPoint / LibreOffice 截图与旧格式转换仍逐个进行）
   split: { enabled: true, size: 1000, parallel: 3 },
+  // 插件（v3.7）：智能总结脚本。enabled 为“生效”开关（检查通过后才能设为生效）；auto：解析完成的文档自动加入总结队列
+  plugins: { summary: { enabled: false, script: '', args: '"{input}" "{output}"', timeout: 300, auto: true } },
 };
 // 反馈接收地址只在主进程中使用，不传给界面
 const FEEDBACK_TO = 'weber.liuweibo@huawei.com';
@@ -126,7 +128,7 @@ class AgentService extends EventEmitter {
       const c = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
       // 3.1 新增 PDF：旧配置升级时默认一并启用 PDF（之后用户可在设置中取消）
       if (Array.isArray(c.docTypes) && (c.docTypesRev || 1) < 2) { if (!c.docTypes.includes('pdf')) c.docTypes = [...c.docTypes, 'pdf']; c.docTypesRev = 2; }
-      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) } };
+      return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) }, plugins: { ...(c.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((c.plugins || {}).summary || {}) } } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
   getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY }; }
@@ -136,7 +138,7 @@ class AgentService extends EventEmitter {
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) } };
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) }, plugins: { ...(this.config.plugins || {}), ...(patch.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((this.config.plugins || {}).summary || {}), ...((patch.plugins || {}).summary || {}) } } };
     if (patch.mail) setImmediate(() => this.flushFeedback().catch(() => {}));
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
@@ -709,6 +711,8 @@ class AgentService extends EventEmitter {
           throw e;
         }
         counts[r]++;
+        // 插件：解析完成的文档自动加入智能总结队列（异步，失败不影响本任务）
+        if (r === 'parsed') { const pf = this.store.fileByPath(file); if (pf) this.summary.onParsed(pf.id); }
         if (incremental && r === 'parsed') { if (before && before.status !== 'recycled') inc.updated++; else inc.added++; }
         if (r !== 'parsed') this.emitProgress(id, { stage: 'result', file, action: r, index: i + 1, total: files.length });
         if (r === 'parsed' || r === 'duplicate') changed = true;
@@ -1860,6 +1864,27 @@ class AgentService extends EventEmitter {
     else if (taskIds.length) ids = [...new Set(taskIds.flatMap((t) => [...this.taskFileIds(t)]))];
     return this.summary.start(ids, { force });
   }
+
+  /** 插件脚本：检查（试运行一次示例文档）；通过后才把“生效”打开 */
+  async pluginCheck(patch = {}) {
+    const cfg = { ...((this.config.plugins || {}).summary || {}), ...patch };
+    const r = await require('./plugins/scriptRunner').check(cfg);
+    this.log[r.ok ? 'info' : 'warn'](`[智能总结] 检查脚本 ${cfg.script || '（未设置）'}：${r.ok ? `通过（${r.ms}ms）` : r.error}`);
+    return r;
+  }
+  async pluginEnable(on, patch = {}) {
+    if (on) {
+      const r = await this.pluginCheck(patch);
+      if (!r.ok) return { ...r, enabled: false };
+      this.setConfig({ plugins: { summary: { ...patch, enabled: true } } });
+      this.summary.resume();
+      return { ...r, enabled: true };
+    }
+    this.setConfig({ plugins: { summary: { ...patch, enabled: false } } });
+    this.summary.changed();
+    return { ok: true, enabled: false };
+  }
+  pluginExample() { return SummaryPlugin.examplePath(); }
 
   close() { clearInterval(this.schedTimer); clearInterval(this.statTimer); if (this.summary) this.summary.close(); this.store.close(); }
 }

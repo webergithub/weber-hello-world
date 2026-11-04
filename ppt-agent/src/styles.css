@@ -1439,3 +1439,11 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .sum-hits { display: flex; flex-direction: column; gap: 10px; padding: 12px; overflow-y: auto; }
 .sum-hit { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); padding: 10px 14px; }
 .sum-hit .sh-head { display: flex; align-items: center; gap: 6px; font-weight: 600; margin-bottom: 4px; }
+
+/* ---- v3.7 插件脚本设置 ---- */
+.plugin-settings .row .grow { flex: 1; min-width: 260px; }
+.plugin-switch button.on:first-child { background: var(--ok); color: #fff; }
+.plugin-check { margin: 6px 0 0 120px; font-size: 12.5px; }
+.plugin-check.ok { color: var(--ok-fg); }
+.plugin-check.bad { color: var(--danger-fg); }
+.plugin-check pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg3); border-radius: 6px; color: var(--fg2); white-space: pre-wrap; max-height: 120px; overflow: auto; }

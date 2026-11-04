@@ -284,6 +284,7 @@ app.whenReady().then(async () => {
   service.on('progress', (p) => { progBuf.push(p); scheduleFlush(); });
   service.on('library', (e) => send('library', e));
   service.summary.on('update', (st) => send('plugin', st));
+  service.summary.on('notice', (n) => send('pluginNotice', n));
   service.on('watch', (w) => send('watch', w));
   service.startScheduler();
   createTray();
@@ -309,6 +310,13 @@ app.whenReady().then(async () => {
     summaryCancel: () => service.summary.cancel(),
     summaryClear: () => service.summary.clearFinished(),
     summaryList: () => service.summary.list(),
+    pluginCheck: (cfg) => service.pluginCheck(cfg),
+    pluginEnable: (on, cfg) => service.pluginEnable(on, cfg),
+    pluginExample: () => service.pluginExample(),
+    selectScript: async () => {
+      const r = await dialog.showOpenDialog(win, { title: '选择智能总结脚本', properties: ['openFile'], filters: [{ name: '脚本 / 程序', extensions: ['js', 'cjs', 'mjs', 'py', 'ps1', 'bat', 'cmd', 'exe'] }, { name: '所有文件', extensions: ['*'] }] });
+      return r.canceled ? null : r.filePaths[0];
+    },
     resumeTask: (id) => service.resumeTask(id),
     pauseTask: (id) => service.pauseTask(id),
     startAll: () => service.startAll(),

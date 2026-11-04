@@ -224,9 +224,11 @@ export default function App() {
       for (const t of list) onTask(t);
     });
     const offLib = on('library', () => bump());
+    // 插件（智能总结脚本）失败 / 自动暂停：只提示，不影响解析任务
+    const offPlug = on('pluginNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : 'info', { label: '查看插件', link: { type: 'view', view: { type: 'plugins' } }, cat: '插件' }));
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
     const off3 = on('progressBatch', (list) => setProgress((p) => list.reduce(reduceProgress, p)));
-    return () => { off0(); off1(); off2(); off3(); offLib(); if (mq) mq.removeEventListener('change', onMq); };
+    return () => { off0(); off1(); off2(); off3(); offLib(); offPlug(); if (mq) mq.removeEventListener('change', onMq); };
   }, []);
   useEffect(() => { try { localStorage.setItem(BASKET_KEY, JSON.stringify(basket)); } catch { /* ignore */ } }, [basket]);
 

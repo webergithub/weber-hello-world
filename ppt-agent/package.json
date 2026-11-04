@@ -1,7 +1,7 @@
 {
   "name": "ppt-agent",
   "productName": "PPT智能体",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "description": "PPT 智能解析、归档、搜索与编排工具（Electron）",
   "author": "weber",
   "license": "MIT",
@@ -52,6 +52,9 @@
       "!node_modules/pdfjs-dist/build/*.min.mjs",
       "!node_modules/pdfjs-dist/build/*sandbox*",
       "!node_modules/@napi-rs/**"
+    ],
+    "extraResources": [
+      { "from": "plugins", "to": "plugins" }
     ],
     "asarUnpack": [
       "node_modules/jieba-wasm/pkg/nodejs/**"

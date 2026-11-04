@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useApp } from '../ctx';
 import KeymapEditor from './KeymapEditor';
 import WatchSettings from './WatchSettings';
+import PluginSettings from './PluginSettings';
 import { LANG_NAMES } from './Panels';
 
 const LLM_PRESETS = [
@@ -19,7 +20,7 @@ const LLM_PRESETS = [
 ];
 
 const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
-const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
 
 export default function SettingsView({ focus }) {
@@ -29,6 +30,7 @@ export default function SettingsView({ focus }) {
   const agentRef = useRef(null);
   const mailRef = useRef(null);
   const langRef = useRef(null);
+  const pluginRef = useRef(null);
   const [mailBusy, setMailBusy] = useState(false);
   const [fbSt, setFbSt] = useState(null);
   useEffect(() => { api.feedbackStatus().then(setFbSt).catch(() => {}); }, []);
@@ -44,7 +46,7 @@ export default function SettingsView({ focus }) {
   const [tab, setTab] = useState(() => FOCUS_TAB[focus] || LAST_TAB.k || 'general');
   const pickTab = (k) => { LAST_TAB.k = k; setTab(k); };
   useEffect(() => { if (FOCUS_TAB[focus]) pickTab(FOCUS_TAB[focus]); }, [focus]);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'langs' ? langRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'langs' ? langRef : focus === 'plugin' ? pluginRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
   if (!cfg) return null;
   const offline = !!cfg.offlineOnly;
   const set = (patch) => setCfg({ ...cfg, ...patch });
@@ -95,6 +97,10 @@ export default function SettingsView({ focus }) {
             onChange={(e) => set({ split: { ...(cfg.split || {}), size: Math.max(100, Math.min(20000, Number(e.target.value) || 1000)) } })} /> <span className="muted">个文件</span></div>
           <div className="row"><label>同时执行的子任务</label><input className="input split-par" type="number" min="1" max="8" step="1" value={(cfg.split || {}).parallel || 3} disabled={(cfg.split || {}).enabled === false}
             onChange={(e) => set({ split: { ...(cfg.split || {}), parallel: Math.max(1, Math.min(8, Number(e.target.value) || 3)) } })} /> <span className="muted">个</span></div>
+        </section>
+        <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
+          <h3>插件：智能总结脚本</h3>
+          <PluginSettings />
         </section>
         <section>
           <h3>页面截图（PPT 原始页预览）</h3>

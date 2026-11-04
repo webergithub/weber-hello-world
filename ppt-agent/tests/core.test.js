@@ -492,7 +492,7 @@ test('插件·智能总结：单机版不可用；工作线程异步生成 Markd
   // 单机版（不联网）：插件不可用，给出原因
   delete process.env.PPTA_FAKE_LLM;
   assert.strictEqual(svc.summary.state().available.ok, false);
-  assert.throws(() => svc.summaryStart({ all: true }), /单机版/);
+  assert.throws(() => svc.summaryStart({ all: true }), /设置/);
   // 测试替身：在工作线程中执行，主线程只排队与保存
   process.env.PPTA_FAKE_LLM = '1';
   const updates = [];
@@ -512,6 +512,73 @@ test('插件·智能总结：单机版不可用；工作线程异步生成 Markd
   const q = await svc.searchQuery('航班过站', { record: false, useLlm: false });
   assert.ok(q.summaries.length >= 1 && q.summaries[0].snippet.length > 0, '总结内容可被检索');
   delete process.env.PPTA_FAKE_LLM;
+  svc.close();
+});
+
+test('插件·智能总结脚本：检查后生效；解析完成自动异步总结并入库；失败只通知、连续失败自动暂停，不影响解析；手动暂停立即停止', async () => {
+  const { AgentService } = require('../electron/core/service');
+  delete process.env.PPTA_FAKE_LLM;
+  const svc = new AgentService(path.join(tmp, 'datascript'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const notices = [];
+  svc.summary.on('notice', (n) => notices.push(n));
+  // 未设置脚本：不可用，给出去设置的提示
+  assert.strictEqual(svc.summary.available().ok, false);
+  assert.ok(/设置/.test(svc.summary.available().reason));
+  // 不存在的脚本：检查不通过，不能生效
+  const bad0 = await svc.pluginEnable(true, { script: path.join(tmp, '不存在.js') });
+  assert.strictEqual(bad0.enabled, false);
+  assert.strictEqual(svc.getConfig().plugins.summary.enabled, false);
+  // 示例脚本：检查通过 → 生效
+  const example = svc.pluginExample();
+  assert.ok(fs.existsSync(example));
+  const ok = await svc.pluginEnable(true, { script: example, auto: true });
+  assert.ok(ok.ok && ok.enabled, ok.error);
+  assert.ok(svc.summary.available().ok && svc.summary.available().engine === 'script');
+  // 解析任务：每解析完一个文档自动加入总结队列，脚本在子进程中执行
+  const id = svc.addTask(P('机场运营'));
+  const parsed = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await parsed;
+  const nParsed = svc.store.getTask(id).parsed;
+  for (let i = 0; i < 100; i++) { const st = svc.summary.state(); if (!st.counts.queued && !st.counts.running) break; await new Promise((r) => setTimeout(r, 200)); }
+  const list = svc.summary.list();
+  assert.strictEqual(list.length, nParsed, '每个解析出的文档都有总结');
+  assert.ok(list.every((x) => fs.readFileSync(x.md_path, 'utf8').includes('## 核心要点')));
+  const q = await svc.searchQuery('航班过站', { record: false, useLlm: false });
+  assert.ok(q.summaries.length >= 1, '总结内容可被检索');
+  // 失败的脚本：只通知，连续 3 次失败自动暂停；解析任务照常完成
+  const failJs = path.join(tmp, 'fail-summary.js');
+  fs.writeFileSync(failJs, "console.error('模型接口不可用'); process.exit(3);");
+  svc.setConfig({ plugins: { summary: { script: failJs, enabled: true } } });
+  const id2 = svc.addTask(P('技术方案'));
+  const parsed2 = new Promise((res) => { const h = (t) => { if (t.id === id2 && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id2);
+  await parsed2;
+  assert.strictEqual(svc.store.getTask(id2).status, 'done', '脚本失败不影响解析任务');
+  svc.summaryStart({ taskIds: [id2], force: true });
+  for (let i = 0; i < 100 && !svc.summary.paused; i++) await new Promise((r) => setTimeout(r, 100));
+  assert.ok(svc.summary.paused, '连续失败后自动暂停');
+  assert.ok(notices.some((n) => /失败/.test(n.msg) && /退出码 3/.test(n.msg)), '失败原因写进通知');
+  assert.ok(notices.some((n) => /自动暂停/.test(n.msg)));
+  // 手动暂停：正在运行的脚本立即结束，文档放回队列；继续后完成
+  const slowJs = path.join(tmp, 'slow-summary.js');
+  fs.writeFileSync(slowJs, "const fs=require('fs');setTimeout(()=>{fs.writeFileSync(process.argv[3],'# 慢 · 总结 ## 核心要点');},1500);");
+  svc.setConfig({ plugins: { summary: { script: slowJs, enabled: true } } });
+  svc.summary.cancel(); svc.summary.clearFinished();
+  svc.summaryStart({ taskIds: [id2], force: true });
+  for (let i = 0; i < 50 && !svc.summary.state().counts.running; i++) await new Promise((r) => setTimeout(r, 50));
+  svc.summary.pause();
+  await new Promise((r) => setTimeout(r, 300));
+  let st = svc.summary.state();
+  assert.strictEqual(st.counts.running, 0, '暂停后没有正在运行的脚本');
+  assert.ok(st.counts.queued >= 1 && st.counts.failed === 0, '被打断的文档放回队列，不算失败');
+  svc.summary.resume();
+  for (let i = 0; i < 100; i++) { st = svc.summary.state(); if (!st.counts.queued && !st.counts.running) break; await new Promise((r) => setTimeout(r, 200)); }
+  assert.ok(st.counts.done >= 1 && st.counts.failed === 0, JSON.stringify(st.counts) + ' ' + st.jobs.filter((j) => j.error).map((j) => j.error).slice(0, 2).join(' | '));
+  // 失效：不再自动总结
+  await svc.pluginEnable(false);
+  assert.strictEqual(svc.summary.available().ok, false);
   svc.close();
 });
 

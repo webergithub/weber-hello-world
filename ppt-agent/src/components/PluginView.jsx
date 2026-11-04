@@ -68,13 +68,14 @@ export default function PluginView() {
   return (
     <div className="view plugin-view">
       <div className="view-head">
-        <div className="vh-title">🧠 智能总结 <span className="tag accent">插件</span>{ok ? <span className="tag ok">{st.available.model}</span> : <span className="tag warn">不可用</span>}</div>
+        <div className="vh-title">🧠 智能总结 <span className="tag accent">插件</span>{ok ? <span className="tag ok">{st.available.model}</span> : <span className="tag warn">不可用</span>}{ok && st.script.enabled && st.script.auto ? <span className="tag">自动总结新解析的文档</span> : null}</div>
         <div className="spacer" />
         {st.paused ? <button className="btn" disabled={!total} onClick={() => api.summaryResume()}>▶ 继续</button> : <button className="btn" disabled={!c.queued && !c.running} onClick={() => api.summaryPause()}>⏸ 暂停</button>}
         <button className="btn" disabled={!c.queued} onClick={() => api.summaryCancel()}>取消排队</button>
         <button className="btn ghost" disabled={!finished && !c.cancelled} onClick={() => api.summaryClear()}>清除已结束</button>
       </div>
-      {!ok && <div className="notice warn">{st.available.reason} <button className="btn small" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>⚙ 去设置</button></div>}
+      {!ok && <div className="notice warn">{st.available.reason} <button className="btn small" onClick={() => app.go({ type: 'settings', focus: 'plugin' })}>⚙ 去设置</button></div>}
+      {ok && st.paused && <div className="notice warn">已暂停 <button className="btn small primary" onClick={() => api.summaryResume()}>▶ 继续</button></div>}
       <div className="plugin-bar">
         <div className="seg">
           <button className={scope === 'all' ? 'on' : ''} onClick={() => setScope('all')}>全部已解析文档</button>
