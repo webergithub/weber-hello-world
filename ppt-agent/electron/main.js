@@ -125,7 +125,7 @@ async function confirmQuit(skipAsk = false) {
     const r = await dialog.showMessageBox(win, { type: 'warning', title: '退出', message: '有解析任务正在运行，确定退出？', detail: '退出后任务会中断，下次启动可点击“继续”从断点继续。', buttons: ['退出', '取消'], defaultId: 1, cancelId: 1, noLink: true });
     if (r.response !== 0) return;
   }
-  if (service.running) { service.pauseTask(service.running); logger.child('app').info('退出前中断正在运行的任务（可继续）'); }
+  if (service.running) { for (const id of [...service.runningSet]) service.pauseTask(id); logger.child('app').info('退出前中断正在运行的任务（可继续）'); }
   quitting = true;
   if (tray) { tray.destroy(); tray = null; }
   app.quit();

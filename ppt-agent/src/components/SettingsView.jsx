@@ -93,6 +93,8 @@ export default function SettingsView({ focus }) {
           <div className="row"><label className="chk"><input type="checkbox" checked={(cfg.split || {}).enabled !== false} onChange={(e) => set({ split: { ...(cfg.split || {}), enabled: e.target.checked } })} /> 扫描到的文件超过上限时，按盘符 / 文件夹拆分为多个子任务依次执行</label></div>
           <div className="row"><label>每个子任务最多</label><input className="input split-size" type="number" min="100" max="20000" step="100" value={(cfg.split || {}).size || 1000} disabled={(cfg.split || {}).enabled === false}
             onChange={(e) => set({ split: { ...(cfg.split || {}), size: Math.max(100, Math.min(20000, Number(e.target.value) || 1000)) } })} /> <span className="muted">个文件</span></div>
+          <div className="row"><label>同时执行的子任务</label><input className="input split-par" type="number" min="1" max="8" step="1" value={(cfg.split || {}).parallel || 3} disabled={(cfg.split || {}).enabled === false}
+            onChange={(e) => set({ split: { ...(cfg.split || {}), parallel: Math.max(1, Math.min(8, Number(e.target.value) || 3)) } })} /> <span className="muted">个</span></div>
         </section>
         <section>
           <h3>页面截图（PPT 原始页预览）</h3>

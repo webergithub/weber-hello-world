@@ -233,7 +233,8 @@ function HistoryPanel({ taskId }) {
   useEffect(() => { api.history({ action: action || undefined, q: q || undefined, limit: 5000, taskId }).then(setRows); }, [action, q, app.taskTick, taskId]);
   // 正在解析的文件：来自实时进度，作为“解析中”记录显示在历史中
   const STAGE = { file: '读取文件', parse: '解析中', slide: '逐页解析', thumb: '生成页面截图', store: '写入数据库', parsed: '解析完成', tag: '计算标签', scanning: '扫描目录' };
-  const live = useMemo(() => app.tasks.filter((t) => isActive(t) && (!taskId || t.id === taskId)).map((t) => {
+  // 正在执行的任务（已拆分的总任务改为列出每个正在执行的子任务，子任务可并行）
+  const live = useMemo(() => app.allTasks.filter((t) => isActive(t) && !app.allTasks.some((c) => c.parent_id === t.id) && (!taskId || t.id === taskId || t.parent_id === taskId)).map((t) => {
     const p = app.progress[t.id] || {};
     const lt = app.liveTasks[t.id] || {};
     const file = p.file || (lt.current && /[\\/]/.test(lt.current) && !lt.current.startsWith('扫描中') ? lt.current : '');
@@ -241,7 +242,7 @@ function HistoryPanel({ taskId }) {
     const unit = p.unit || '页';
     return { hid: `live-${t.id}`, live: true, task_id: t.id, task_name: t.name, action: 'running', path: file, at: Date.now(), name: file.split(/[\\/]/).pop(),
       message: `第 ${p.index || (lt.done || 0) + 1}/${p.total || t.total || '?'} 个文件${p.slideTotal ? ` · 第 ${p.slide}/${p.slideTotal} ${unit}` : ''} · ${STAGE[p.stage] || '解析中'}` };
-  }).filter((r) => r && (!action || action === 'running') && (!q || r.path.includes(q))), [app.tasks, app.progress, app.liveTasks, action, q, taskId]);
+  }).filter((r) => r && (!action || action === 'running') && (!q || r.path.includes(q))), [app.allTasks, app.progress, app.liveTasks, action, q, taskId]);
   const all = useMemo(() => (action === 'running' ? live : [...live, ...rows]), [live, rows, action]);
   const [follow, setFollow] = useState(true);
   const locate = () => { const el = document.querySelector('.files-stats .row-live'); if (el) el.scrollIntoView({ block: 'center', behavior: 'smooth' }); return !!el; };

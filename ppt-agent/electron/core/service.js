@@ -80,7 +80,8 @@ const DEFAULT_CONFIG = {
   // 反馈邮件的发件邮箱（用户自行配置，应用不内置账号）；secure：true 为 SSL（465），false 为 STARTTLS（587 / 25）
   mail: { host: '', port: 465, secure: true, user: '', pass: '', from: '' },
   // 大任务拆分（v3.5）：扫描到的文件超过 size 个时，按盘符 / 文件夹拆为多个子任务，每个子任务不超过 size 个文件
-  split: { enabled: true, size: 1000 },
+  // parallel：同时执行的子任务数（解析页面并行；PowerPoint / LibreOffice 截图与旧格式转换仍逐个进行）
+  split: { enabled: true, size: 1000, parallel: 3 },
 };
 // 反馈接收地址只在主进程中使用，不传给界面
 const FEEDBACK_TO = 'weber.liuweibo@huawei.com';
@@ -102,7 +103,8 @@ class AgentService extends EventEmitter {
     this.office = new Office(logger.child('office'));
     this.search = new SearchEngine(this.store, () => this.config, logger.child('search'));
     this.queue = [];
-    this.running = null;
+    this.runningSet = new Set(); // 正在执行的任务（子任务可并行，见 config.split.parallel）
+    this.inflightFp = new Map(); // 正在完整解析的文件指纹 → Promise（并行时避免同一文件重复解析）
     this.cancelled = new Set();
     this.groupsCache = null;
     // 上次异常退出时未完成的任务标记为中断
@@ -112,6 +114,7 @@ class AgentService extends EventEmitter {
     this.resumeFlags = new Map();
     this.incrementalRuns = new Map();
     this.pausing = new Set();
+    this.leadSub = new Map(); // 总任务 → 解析动态跟随的子任务
     this.parentWatch = new Map(); // 总任务的增量扫描：子任务全部完成后汇总新增 / 更新 / 移除
     this.summary = new SummaryPlugin(this); // 插件：智能总结（工作线程调用大模型）
     for (const t of this.store.listTasks()) if (!t.parent_id && this.store.children(t.id).length) this.refreshParent(t.id, { quiet: true });
@@ -272,7 +275,7 @@ class AgentService extends EventEmitter {
   startTask(id, { resume = false, incremental = false, reason = '' } = {}) {
     const t = this.store.getTask(id);
     if (!t) throw new Error('任务不存在');
-    if (this.running === id || this.queue.includes(id)) return id;
+    if (this.runningSet.has(id) || this.queue.includes(id)) return id;
     const kids = t.parent_id ? [] : this.store.children(id);
     if (kids.length) {
       // 已拆分的总任务：“继续”= 依次继续所有未完成的子任务；“重新扫描 / 增量扫描”= 重新扫描后重新拆分
@@ -293,7 +296,9 @@ class AgentService extends EventEmitter {
 
   rerunTask(id) { return this.startTask(id); }
 
-  isTaskActive(id) { return this.running === id || this.queue.includes(id); }
+  isTaskActive(id) { return this.runningSet.has(id) || this.queue.includes(id); }
+  /** 第一个正在执行的任务（托盘、退出提示等只需要知道“有没有任务在跑”） */
+  get running() { for (const id of this.runningSet) return id; return null; }
 
   /** 总任务“继续”：按顺序把未完成的子任务加入队列（已暂停 / 中断的从断点继续） */
   resumeChildren(pid) {
@@ -311,10 +316,10 @@ class AgentService extends EventEmitter {
     const sum = { total: 0, parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
     for (const c of kids) for (const k of Object.keys(sum)) sum[k] += c[k] || 0;
     const st = (s) => kids.some((c) => c.status === s);
-    const running = (c) => this.running === c.id;
+    const running = (c) => this.runningSet.has(c.id);
     const done = kids.filter((c) => c.status === 'done').length;
     let status;
-    if (this.running === pid) status = 'running';
+    if (this.runningSet.has(pid)) status = 'running';
     else if (st('pausing')) status = 'pausing';
     else if (kids.some(running) || st('running')) status = 'running';
     else if (kids.some((c) => this.queue.includes(c.id)) || st('pending')) status = 'pending';
@@ -329,7 +334,7 @@ class AgentService extends EventEmitter {
     // 总任务从“执行中”变为结束 / 暂停时记录结束时间（界面据此提示一次并刷新统计）
     const activeS = ['running', 'pending', 'pausing'];
     if (!activeS.includes(status) && (activeS.includes(prev.status) || (status === 'done' && prev.status !== 'done'))) patch.finished_at = Date.now();
-    if (this.running !== pid) this.store.updateTask(pid, patch);
+    if (!this.runningSet.has(pid)) this.store.updateTask(pid, patch);
     // 增量扫描的总任务：子任务全部结束后汇总一次
     const w = this.parentWatch.get(pid);
     if (w && !['running', 'pending', 'pausing'].includes(status)) {
@@ -348,7 +353,7 @@ class AgentService extends EventEmitter {
   /** 中断正在运行或排队的任务（可继续） */
   pauseTask(id) {
     const kids = this.store.children(id);
-    if (kids.length && this.running !== id) {
+    if (kids.length && !this.runningSet.has(id)) {
       // 总任务：暂停所有正在执行 / 排队的子任务
       for (const c of kids) if (this.isTaskActive(c.id) || c.status === 'pending') this.pauseTask(c.id);
       this.log.info(`[任务#${id}] 请求暂停总任务（全部子任务）`);
@@ -359,7 +364,7 @@ class AgentService extends EventEmitter {
     this.cancelled.add(id);
     const i = this.queue.indexOf(id);
     if (i >= 0) { this.queue.splice(i, 1); this.store.updateTask(id, { status: 'paused', message: '已暂停，可点击“继续”' }); this.emitTask(id); }
-    else if (this.running === id) {
+    else if (this.runningSet.has(id)) {
       // 状态统一写入数据库，界面各处显示同一个“暂停中…”，直到当前文件停下
       this.store.updateTask(id, { status: 'pausing', message: '正在暂停…（当前文件会在下次继续时重新解析）' });
       this.emitTask(id);
@@ -383,13 +388,16 @@ class AgentService extends EventEmitter {
     return this.queue;
   }
 
-  queueState() { return { running: this.running, queue: [...this.queue] }; }
+  queueState() { return { running: this.running, runningAll: [...this.runningSet], queue: [...this.queue] }; }
 
   emitProgress(taskId, data) {
     this.emit('progress', { taskId, at: Date.now(), ...data });
     // 子任务的解析动态同时推给总任务（总任务的“解析动态”显示正在执行的子任务）
     const pid = this.parentOf(taskId);
-    if (pid) {
+    // 多个子任务并行时，总任务的解析动态只跟随其中一个（最早开始的那个），其余子任务的开始 / 结束只记一行
+    let lead = pid && this.leadSub.get(pid);
+    if (pid && (!lead || !this.runningSet.has(lead))) { lead = taskId; this.leadSub.set(pid, lead); }
+    if (pid && (lead === taskId || data.stage === 'done')) {
       const stage = data.stage === 'scanned' ? 'subscanned' : data.stage === 'done' ? 'subdone' : data.stage;
       this.emit('progress', { taskId: pid, at: Date.now(), ...data, stage, sub: taskId, subLabel: this.partLabel(taskId) });
     }
@@ -403,7 +411,7 @@ class AgentService extends EventEmitter {
 
   cancelTask(id) {
     const kids = this.store.children(id);
-    if (kids.length && this.running !== id) {
+    if (kids.length && !this.runningSet.has(id)) {
       for (const c of kids) if (this.isTaskActive(c.id) || c.status === 'pending') this.cancelTask(c.id);
       this.refreshParent(id);
       return;
@@ -416,7 +424,7 @@ class AgentService extends EventEmitter {
 
   deleteTask(id, removeFiles = false) {
     const fam = this.store.familyIds(id);
-    if (fam.some((x) => this.running === x)) throw new Error('任务正在运行，请先取消');
+    if (fam.some((x) => this.runningSet.has(x))) throw new Error('任务正在运行，请先取消');
     if (removeFiles) {
       for (const f of this.store.taskFiles(id)) if (f.id && fam.includes(f.task_id)) this.store.deleteFile(f.id);
       this.afterLibraryChange();
@@ -459,28 +467,49 @@ class AgentService extends EventEmitter {
     return { deleted: done, skipped };
   }
 
+  /**
+   * 调度：按队列顺序启动任务。普通任务 / 总任务独占执行；子任务可并行，最多 config.split.parallel 个，
+   * 其中一个结束后自动启动队列中的下一个子任务。
+   */
   async pump() {
-    if (this.running || !this.queue.length) return;
-    const id = this.queue.shift();
-    this.running = id;
-    // 后台重算还在进行时先等它完成，避免两次全库计算交叉
-    if (this.refreshing) await this.refreshing.catch(() => {});
-    try { await this.runTask(id); } catch (e) {
+    if (this.pumping) return;
+    this.pumping = true;
+    try {
+      while (this.queue.length) {
+        const head = this.queue[0];
+        if (this.runningSet.size) {
+          const limit = Math.max(1, Math.min(16, Number((this.config.split || {}).parallel) || 1));
+          const allSub = [...this.runningSet].every((x) => this.parentOf(x));
+          if (!this.parentOf(head) || !allSub || this.runningSet.size >= limit) break;
+        } else if (this.refreshing) {
+          // 后台重算还在进行时先等它完成，避免两次全库计算交叉
+          await this.refreshing.catch(() => {});
+          continue;
+        }
+        this.queue.shift();
+        this.runOne(head);
+      }
+    } finally { this.pumping = false; }
+  }
+
+  runOne(id) {
+    this.runningSet.add(id);
+    this.runTask(id).catch((e) => {
       this.log.error(`[任务#${id}] 任务异常终止`, e);
       this.store.updateTask(id, { status: 'failed', finished_at: Date.now(), message: e.message });
-    } finally {
-      this.running = null;
+    }).finally(() => {
+      this.runningSet.delete(id);
       this.emitTask(id);
       setImmediate(() => this.pump());
       if (this.libraryDirty) this.kickLibraryRefresh();
-    }
+    });
   }
 
   /** 暂停后在空闲时补算标签 / 分组 / 关联（分片执行，不阻塞界面）；有任务在跑就等它结束 */
   kickLibraryRefresh(delay = 3000) {
     clearTimeout(this.refreshTimer);
     this.refreshTimer = setTimeout(() => {
-      if (!this.libraryDirty || this.running || this.queue.length || this.refreshing) return;
+      if (!this.libraryDirty || this.runningSet.size || this.queue.length || this.refreshing) return;
       this.libraryDirty = false;
       this.log.info('[资料库] 空闲时补算标签、相似分组与页面关联');
       this.refreshing = this.afterLibraryChange(this.log, '[资料库]').then(() => this.emit('library', { at: Date.now() }))
@@ -555,7 +584,7 @@ class AgentService extends EventEmitter {
   // 任务状态事件只带轻量字段（不含 scan_list），并附上队列信息，界面各处用同一份数据
   emitTask(id, extra = {}) {
     const t = this.store.getTaskLite(id) || { id };
-    this.emit('task', { ...t, running: this.running === id, queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, ...extra });
+    this.emit('task', { ...t, running: this.runningSet.has(id), queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, ...extra });
     // 子任务变化时同步刷新总任务（数量合计与统一状态）
     if (t.parent_id && !extra.noParent) this.refreshParent(t.parent_id);
   }
@@ -694,7 +723,7 @@ class AgentService extends EventEmitter {
     // 资料库变化记下来，空闲时在后台分片重算
     const stopping = this.cancelled.has(id);
     // 子任务：只有总任务的最后一个子任务结束时才全库重算，其余记下待算（避免每个子任务都重算一遍全库）
-    const morePartsQueued = task.parent_id && this.store.children(task.parent_id).some((c) => c.id !== id && this.queue.includes(c.id));
+    const morePartsQueued = task.parent_id && this.store.children(task.parent_id).some((c) => c.id !== id && this.isTaskActive(c.id));
     if (changed && !stopping && morePartsQueued) this.libraryDirty = true;
     else if ((changed || (task.parent_id && this.libraryDirty)) && !stopping) {
       this.libraryDirty = false;
@@ -732,9 +761,9 @@ class AgentService extends EventEmitter {
     this.emitProgress(id, { stage: 'split', parts: groups.length, size, total: files.length });
     this.store.updateTask(id, { status: 'pending' });
     for (const cid of ids) this.emitTask(cid, { noParent: true });
-    this.running = null; // 让总任务的汇总状态按子任务计算
+    this.runningSet.delete(id); // 让总任务的汇总状态按子任务计算
     this.refreshParent(id);
-    this.running = id;
+    this.runningSet.add(id);
   }
 
   fingerprint(name, size, mtime, author) {
@@ -776,6 +805,8 @@ class AgentService extends EventEmitter {
       log.info(`${tag} 已解析过，跳过：${file}`);
       return 'skipped';
     }
+    // 并行子任务：同一指纹的文件正在被另一个子任务解析时，等它完成后再判断是否为重复文件
+    while (!force && this.inflightFp.has(fp)) await this.inflightFp.get(fp);
     const same = this.store.fileByFingerprint(fp);
     if (!force && same && same.path !== file && fs.existsSync(same.path)) {
       const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, title, fingerprint: fp,
@@ -785,123 +816,130 @@ class AgentService extends EventEmitter {
       log.info(`${tag} 与已解析文件一致，不重复解析：${file} == ${same.path}`);
       return 'duplicate';
     }
-    // 完整解析
-    const t0 = Date.now();
-    let src = file;
-    if (LEGACY.has(ext)) {
-      log.info(`${tag} 旧版格式，转换为 ${kind === 'word' ? 'DOCX' : 'PPTX'}：${file}`);
-      const out = path.join(this.cacheDir, 'converted', crypto.createHash('sha1').update(file).digest('hex').slice(0, 12));
+    let releaseFp;
+    this.inflightFp.set(fp, new Promise((r) => { releaseFp = r; }));
+    try {
+      // 完整解析
+      const t0 = Date.now();
+      let src = file;
+      if (LEGACY.has(ext)) {
+        log.info(`${tag} 旧版格式，转换为 ${kind === 'word' ? 'DOCX' : 'PPTX'}：${file}`);
+        const out = path.join(this.cacheDir, 'converted', crypto.createHash('sha1').update(file).digest('hex').slice(0, 12));
+        try {
+          src = kind === 'word' ? await this.office.convertDoc(file, out) : await this.office.convertPpt(file, out);
+        } catch (e) {
+          const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, kind, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
+          this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
+          log.warn(`${tag} 旧版格式转换失败：${file}（${e.message}）`);
+          return 'failed';
+        }
+      }
+      // 截图 / 图片缓存按“路径 + 大小 + 修改时间”区分版本：文件修改或重新生成后不会显示旧截图
+      const mediaKey = crypto.createHash('sha1').update(`${file}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 16);
+      if (!this.mediaSrc) this.mediaSrc = new Map();
+      this.mediaSrc.set(mediaKey, src); // 解析动态中即可显示页面图片（从原文件读取）
+      // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
+      // PDF 不生成截图：界面直接用 pdf.js 只读渲染原文件的页面（ppta://src/<文件 id>）
+      let preview = kind === 'pdf' ? { engine: 'pdf', src: true } : null;
+      if (kind === 'ppt' && this.config.thumbnails !== 'off') {
+        try {
+          checkPause();
+          this.emitProgress(taskId, { stage: 'thumb', file });
+          preview = await this.office.thumbnails(src, path.join(this.thumbDir, mediaKey), mediaKey, this.config.thumbnails, this.config.thumbWidth);
+          if (preview) log.info(`${tag} 页面截图(${preview.engine})：${preview.images ? preview.images.length + ' 页' : 'PDF'} ${name}`);
+        } catch (e) { if (e && e.paused) throw e; log.warn(`${tag} 生成截图失败 ${name}`, e); }
+      }
+      const thumbOf = (i) => (preview && preview.images && preview.images[i - 1]) || null;
+      // 逐页进度：附带真实截图、页面版式、文字、讲解词与生成的 Markdown，用于“解析动态”实时展示
+      const onSlide = (i, n, t, sl) => checkPause() || this.emitProgress(taskId, {
+        stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit, kind,
+        detail: sl ? { theme: sl.theme, bg: sl.bg, layout: sl.layout || null, thumb: thumbOf(i), text: String(sl.text || '').slice(0, 2000), notes: String(sl.notes || '').slice(0, 800), md: slideToMd(sl, kind).slice(0, 6000), media: (sl.media || []).map((m) => ({ type: m.type, name: m.name, subtitles: (m.subtitles || []).length })) } : null,
+      });
+      this.emitProgress(taskId, { stage: 'parse', file, kind });
+      let parsed;
       try {
-        src = kind === 'word' ? await this.office.convertDoc(file, out) : await this.office.convertPpt(file, out);
+        parsed = kind === 'word' ? await parseDocx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide })
+          : kind === 'pdf' ? await parsePdf(src, { mediaKey, log, onSlide })
+          : await parsePptx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide, ffmpeg: engines.ffmpeg ? this.office.ffmpegExtractor(this.cacheDir) : null });
       } catch (e) {
-        const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, kind, size: st.size, mtime: Math.round(st.mtimeMs), status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
+        if (e && e.paused) throw e;
+        const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, kind, fingerprint: null, status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
         this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
-        log.warn(`${tag} 旧版格式转换失败：${file}（${e.message}）`);
+        log.warn(`${tag} 解析失败：${file}（${e.message}）`);
         return 'failed';
       }
-    }
-    // 截图 / 图片缓存按“路径 + 大小 + 修改时间”区分版本：文件修改或重新生成后不会显示旧截图
-    const mediaKey = crypto.createHash('sha1').update(`${file}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 16);
-    if (!this.mediaSrc) this.mediaSrc = new Map();
-    this.mediaSrc.set(mediaKey, src); // 解析动态中即可显示页面图片（从原文件读取）
-    // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
-    // PDF 不生成截图：界面直接用 pdf.js 只读渲染原文件的页面（ppta://src/<文件 id>）
-    let preview = kind === 'pdf' ? { engine: 'pdf', src: true } : null;
-    if (kind === 'ppt' && this.config.thumbnails !== 'off') {
-      try {
-        checkPause();
-        this.emitProgress(taskId, { stage: 'thumb', file });
-        preview = await this.office.thumbnails(src, path.join(this.thumbDir, mediaKey), mediaKey, this.config.thumbnails, this.config.thumbWidth);
-        if (preview) log.info(`${tag} 页面截图(${preview.engine})：${preview.images ? preview.images.length + ' 页' : 'PDF'} ${name}`);
-      } catch (e) { if (e && e.paused) throw e; log.warn(`${tag} 生成截图失败 ${name}`, e); }
-    }
-    const thumbOf = (i) => (preview && preview.images && preview.images[i - 1]) || null;
-    // 逐页进度：附带真实截图、页面版式、文字、讲解词与生成的 Markdown，用于“解析动态”实时展示
-    const onSlide = (i, n, t, sl) => checkPause() || this.emitProgress(taskId, {
-      stage: 'slide', file, slide: i, slideTotal: n, slideTitle: t, unit, kind,
-      detail: sl ? { theme: sl.theme, bg: sl.bg, layout: sl.layout || null, thumb: thumbOf(i), text: String(sl.text || '').slice(0, 2000), notes: String(sl.notes || '').slice(0, 800), md: slideToMd(sl, kind).slice(0, 6000), media: (sl.media || []).map((m) => ({ type: m.type, name: m.name, subtitles: (m.subtitles || []).length })) } : null,
-    });
-    this.emitProgress(taskId, { stage: 'parse', file, kind });
-    let parsed;
-    try {
-      parsed = kind === 'word' ? await parseDocx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide })
-        : kind === 'pdf' ? await parsePdf(src, { mediaKey, log, onSlide })
-        : await parsePptx(src, { mediaDir: this.mediaDir, mediaKey, log, onSlide, ffmpeg: engines.ffmpeg ? this.office.ffmpegExtractor(this.cacheDir) : null });
-    } catch (e) {
-      if (e && e.paused) throw e;
-      const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, kind, fingerprint: null, status: 'failed', error: e.message, task_id: taskId, parsed_at: Date.now() });
-      this.store.linkTaskFile(taskId, id, file, 'failed', e.message);
-      log.warn(`${tag} 解析失败：${file}（${e.message}）`);
-      return 'failed';
-    }
-    if (LEGACY.has(ext)) { author = parsed.props.author; title = parsed.props.title; }
-    const slides = parsed.slides;
+      if (LEGACY.has(ext)) { author = parsed.props.author; title = parsed.props.title; }
+      const slides = parsed.slides;
 
-    for (const s of slides) {
-      s.md = slideToMd(s, kind);
-      s.kw = slideKeywords(s);
-      s.vec = hashVector(`${s.title}\n${s.title}\n${s.text}\n${s.notes}`);
-      if (preview && preview.images && preview.images[s.index - 1]) {
-        s.thumb = preview.images[s.index - 1];
-        // 用真实渲染图的边缘亮度校正黑白底判断
-        try {
-          const lum = await borderLuminance(path.join(this.thumbDir, s.thumb));
-          if (lum !== null) { s.bg = { ...s.bg, renderLum: Math.round(lum * 1000) / 1000 }; s.theme = lum < 0.3 ? 'dark' : 'light'; }
-        } catch { /* ignore */ }
-      }
-    }
-    const dark = slides.filter((s) => s.theme === 'dark').length;
-    const allText = slides.map((s) => `${s.title}\n${s.text}\n${s.notes}`).join('\n');
-    const fileRow = {
-      path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), atime_pre: Math.round(st.atimeMs), ctime: Math.round(st.birthtimeMs || st.ctimeMs), author, title: title || (slides[0] && slides[0].title) || '',
-      fingerprint: fp, status: 'parsed', kind, error: null, dup_of: null, slide_count: slides.length,
-      theme: !slides.length ? 'light' : dark === 0 ? 'light' : dark === slides.length ? 'dark' : (dark / slides.length >= 0.6 ? 'dark' : dark / slides.length <= 0.4 ? 'light' : 'mixed'),
-      dark_slides: dark, light_slides: slides.length - dark,
-      video_count: slides.reduce((a, s) => a + s.media.filter((m) => m.type === 'video').length, 0),
-      notes_count: slides.filter((s) => s.notes).length,
-      lang: detectLang(allText), preview,
-      meta: { mediaKey, props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}${unit} ${e}`)).slice(0, 50) },
-      task_id: taskId, parsed_at: Date.now(),
-    };
-    const info = fileTerms(fileRow, slides);
-    fileRow.terms = info;
-    fileRow.vec = mean([...slides.map((s) => s.vec), hashVector(name.replace(/\.[^.]+$/, ''))]) || hashVector(name);
-    const metaTokens = tokenize(`${name} ${path.basename(path.dirname(file))}`).join(' ');
-    let fileId;
-    checkPause();
-    this.emitProgress(taskId, { stage: 'store', file, slides: slides.length });
-    // 旧版本的截图与图片缓存不再使用，清理掉
-    if (existing) {
-      const oldKey = (existing.meta && existing.meta.mediaKey) || crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
-      if (oldKey !== mediaKey) for (const d of [this.thumbDir, this.mediaDir]) { try { fs.rmSync(path.join(d, oldKey), { recursive: true, force: true }); } catch { /* ignore */ } }
-    }
-    this.store.tx(() => {
-      if (existing) this.store.deleteSlidesOf(existing.id);
-      fileId = this.store.upsertFile(fileRow);
       for (const s of slides) {
-        this.store.insertSlide(fileId, s, { title: tokenize(s.title).join(' '), body: tokenize(s.text).join(' '), notes: tokenize(s.notes).join(' '), meta: metaTokens });
+        s.md = slideToMd(s, kind);
+        s.kw = slideKeywords(s);
+        s.vec = hashVector(`${s.title}\n${s.title}\n${s.text}\n${s.notes}`);
+        if (preview && preview.images && preview.images[s.index - 1]) {
+          s.thumb = preview.images[s.index - 1];
+          // 用真实渲染图的边缘亮度校正黑白底判断
+          try {
+            const lum = await borderLuminance(path.join(this.thumbDir, s.thumb));
+            if (lum !== null) { s.bg = { ...s.bg, renderLum: Math.round(lum * 1000) / 1000 }; s.theme = lum < 0.3 ? 'dark' : 'light'; }
+          } catch { /* ignore */ }
+        }
       }
-    });
-    // Markdown 文件（按源目录结构镜像保存）
-    try {
-      const rel = file.replace(/^[a-zA-Z]:/, (m) => m[0]).replace(/^[\\/]+/, '');
-      const mdPath = path.join(this.mdDir, rel + '.md');
-      fs.mkdirSync(path.dirname(mdPath), { recursive: true });
-      fs.writeFileSync(mdPath, docToMd({ ...fileRow, tags: [] }, slides));
-      this.store.updateFile(fileId, { md_path: mdPath });
-    } catch (e) { log.warn(`${tag} 写入 Markdown 失败`, e); }
-    this.emitProgress(taskId, { stage: 'parsed', file, kind, slides: slides.length, unit, dark, notes: fileRow.notes_count, videos: fileRow.video_count, ms: Date.now() - t0, titles: slides.slice(0, 40).map((x) => x.title) });
-    if (kind === 'word') {
-      this.store.linkTaskFile(taskId, fileId, file, 'parsed', `Word：${slides.length} 节，${fileRow.notes_count} 节含批注，耗时 ${Date.now() - t0}ms`);
-      log.info(`${tag} 解析完成：${file}（Word，${slides.length} 节，${Date.now() - t0}ms）`);
-    } else if (kind === 'pdf') {
-      this.store.linkTaskFile(taskId, fileId, file, 'parsed', `PDF：${slides.length} 页，黑底 ${dark} 页，耗时 ${Date.now() - t0}ms`);
-      log.info(`${tag} 解析完成：${file}（PDF，${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，${Date.now() - t0}ms）`);
-    } else {
-      this.store.linkTaskFile(taskId, fileId, file, 'parsed', `${slides.length} 页，${fileRow.notes_count} 页含备注，${fileRow.video_count} 个视频，耗时 ${Date.now() - t0}ms`);
-      log.info(`${tag} 解析完成：${file}（${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，视频 ${fileRow.video_count}，${Date.now() - t0}ms）`);
+      const dark = slides.filter((s) => s.theme === 'dark').length;
+      const allText = slides.map((s) => `${s.title}\n${s.text}\n${s.notes}`).join('\n');
+      const fileRow = {
+        path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), atime_pre: Math.round(st.atimeMs), ctime: Math.round(st.birthtimeMs || st.ctimeMs), author, title: title || (slides[0] && slides[0].title) || '',
+        fingerprint: fp, status: 'parsed', kind, error: null, dup_of: null, slide_count: slides.length,
+        theme: !slides.length ? 'light' : dark === 0 ? 'light' : dark === slides.length ? 'dark' : (dark / slides.length >= 0.6 ? 'dark' : dark / slides.length <= 0.4 ? 'light' : 'mixed'),
+        dark_slides: dark, light_slides: slides.length - dark,
+        video_count: slides.reduce((a, s) => a + s.media.filter((m) => m.type === 'video').length, 0),
+        notes_count: slides.filter((s) => s.notes).length,
+        lang: detectLang(allText), preview,
+        meta: { mediaKey, props: parsed.props, slideSize: parsed.size, legacy: LEGACY.has(ext), convertedFrom: LEGACY.has(ext) ? src : undefined, errors: slides.flatMap((s) => (s.errors || []).map((e) => `第${s.index}${unit} ${e}`)).slice(0, 50) },
+        task_id: taskId, parsed_at: Date.now(),
+      };
+      const info = fileTerms(fileRow, slides);
+      fileRow.terms = info;
+      fileRow.vec = mean([...slides.map((s) => s.vec), hashVector(name.replace(/\.[^.]+$/, ''))]) || hashVector(name);
+      const metaTokens = tokenize(`${name} ${path.basename(path.dirname(file))}`).join(' ');
+      let fileId;
+      checkPause();
+      this.emitProgress(taskId, { stage: 'store', file, slides: slides.length });
+      // 旧版本的截图与图片缓存不再使用，清理掉
+      if (existing) {
+        const oldKey = (existing.meta && existing.meta.mediaKey) || crypto.createHash('sha1').update(file).digest('hex').slice(0, 16);
+        if (oldKey !== mediaKey) for (const d of [this.thumbDir, this.mediaDir]) { try { fs.rmSync(path.join(d, oldKey), { recursive: true, force: true }); } catch { /* ignore */ } }
+      }
+      this.store.tx(() => {
+        if (existing) this.store.deleteSlidesOf(existing.id);
+        fileId = this.store.upsertFile(fileRow);
+        for (const s of slides) {
+          this.store.insertSlide(fileId, s, { title: tokenize(s.title).join(' '), body: tokenize(s.text).join(' '), notes: tokenize(s.notes).join(' '), meta: metaTokens });
+        }
+      });
+      // Markdown 文件（按源目录结构镜像保存）
+      try {
+        const rel = file.replace(/^[a-zA-Z]:/, (m) => m[0]).replace(/^[\\/]+/, '');
+        const mdPath = path.join(this.mdDir, rel + '.md');
+        fs.mkdirSync(path.dirname(mdPath), { recursive: true });
+        fs.writeFileSync(mdPath, docToMd({ ...fileRow, tags: [] }, slides));
+        this.store.updateFile(fileId, { md_path: mdPath });
+      } catch (e) { log.warn(`${tag} 写入 Markdown 失败`, e); }
+      this.emitProgress(taskId, { stage: 'parsed', file, kind, slides: slides.length, unit, dark, notes: fileRow.notes_count, videos: fileRow.video_count, ms: Date.now() - t0, titles: slides.slice(0, 40).map((x) => x.title) });
+      if (kind === 'word') {
+        this.store.linkTaskFile(taskId, fileId, file, 'parsed', `Word：${slides.length} 节，${fileRow.notes_count} 节含批注，耗时 ${Date.now() - t0}ms`);
+        log.info(`${tag} 解析完成：${file}（Word，${slides.length} 节，${Date.now() - t0}ms）`);
+      } else if (kind === 'pdf') {
+        this.store.linkTaskFile(taskId, fileId, file, 'parsed', `PDF：${slides.length} 页，黑底 ${dark} 页，耗时 ${Date.now() - t0}ms`);
+        log.info(`${tag} 解析完成：${file}（PDF，${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，${Date.now() - t0}ms）`);
+      } else {
+        this.store.linkTaskFile(taskId, fileId, file, 'parsed', `${slides.length} 页，${fileRow.notes_count} 页含备注，${fileRow.video_count} 个视频，耗时 ${Date.now() - t0}ms`);
+        log.info(`${tag} 解析完成：${file}（${slides.length} 页，黑底 ${dark}/白底 ${slides.length - dark}，视频 ${fileRow.video_count}，${Date.now() - t0}ms）`);
+      }
+      return 'parsed';
+    } finally {
+      this.inflightFp.delete(fp);
+      releaseFp();
     }
-    return 'parsed';
   }
 
   /** 资料库变化后：重算标签/分类、相似分组、黑白底对应 */
@@ -1027,7 +1065,7 @@ class AgentService extends EventEmitter {
   }
 
   // ================= 查询接口 =================
-  tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.running === t.id, queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
+  tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.runningSet.has(t.id), queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
 
   /** 子任务的文件清单：拆分时分到的全部文件 + 每个文件最近一次的处理结果（未处理的为“待处理”） */
   subtaskFiles(id) {
@@ -1063,7 +1101,7 @@ class AgentService extends EventEmitter {
       const per = new Map(this.store.db.prepare(`SELECT file_id, SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (${parsedIds.join(',')}) GROUP BY file_id`).all().map((r) => [r.file_id, r]));
       for (const f of files) { const r = f.id && f.status === 'parsed' ? per.get(f.id) : null; f.hidden_count = r ? r.h || 0 : 0; f.subtitle_count = r ? r.s || 0 : 0; }
     }
-    return { task: { ...task, running: this.running === id }, files, stats: st };
+    return { task: { ...task, running: this.runningSet.has(id) }, files, stats: st };
   }
 
   /** 任务范围内的文件 id（含重复文件所指向的原文件，用于检索与关联） */

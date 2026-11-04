@@ -41,6 +41,17 @@ class Office {
   constructor(log) {
     this.log = log;
     this.detected = null;
+    this.chain = Promise.resolve();
+  }
+
+  /**
+   * 逐个执行：PowerPoint / Word 自动化与 LibreOffice 不能同时被多个子任务调用
+   * （一个调用结束时可能关闭另一个正在使用的 PowerPoint），并行解析时这些步骤排队执行。
+   */
+  serial(fn) {
+    const run = this.chain.then(fn, fn);
+    this.chain = run.catch(() => {});
+    return run;
   }
 
   async detect(force = false) {
@@ -60,7 +71,9 @@ class Office {
   }
 
   /** 旧版 .ppt → .pptx，返回转换后的路径（缓存目录） */
-  async convertPpt(src, outDir) {
+  convertPpt(src, outDir) { return this.serial(() => this._convertPpt(src, outDir)); }
+
+  async _convertPpt(src, outDir) {
     const d = await this.detect();
     fs.mkdirSync(outDir, { recursive: true });
     const dest = path.join(outDir, path.basename(src).replace(/\.(ppt|pps|pot)$/i, '') + '.pptx');
@@ -82,7 +95,9 @@ try { $p=$app.Presentations.Open($env:PPTA_SRC, -1, 0, 0); $p.SaveAs($env:PPTA_D
   }
 
   /** 旧版 .doc → .docx（Word COM 或 LibreOffice） */
-  async convertDoc(src, outDir) {
+  convertDoc(src, outDir) { return this.serial(() => this._convertDoc(src, outDir)); }
+
+  async _convertDoc(src, outDir) {
     const d = await this.detect();
     fs.mkdirSync(outDir, { recursive: true });
     const dest = path.join(outDir, path.basename(src).replace(/\.(doc|dot)$/i, '') + '.docx');
@@ -108,7 +123,9 @@ try { $doc=$app.Documents.Open($env:PPTA_SRC, $false, $true); $doc.SaveAs2($env:
    * 生成每页截图，返回 {engine, images:[相对路径...]} 或 {engine:'pdf', pdf}。
    * mode: 'auto' | 'powerpoint' | 'libreoffice' | 'off'
    */
-  async thumbnails(src, outDir, relBase, mode = 'auto', width = 1280) {
+  thumbnails(src, outDir, relBase, mode = 'auto', width = 1280) { return this.serial(() => this._thumbnails(src, outDir, relBase, mode, width)); }
+
+  async _thumbnails(src, outDir, relBase, mode = 'auto', width = 1280) {
     if (mode === 'off') return null;
     const d = await this.detect();
     fs.mkdirSync(outDir, { recursive: true });

@@ -1427,7 +1427,7 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 /* ---- v3.5 子任务 ---- */
 .subtasks .sub-prog { display: flex; align-items: center; gap: 6px; min-width: 120px; max-width: 200px; }
 .subtasks .sub-prog .progress { flex: 1; height: 6px; }
-.split-size { width: 110px; }
+.split-size, .split-par { width: 110px; }
 .danger-fg { color: var(--danger-fg); }
 
 /* ---- v3.5 插件 · 智能总结 ---- */

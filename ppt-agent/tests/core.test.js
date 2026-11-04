@@ -441,6 +441,46 @@ test('大任务拆分为子任务：按文件夹不超过上限；子任务单�
   svc.store.db.close();
 });
 
+test('子任务并行：同时执行不超过设置的数量，结束一个自动启动下一个；并行时相同文件仍识别为重复', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const lib = path.join(tmp, 'libpar');
+  const src = fs.readdirSync(P('机场运营')).filter((n) => n.endsWith('.pptx')).sort();
+  const t0 = new Date(2026, 0, 1);
+  for (const d of ['a1', 'a2', 'a3', 'a4', 'a5']) {
+    fs.mkdirSync(path.join(lib, d), { recursive: true });
+    for (let k = 0; k < 2; k++) fs.copyFileSync(P('机场运营', src[k]), path.join(lib, d, `${d}_${k}.pptx`));
+    // 每个文件夹里放一份同名、同大小、同修改时间的文件：只应完整解析一次，其余为重复文件
+    const same = path.join(lib, d, '同一份.pptx');
+    fs.copyFileSync(P('机场运营', src[2]), same);
+    fs.utimesSync(same, t0, t0);
+  }
+  const svc = new AgentService(path.join(tmp, 'datapar'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'], split: { enabled: true, size: 3, parallel: 3 } });
+  let maxRun = 0;
+  const seen = [];
+  svc.on('task', () => { maxRun = Math.max(maxRun, svc.runningSet.size); seen.push(svc.runningSet.size); });
+  const id = svc.addTask(lib);
+  const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  const kids = svc.store.children(id);
+  assert.strictEqual(kids.length, 5);
+  assert.ok(maxRun >= 2 && maxRun <= 3, '同时执行的子任务数: ' + maxRun);
+  assert.ok(kids.every((c) => c.status === 'done'));
+  const p = svc.store.getTask(id);
+  assert.strictEqual(p.total, 15);
+  assert.strictEqual(p.duplicate, 4, '5 份相同文件：1 份解析，4 份为重复');
+  assert.strictEqual(p.parsed, 11);
+  // 并行数 1：与以前一样逐个执行
+  svc.setConfig({ split: { parallel: 1 } });
+  maxRun = 0;
+  const done2 = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done' && t.finished_at) { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done2;
+  assert.strictEqual(maxRun, 1);
+  svc.close();
+});
+
 test('插件·智能总结：单机版不可用；工作线程异步生成 Markdown 总结，另存 .md 并入库，可被检索', async () => {
   const { AgentService } = require('../electron/core/service');
   const svc = new AgentService(path.join(tmp, 'datasum'));
