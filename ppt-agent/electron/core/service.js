@@ -594,7 +594,7 @@ class AgentService extends EventEmitter {
   // 任务状态事件只带轻量字段（不含 scan_list），并附上队列信息，界面各处用同一份数据
   emitTask(id, extra = {}) {
     const t = this.store.getTaskLite(id) || { id };
-    this.emit('task', { ...t, running: this.runningSet.has(id), queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, ...extra });
+    this.emit('task', { ...t, running: this.runningSet.has(id), queued: this.queue.includes(id), queuePos: this.queue.indexOf(id) + 1, eta: this.etaFor(t), ...extra });
     // 子任务变化时同步刷新总任务（数量合计与统一状态）
     if (t.parent_id && !extra.noParent) this.refreshParent(t.parent_id);
   }
@@ -1083,7 +1083,34 @@ class AgentService extends EventEmitter {
   }
 
   // ================= 查询接口 =================
-  tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.runningSet.has(t.id), queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1 })); }
+  tasks() { return this.store.listTasksLite().map((t) => ({ ...t, running: this.runningSet.has(t.id), queued: this.queue.includes(t.id), queuePos: this.queue.indexOf(t.id) + 1, eta: (this.etaLast && this.etaLast.get(t.id)) || null })); }
+
+  /**
+   * 预计剩余时间（v3.10）：按最近约 90 秒的处理速度（个文件 / 秒）估算剩余文件所需时间；
+   * 返回 { elapsed 本轮已用, remainingMs 预计剩余, totalMs 预计本轮总耗时, rate 个/秒, done, total }，数据不足时 remainingMs 为 null（界面显示“正在估算…”）。
+   * 总任务用汇总后的数量（多个子任务并行时就是合计速度）。不在执行中的任务不返回。
+   */
+  etaFor(t) {
+    if (!this.etaSamples) { this.etaSamples = new Map(); this.etaLast = new Map(); }
+    if (!t || !['running', 'pausing'].includes(t.status) || !t.total) { if (t) { this.etaSamples.delete(t.id); this.etaLast.delete(t.id); } return null; }
+    const now = Date.now();
+    const done = (t.parsed || 0) + (t.skipped || 0) + (t.duplicate || 0) + (t.failed || 0);
+    let s = this.etaSamples.get(t.id);
+    if (!s || s.total !== t.total || done < s.pts[s.pts.length - 1][1]) { s = { total: t.total, pts: [] }; this.etaSamples.set(t.id, s); }
+    const lastPt = s.pts[s.pts.length - 1];
+    if (!lastPt || now - lastPt[0] >= 500 || done !== lastPt[1]) s.pts.push([now, done]);
+    while (s.pts.length > 2 && now - s.pts[1][0] > 90000) s.pts.shift();
+    if (s.pts.length > 400) s.pts.splice(1, s.pts.length - 400);
+    const [t0, d0] = s.pts[0];
+    const dt = now - t0, dd = done - d0;
+    const rate = dt >= 5000 && dd > 0 ? dd / dt : 0; // 个 / 毫秒
+    const elapsed = t.started_at ? now - t.started_at : dt;
+    const left = Math.max(0, t.total - done);
+    const remainingMs = rate ? Math.round(left / rate) : left === 0 ? 0 : null;
+    const eta = { elapsed, remainingMs, totalMs: remainingMs === null ? null : elapsed + remainingMs, rate: rate ? Math.round(rate * 100000) / 100 : 0, done, total: t.total };
+    this.etaLast.set(t.id, eta);
+    return eta;
+  }
 
   /** 子任务的文件清单：拆分时分到的全部文件 + 每个文件最近一次的处理结果（未处理的为“待处理”） */
   subtaskFiles(id) {

@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react';
+import EtaLine from './Eta';
 import { api, STATUS_LABEL, isActive } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
@@ -47,6 +48,7 @@ export default function SubtaskPanel({ task }) {
     { key: 'duplicate', label: '重复', type: 'number', sort: (c) => c.duplicate || 0, render: (c) => num(c, 'duplicate', '重复文件', c.duplicate) },
     { key: 'failed', label: '失败', type: 'number', sort: (c) => c.failed || 0, render: (c) => num(c, 'failed', '失败', c.failed, 'danger-fg') },
     { key: 'pending', label: '待处理', type: 'number', sort: (c) => Math.max(0, (c.total || 0) - processed(c)), render: (c) => num(c, 'pending', '待处理', Math.max(0, (c.total || 0) - processed(c))) },
+    { key: 'eta', label: '预计剩余', className: 'nowrap small', nofilter: true, sort: (c) => (c.eta && c.eta.remainingMs) || 0, render: (c) => (isActive(c) && c.eta ? <EtaLine eta={c.eta} compact /> : '') },
     { key: 'dir', label: '目录', className: 'muted small ellipsis', render: (c) => <span title={c.dir}>{c.dir}</span> },
     { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (c) => <>{ops(c)}<button className="btn tiny ghost" title="在资源管理器中显示" onClick={() => api.showItem(c.dir)}>📂</button></> },
   ];

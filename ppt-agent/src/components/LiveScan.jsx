@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import EtaLine from './Eta';
 import { api, assetUrl, STATUS_LABEL, THEME_LABEL, isActive } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
@@ -84,6 +85,7 @@ export default function LiveScan({ taskId, onPick, lock = false }) {
         <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>
         <div className="ls-prog"><div className="progress big"><div style={{ width: `${t.status === 'done' ? 100 : filePct}%` }} /></div></div>
         <span className="small num-link" onClick={() => drillTask(app, t, '已处理文档')}>文件 {p.index || (t.status === 'done' ? t.total : 0)}/{t.total || p.total || '?'}</span>
+        {t.eta && <EtaLine eta={t.eta} />}
         {t.status === 'running' && <button className="btn small" onClick={() => api.pauseTask(t.id)}>⏸ 暂停</button>}
         {t.status === 'pausing' && <button className="btn small" disabled>⏸ 暂停中…</button>}
         {['paused', 'interrupted'].includes(t.status) && <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 继续</button>}

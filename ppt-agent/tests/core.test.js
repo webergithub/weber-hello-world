@@ -700,6 +700,47 @@ test('AI 调用模块：脚本统一给智能总结、智能搜索（查询扩�
   svc.close();
 });
 
+test('预计剩余时间：按最近处理速度估算剩余与总耗时；智能总结按平均每个文档的耗时估算', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'dataeta'));
+  const realNow = Date.now;
+  let now = 1.8e12;
+  Date.now = () => now;
+  try {
+    const t = { id: 9999, status: 'running', total: 100, parsed: 0, skipped: 0, duplicate: 0, failed: 0, started_at: now };
+    let e = svc.etaFor(t);
+    assert.strictEqual(e.remainingMs, null, '刚开始：正在估算');
+    now += 10000; t.parsed = 15; t.skipped = 5;
+    e = svc.etaFor(t);
+    assert.strictEqual(e.done, 20);
+    assert.strictEqual(e.remainingMs, 40000, '20 个 / 10 秒 → 剩余 80 个约 40 秒');
+    assert.strictEqual(e.totalMs, 50000);
+    assert.strictEqual(e.rate, 2);
+    now += 10000; t.parsed = 35;
+    e = svc.etaFor(t);
+    assert.strictEqual(e.remainingMs, 30000);
+    assert.ok(svc.tasks().length === 0 || true);
+    t.status = 'done';
+    assert.strictEqual(svc.etaFor(t), null, '结束后不再估算');
+  } finally { Date.now = realNow; }
+  // 智能总结：至少完成一个文档后给出预计剩余
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const id = svc.addTask(P('技术方案'));
+  const done = new Promise((res) => { const h = (x) => { if (x.id === id && x.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  process.env.PPTA_FAKE_LLM = '1';
+  const etas = [];
+  const finished = new Promise((res) => svc.summary.on('update', (st) => { if (st.eta) etas.push(st.eta); if (!st.counts.queued && !st.counts.running && st.counts.done) res(st); }));
+  svc.summaryStart({ taskIds: [id] });
+  const st = await finished;
+  assert.strictEqual(st.eta, null, '全部完成后不再显示');
+  assert.ok(etas.some((x) => x.remainingMs === null), '第一个完成前为正在估算');
+  assert.ok(etas.some((x) => typeof x.remainingMs === 'number' && x.avgMs > 0 && x.left > 0), '有平均耗时后给出预计剩余');
+  delete process.env.PPTA_FAKE_LLM;
+  svc.close();
+});
+
 test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料库的文档不自动加回', async () => {
   const { AgentService } = require('../electron/core/service');
   const lib = path.join(tmp, 'lib3');

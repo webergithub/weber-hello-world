@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import EtaLine from './Eta';
 import { api, on, fmtTime, KIND_LABEL } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
@@ -91,6 +92,7 @@ export default function PluginView() {
       <div className="plugin-progress">
         <div className="progress"><div style={{ width: `${total ? (finished / total) * 100 : 0}%` }} /></div>
         <span className="small">{finished}/{total}{c.failed ? ` · 失败 ${c.failed}` : ''}{st.paused ? ' · 已暂停' : running ? ` · 正在总结：${running.name}` : ''}</span>
+        {st.eta && <EtaLine eta={st.eta} />}
       </div>
       <div className="tabs">
         <button className={tab === 'jobs' ? 'on' : ''} onClick={() => setTab('jobs')}>进度（{st.jobs.length}）</button>

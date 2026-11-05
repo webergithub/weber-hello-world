@@ -1474,3 +1474,11 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .notice.closable { position: relative; padding-right: 34px; }
 .notice .notice-x { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); border: none; background: transparent; color: var(--fg3); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 6px; border-radius: 4px; }
 .notice .notice-x:hover { background: var(--bg3); color: var(--fg); }
+
+/* ---- v3.10 预计剩余时间 ---- */
+.eta-line { display: inline-flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12.5px; color: var(--fg2); }
+.eta-line b { color: var(--fg); font-weight: 600; }
+.eta-compact { color: var(--fg3); }
+.eta-row { margin-top: 4px; }
+.plugin-progress .eta-line { margin-left: 8px; }
+.ls-top .eta-line { font-size: 12px; }

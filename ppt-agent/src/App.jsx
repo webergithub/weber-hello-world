@@ -17,6 +17,7 @@ import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
 import PluginView from './components/PluginView';
 import BusyHint from './components/BusyHint';
+import EtaLine from './components/Eta';
 import AnalyticsView from './components/AnalyticsView';
 import RecycleView from './components/Recycle';
 import SettingsView from './components/SettingsView';
@@ -445,7 +446,7 @@ export default function App() {
                   {!collapsed && (
                     <div className="sbt-main">
                       <div className="sbt-name">{t.name}{t.watch ? <span className="watch-dot" title={`已开启定时监测更新（每天 ${(config && config.watch && config.watch.time) || ''}）`}> 📡</span> : null}</div>
-                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{isActive(t) ? ` ${pct}%` : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析`}</div>
+                      <div className="sbt-meta"><span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span>{isActive(t) ? <>{` ${pct}%`}{t.eta && t.eta.remainingMs !== null ? <> · <EtaLine eta={t.eta} compact /></> : null}</> : t.status === 'pending' ? ` · 第 ${t.queuePos} 位` : t.status === 'draft' ? '' : ` · ${t.parsed} 解析`}</div>
                       {isActive(t) && <div className="sbt-bar"><div style={{ width: `${pct}%` }} /></div>}
                     </div>
                   )}

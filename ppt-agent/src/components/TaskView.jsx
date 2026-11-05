@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import EtaLine from './Eta';
 import Notice from './Notice';
 import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, isActive, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
@@ -55,6 +56,9 @@ export default function TaskView({ taskId, back, onBack }) {
               <div className="progress"><div style={{ width: `${cur.total ? ((kids.length ? done(cur) : (live && live.done) || 0) / cur.total) * 100 : 5}%` }} /></div>
               <span className="small muted">{kids.length ? done(cur) : (live && live.done) || 0}/{cur.total} {!kids.length && live && live.current ? '· ' + live.current : ''}</span>
             </div>
+          )}
+          {isActive(cur) && cur.eta && (
+            <div className="eta-row"><EtaLine eta={cur.eta} /></div>
           )}
         </div>
         <div className="spacer" />

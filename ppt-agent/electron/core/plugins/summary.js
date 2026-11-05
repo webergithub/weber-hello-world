@@ -65,6 +65,7 @@ class SummaryPlugin extends EventEmitter {
     const av = this.available();
     if (!av.ok) throw new Error(av.reason);
     const queued = new Set(this.jobs.filter((j) => ['queued', 'running'].includes(j.status)).map((j) => j.fileId));
+    if (!queued.size) this.batchStart = Date.now(); // 新一批：重新计算已用时间与预计剩余
     const have = new Set(force ? [] : this.store.db.prepare('SELECT file_id FROM doc_summaries').all().map((r) => r.file_id));
     let added = 0, skipped = 0;
     for (const id of [...new Set(fileIds || [])]) {
@@ -201,7 +202,24 @@ class SummaryPlugin extends EventEmitter {
     for (const j of this.jobs) c[j.status] = (c[j.status] || 0) + 1;
     const total = this.store.db.prepare('SELECT COUNT(*) n FROM doc_summaries').get().n;
     const cfg = this.cfg();
-    return { plugins: PLUGINS, available: this.available(), paused: this.paused, counts: c, jobs: this.jobs, stored: total, script: { enabled: !!cfg.enabled, script: cfg.script || '', auto: cfg.auto !== false } };
+    return { eta: this.eta(c), plugins: PLUGINS, available: this.available(), paused: this.paused, counts: c, jobs: this.jobs, stored: total, script: { enabled: !!cfg.enabled, script: cfg.script || '', auto: cfg.auto !== false } };
+  }
+
+  /**
+   * 预计剩余时间（v3.10）：按本批最近 10 个已结束文档的平均耗时 × 剩余文档数（逐个执行），
+   * 减去正在总结的文档已用的时间；返回 { elapsed, remainingMs, totalMs, avgMs, left }，暂停或没有排队时为 null
+   */
+  eta(c) {
+    const left = c.queued + c.running;
+    if (!left || !this.batchStart) return null;
+    const now = Date.now();
+    const recent = this.jobs.filter((j) => (j.status === 'done' || j.status === 'failed') && j.ms && j.at >= this.batchStart - 1).slice(-10);
+    const avgMs = recent.length ? Math.round(recent.reduce((a, j) => a + j.ms, 0) / recent.length) : null;
+    const run = this.jobs.find((j) => j.status === 'running');
+    const runLeft = run && avgMs !== null ? Math.max(0, avgMs - (now - (run.startedAt || now))) : 0;
+    const remainingMs = avgMs === null ? null : avgMs * c.queued + runLeft;
+    const elapsed = now - this.batchStart;
+    return { elapsed, remainingMs, totalMs: remainingMs === null ? null : elapsed + remainingMs, avgMs, left, paused: this.paused };
   }
 
   /** 已入库的总结（“已生成的总结”列表） */
