@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Notice from './Notice';
 import { useIncremental } from '../useIncremental';
 import { api, fmtSize, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
@@ -193,7 +194,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
               <span className="muted">{slides.length} {unit} · Shift 连选 · ↑↓ 切换 · 空格选择</span>
             </div>
           )}
-          {detail && detail.file.status === 'duplicate' && <div className="notice">该文件与 <b>{detail.source.path}</b> 信息完全一致，未重复解析，显示的是原文件的解析结果。</div>}
+          {detail && detail.file.status === 'duplicate' && <Notice id={`dupfile-${detail.file.id}`}>该文件与 <b>{detail.source.path}</b> 信息完全一致，未重复解析，显示的是原文件的解析结果。</Notice>}
           {detail && detail.file.status === 'failed' && <div className="notice danger">解析失败：{detail.file.error}</div>}
           {slides.map((s) => (
             <div key={s.id} data-sid={s.id} className={`slide-item ${s.id === slideId ? 'active' : ''} ${selected.has(s.id) ? 'sel' : ''}`} onClick={() => setSlideId(s.id)}>

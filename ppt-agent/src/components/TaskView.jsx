@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Notice from './Notice';
 import { api, fmtSize, fmtTime, THEME_LABEL, ACTION_LABEL, STATUS_LABEL, isActive, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
@@ -65,10 +66,10 @@ export default function TaskView({ taskId, back, onBack }) {
           onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>}
         <button className="btn ghost" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId })}>⚙️ 解析动态</button>
       </div>
-      {task.status === 'draft' && <div className="notice">任务尚未开始：点击右上角“开始解析”加入解析队列。</div>}
+      {task.status === 'draft' && <Notice id={`draft-${task.id}`}>任务尚未开始：点击右上角“开始解析”加入解析队列。</Notice>}
       {(stats.skipped || 0) + (stats.duplicate || 0) > 0 && task.status !== 'running' && (
-        <div className="notice">有 <b>{(stats.skipped || 0) + (stats.duplicate || 0)}</b> 个文件与解析历史记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
-          <button className="btn small" onClick={() => setDupes(files.filter((f) => f.action === 'skipped' || f.action === 'duplicate'))}>选择是否重新解析…</button></div>
+        <Notice id={`dupes-${task.id}-${(stats.skipped || 0) + (stats.duplicate || 0)}`}>有 <b>{(stats.skipped || 0) + (stats.duplicate || 0)}</b> 个文件与解析历史记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
+          <button className="btn small" onClick={() => setDupes(files.filter((f) => f.action === 'skipped' || f.action === 'duplicate'))}>选择是否重新解析…</button></Notice>
       )}
       {dupes && <ReparseDialog files={dupes} onClose={() => setDupes(null)} />}
       <div className="tabs">

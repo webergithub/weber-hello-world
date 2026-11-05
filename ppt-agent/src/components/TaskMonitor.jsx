@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import Notice from './Notice';
 import { api, fmtSize, fmtTime, STATUS_LABEL, ACTION_LABEL, KIND_LABEL, isActive } from '../api';
 import { useApp } from '../ctx';
 import LiveScan from './LiveScan';
@@ -134,9 +135,9 @@ function LivePanel({ taskId }) {
         <div className="vh-title">#{t.id} {t.name} <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status]}</span></div>
         <div className="muted small">{t.dir}</div>
       </div>
-      {t.status === 'draft' && <div className="notice">任务已添加，尚未开始。点击 <button className="btn small primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button> 加入解析队列。</div>}
-      {['paused', 'interrupted'].includes(t.status) && <div className="notice">{t.message || '任务已暂停'} <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 从断点继续</button></div>}
-      {t.status === 'pending' && <div className="notice">排队中：第 {t.queuePos} 位，前面的任务完成后自动开始。</div>}
+      {t.status === 'draft' && <Notice id={`mon-draft-${t.id}`}>任务已添加，尚未开始。点击 <button className="btn small primary" onClick={() => app.startParse(t.id)}>▶ 开始解析</button> 加入解析队列。</Notice>}
+      {['paused', 'interrupted'].includes(t.status) && <Notice id={`mon-paused-${t.id}-${t.finished_at || 0}`}>{t.message || '任务已暂停'} <button className="btn small primary" onClick={() => app.startParse(t.id, 'resume')}>▶ 从断点继续</button></Notice>}
+      {t.status === 'pending' && <Notice id={`mon-pending-${t.id}`}>排队中：第 {t.queuePos} 位，前面的任务完成后自动开始。</Notice>}
       <div className="live-stats">
         <div className="card drill" onClick={() => drillTask(app, t, '已处理文档')}><div className="card-v">{t.total || (p.scan ? p.scan.found : 0)}</div><div className="card-k">{t.status === 'running' && !t.total ? '已发现文档' : '文档总数'}</div></div>
         <div className="card drill" onClick={() => drillTask(app, t, '已处理文档')}><div className="card-v">{p.index || (t.status === 'done' ? t.total : 0)}</div><div className="card-k">当前第几个</div></div>
@@ -158,9 +159,9 @@ function LivePanel({ taskId }) {
         </div>
       )}
       {['done', 'cancelled'].includes(t.status) && repeat > 0 && (
-        <div className="notice">本次有 <b>{repeat}</b> 个文件与解析历史中的记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
+        <Notice id={`mon-dupes-${t.id}-${repeat}`}>本次有 <b>{repeat}</b> 个文件与解析历史中的记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
           <button className="btn small" onClick={async () => { const d = await api.taskDetail(t.id); setDupes(d.files.filter((f) => f.action === 'skipped' || f.action === 'duplicate')); }}>选择是否重新解析…</button>
-        </div>
+        </Notice>
       )}
       <div className="live-split">
         <div className="pane">

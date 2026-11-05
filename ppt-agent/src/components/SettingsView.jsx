@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import Notice, { restoreNotices, dismissedCount } from './Notice';
 import { api } from '../api';
 import { useApp } from '../ctx';
 import KeymapEditor from './KeymapEditor';
@@ -30,6 +31,7 @@ export default function SettingsView({ focus }) {
   const agentRef = useRef(null);
   const mailRef = useRef(null);
   const langRef = useRef(null);
+  const [closedN, setClosedN] = useState(() => dismissedCount());
   const pluginRef = useRef(null);
   const [mailBusy, setMailBusy] = useState(false);
   const [fbSt, setFbSt] = useState(null);
@@ -155,6 +157,10 @@ export default function SettingsView({ focus }) {
           </div>
           <p className="muted small">在关闭提示框中勾选“记住我的选择”会自动设置这里；改完点击右上角“保存设置”生效。</p>
         </section>
+        <section data-sec="notices">
+          <h3>已关闭的提示栏</h3>
+          <div className="row"><span className="muted">已关闭 {closedN} 条提示</span><button className="btn" disabled={!closedN} onClick={() => { restoreNotices(); setClosedN(0); app.toast('已恢复显示全部关闭过的提示栏'); }}>↺ 恢复显示</button></div>
+        </section>
         </>}
         {tab === 'mail' && <>
         <section ref={mailRef} className={focus === 'mail' ? 'flash-sec' : ''}>
@@ -171,7 +177,7 @@ export default function SettingsView({ focus }) {
         </section>
         </>}
         {tab === 'ai' && <>
-          {offline && <div className="notice offline-notice">🔒 当前为<b>单机版</b>：应用不联网，大模型与语义向量接口暂不可用，本页设置已锁定。解析、检索（本地 RAG）、黑白底互转、智能生成等全部在本机完成。</div>}
+          {offline && <Notice id="offline-ai-tab" className="offline-notice">🔒 当前为<b>单机版</b>：应用不联网，大模型与语义向量接口暂不可用，本页设置已锁定。解析、检索（本地 RAG）、黑白底互转、智能生成等全部在本机完成。</Notice>}
           <fieldset className="settings-lock" disabled={offline}>
         <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
           <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>

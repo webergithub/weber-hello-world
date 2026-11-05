@@ -1469,3 +1469,8 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .search-prog .sp-stage.st-done .sp-ic { color: var(--ok-fg); }
 .search-prog .sp-ms { text-align: right; }
 .plugin-uses { display: flex; flex-direction: column; gap: 4px; }
+
+/* ---- v3.9.1 可关闭的提示栏 ---- */
+.notice.closable { position: relative; padding-right: 34px; }
+.notice .notice-x { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); border: none; background: transparent; color: var(--fg3); cursor: pointer; font-size: 13px; line-height: 1; padding: 4px 6px; border-radius: 4px; }
+.notice .notice-x:hover { background: var(--bg3); color: var(--fg); }
