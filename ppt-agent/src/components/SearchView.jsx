@@ -44,6 +44,8 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const [cmpSel, setCmpSel] = useState(() => new Set());
   const inputRef = useRef(null);
   const llmOn = app.config && !app.config.offlineOnly && app.config.llm && app.config.llm.enabled;
+  // 查询扩展走 AI 调用模块（AI 脚本勾选“用于智能搜索”，或联网版的大模型接口）
+  const aiOn = !!(app.config && app.config.ai && app.config.ai.can && app.config.ai.can.expandQuery);
   const [stats, setStats] = useState(null);
   // 检索范围：在已经执行过的任务中多选；不选 = 所有资料库（选择会记住）
   const ran = app.tasks.filter((t) => t.status !== 'draft' && (t.status === 'done' || (t.parsed || 0) + (t.skipped || 0) + (t.duplicate || 0) > 0));
@@ -71,7 +73,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const setTasksOpen = (v) => { TASKS_OPEN = v; setTasksOpenState(v); };
   const [recent, setRecent] = useState([]);
   useEffect(() => { if (!result) api.searchHistory({ limit: 30 }).then((h) => { const seen = new Set(); setRecent(h.filter((x) => x.status === 'done' && !seen.has(x.q) && seen.add(x.q)).slice(0, 8)); }).catch(() => {}); }, [result, qs.items.length]);
-  const curScope = () => ({ useLlm: llmOn && useLlm, taskIds: scopeIds, taskNames: scopeIds.map((id) => (ran.find((t) => t.id === id) || {}).name || `#${id}`) });
+  const curScope = () => ({ useLlm: aiOn && useLlm, taskIds: scopeIds, taskNames: scopeIds.map((id) => (ran.find((t) => t.id === id) || {}).name || `#${id}`) });
   const show = (q, r) => {
     setState({ q, result: r, tab: state.tab === 'viewer' ? 'viewer' : firstTab(r) });
     setInput(q); setAnswer(null); setFileFilter(null); setSel(new Set()); setCmpSel(new Set());
@@ -133,7 +135,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
       setAnswer(await api.answer(result.analysis.raw, ids));
     } catch (e) { setAnswer({ error: e.message }); }
   };
-  const tierCls = { 1: 'tier1', 2: 'tier2', 3: 'tier3' };
+  const tierCls = { 1: 'tier1', 2: 'tier2', 3: 'tier3', 4: 'tier3' };
   // 对比：每个文件从得分最高的命中页开始
   const bestHit = (fid) => { let b = null; for (const h of allHits) if (h.file_id === fid && (!b || h.score > b.score)) b = h; return b ? b.id : undefined; };
   const compareFiles = (fids) => app.openCompare(fids, Object.fromEntries(fids.map((f) => [f, bestHit(f)]).filter((x) => x[1])));
@@ -157,10 +159,10 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           {busy && <SearchProgress prog={prog} />}
           <div className="row center sl-actions">{scopeSeg}<button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>{tasksBtn}</div>
           {recent.length > 0 && <div className="chips sl-recent"><span className="muted small">最近搜索：</span>{recent.map((h) => <span key={h.id} className="chip link" title={`${fmtTime(h.at)} · 文件 ${h.files}`} onClick={() => viewHistory(h.id)}>🕘 {h.q}</span>)}</div>}
-          {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
+          {aiOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> AI 扩展查询</label>}
           {suggest.length > 0 && <div className="chips sl-chips">{suggest.map((x) => <span key={x.tag} className="chip link" title={`${x.files} 个文档带有该标签`} onClick={() => { const q = tagQuery(x.tag); setInput(q); run(q); }}>{x.tag}</span>)}</div>}
           {stats && <div className="sl-stats"><span><b>{stats.files}</b> 个文档</span><span><b>{stats.slides}</b> 页 / 节</span><span>本地 RAG · 不上传数据</span></div>}
-          <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{llmOn ? ' + 大模型扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word / PDF 分开推荐页面</div>
+          <div className="sl-flow muted small">中英文解析（分词 + 双语词表互译{aiOn ? ' + AI 扩展' : ''}）→ 文件名命中 → 标签命中 → 内容（BM25 全文 + 向量语义召回）→ 按白底 / 黑底 / Word / PDF 分开推荐页面</div>
         </div>
       ) : (
         <div className="search-bar">
@@ -169,7 +171,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           <button className="btn primary big" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '🔍 智能搜索'}</button>
           <button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>
           {tasksBtn}
-          {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
+          {aiOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> AI 扩展查询</label>}
           {scopeSeg}
           <button className="btn ghost" title="清空结果，回到搜索首页" onClick={() => { setState({}); setInput(''); }}>✕ 清空</button>
         </div>
@@ -199,6 +201,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                   <div className="fi-name"><label className="fi-cmp" title="勾选 2–4 个文件进行对比" onClick={(e) => e.stopPropagation()}><input type="checkbox" checked={cmpSel.has(f.file.id)} onChange={() => toggleCmp(f.file.id)} /></label><span dangerouslySetInnerHTML={{ __html: highlight(esc(f.file.name), terms) }} /></div>
                   <div className="fi-meta">
                     <span className={`tag ${tierCls[f.tier]}`}>{f.tierLabel}</span>
+                    {f.summary && <span className={`tag ${f.summaryHit ? 'hit' : 'accent'}`} title="该文档有智能总结（点击打开）" onClick={(e) => { e.stopPropagation(); api.openPath(f.summary); }}>🧠 总结</span>}
                     <span className={`tag theme-${f.file.theme}`}>{THEME_LABEL[f.file.theme]}</span>
                     <span>{f.file.slide_count} 页</span><span>{fmtSize(f.file.size)}</span>{f.hits ? <span>命中 {f.hits} 页</span> : null}
                   </div>
@@ -244,7 +247,11 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                 <div className="sum-hits">{(result.summaries || []).map((h) => (
                   <div key={h.file_id} className="sum-hit">
                     <div className="sh-head"><span className="link" title={h.path} onClick={() => app.openFile(h.file_id)}>🧠 {h.name}</span><span className="spacer" />
-                      <button className="btn tiny" onClick={() => api.openPath(h.md_path)}>打开总结 MD</button><button className="btn tiny" onClick={() => api.showItem(h.md_path)}>📂</button></div>
+                      <button className="btn tiny" onClick={() => api.openPath(h.md_path)}>打开总结 MD</button>
+                      <button className="btn tiny" onClick={() => app.openFile(h.file_id)}>查看文档</button>
+                      {h.path && <button className="btn tiny" onClick={() => api.openPath(h.path)}>打开原文件</button>}
+                      {h.file_md && <button className="btn tiny ghost" onClick={() => api.openPath(h.file_md)}>解析 MD</button>}
+                      <button className="btn tiny" title="在资源管理器中显示总结文件" onClick={() => api.showItem(h.md_path)}>📂</button></div>
                     <div className="sc-snippet" dangerouslySetInnerHTML={{ __html: highlight(esc(h.snippet), terms) }} />
                     <div className="sc-foot">{h.matched.map((m) => <span key={m} className="tag hit">{m}</span>)}</div>
                   </div>

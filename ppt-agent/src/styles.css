@@ -1468,3 +1468,4 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .search-prog .sp-stage.st-run { color: var(--accent-fg); font-weight: 600; }
 .search-prog .sp-stage.st-done .sp-ic { color: var(--ok-fg); }
 .search-prog .sp-ms { text-align: right; }
+.plugin-uses { display: flex; flex-direction: column; gap: 4px; }

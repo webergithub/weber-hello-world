@@ -2,6 +2,7 @@
 // 基于 yauzl 的随机访问 zip 读取：只解压需要的部件，视频等大文件按区间读取，不整体载入内存。
 const fs = require('fs');
 const yauzl = require('yauzl');
+const { decodeXml } = require('./textfix');
 
 function openZip(file) {
   return new Promise((resolve, reject) => {
@@ -83,7 +84,8 @@ class ZipPackage {
   async text(name) {
     const b = await this.buffer(name);
     if (!b) return null;
-    let s = b.toString('utf8');
+    // 按 BOM / XML 声明的编码解码（UTF-16、GBK 等旧文件），见 textfix.decodeXml
+    let s = decodeXml(b);
     if (s.charCodeAt(0) === 0xfeff) s = s.slice(1);
     return s;
   }

@@ -105,6 +105,10 @@ class Store {
     if (!t.has('part_no')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_no INTEGER');
     if (!t.has('part_label')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_label TEXT');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
+    // 智能总结与原文件 / 解析 Markdown 的关联（v3.9）
+    const ds = cols('doc_summaries');
+    if (!ds.has('src_path')) this.db.exec('ALTER TABLE doc_summaries ADD COLUMN src_path TEXT');
+    if (!ds.has('src_md')) this.db.exec('ALTER TABLE doc_summaries ADD COLUMN src_md TEXT');
     if (!cols('search_history').has('task_ids')) this.db.exec('ALTER TABLE search_history ADD COLUMN task_ids TEXT');
     if (!cols('search_history').has('pdf')) this.db.exec('ALTER TABLE search_history ADD COLUMN pdf INTEGER DEFAULT 0');
     const sl = cols('slides');

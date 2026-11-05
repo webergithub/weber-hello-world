@@ -99,7 +99,7 @@ export default function SettingsView({ focus }) {
             onChange={(e) => set({ split: { ...(cfg.split || {}), parallel: Math.max(1, Math.min(8, Number(e.target.value) || 3)) } })} /> <span className="muted">个</span></div>
         </section>
         <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
-          <h3>插件：智能总结脚本</h3>
+          <h3>AI 调用脚本（智能总结 / 智能搜索 / 智能生成）</h3>
           <PluginSettings />
         </section>
         <section>
@@ -122,6 +122,7 @@ export default function SettingsView({ focus }) {
           <h3>相似分组与维护</h3>
           <div className="row"><label>内容相似阈值</label><input className="input" type="number" step="0.01" min="0.5" max="0.99" value={cfg.similarityThreshold} onChange={(e) => set({ similarityThreshold: Number(e.target.value) })} /></div>
           <div className="row"><label /><button className="btn" onClick={async () => { await save(); await api.rebuild(); app.bump(); app.toast('已重新计算标签、分组与黑白底对应关系'); }}>重新计算标签 / 分组 / 黑白底对应</button></div>
+                  <div className="row"><label /><button className="btn" onClick={async () => { try { const r = await api.repairText(); app.bump(); app.toast(r.files || r.slides ? `已修复乱码：文件名 / 标题 / 作者 ${r.files} 个，页面文字 ${r.slides} 页` : `检查了 ${r.checked} 个文档，没有发现乱码`); } catch (e) { app.toast(e.message, 'error'); } }}>🔤 修复乱码文字</button></div>
         </section>
           <section ref={langRef} className={focus === 'langs' ? 'flash-sec' : ''}>
             <h3>讲解词小语种</h3>

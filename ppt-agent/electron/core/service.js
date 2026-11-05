@@ -28,7 +28,9 @@ const llm = require('./llm');
 const { OFFLINE_ONLY, OFFLINE_MSG } = require('./offline');
 const { ticker } = require('./yieldy');
 const { splitFiles } = require('./splitter');
+const { fixMojibake, fixParsed } = require('./textfix');
 const { SummaryPlugin } = require('./plugins/summary');
+const { AiGateway } = require('./ai');
 
 // 支持的文档类型（设置中多选启用）
 const DOC_TYPES = {
@@ -103,7 +105,8 @@ class AgentService extends EventEmitter {
     this.config = this.loadConfig();
     this.store = new Store(path.join(dataDir, 'ppt-agent.db'));
     this.office = new Office(logger.child('office'));
-    this.search = new SearchEngine(this.store, () => this.config, logger.child('search'));
+    this.ai = new AiGateway(this); // AI 调用模块：智能总结、搜索查询扩展、智能生成共用
+    this.search = new SearchEngine(this.store, () => this.config, logger.child('search'), () => this.ai);
     this.queue = [];
     this.runningSet = new Set(); // 正在执行的任务（子任务可并行，见 config.split.parallel）
     this.inflightFp = new Map(); // 正在完整解析的文件指纹 → Promise（并行时避免同一文件重复解析）
@@ -131,7 +134,7 @@ class AgentService extends EventEmitter {
       return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) }, plugins: { ...(c.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((c.plugins || {}).summary || {}) } } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
-  getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY }; }
+  getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY, ai: this.ai ? this.ai.state() : null }; }
   setConfig(patch) {
     if (patch && 'offlineOnly' in patch) { patch = { ...patch }; delete patch.offlineOnly; }
     const w0 = this.config.watch || DEFAULT_CONFIG.watch;
@@ -205,6 +208,11 @@ class AgentService extends EventEmitter {
         if (!has && pages > 1 && !this.running) this.computeRelations().catch((e) => this.log.warn('补算页面关联失败', e));
       } catch (e) { this.log.warn('检查页面关联失败', e); }
     }, 4000);
+    // 乱码兼容（v3.9）：升级后对已有记录做一次乱码修复（后台分页执行）
+    setTimeout(() => {
+      if ((this.config.textFixRev || 0) >= 1 || this.running) return;
+      this.repairTextEncoding().then(() => this.setConfig({ textFixRev: 1 })).catch((e) => this.log.warn('乱码修复失败', e));
+    }, 20000);
     clearInterval(this.schedTimer);
     this.schedTimer = setInterval(() => this.checkSchedule().catch((e) => this.log.warn('定时扫描检查失败', e)), 30000);
     setTimeout(() => this.checkSchedule().catch(() => {}), 15000);
@@ -777,7 +785,9 @@ class AgentService extends EventEmitter {
   async processFile(taskId, file, engines, log, tag, { force = false, isCancelled = () => false } = {}) {
     const checkPause = () => { if (isCancelled()) { const e = new Error('已暂停'); e.paused = true; throw e; } };
     const st = fs.statSync(file);
-    const name = path.basename(file), ext = path.extname(file).toLowerCase();
+    // 乱码兼容（v3.9）：显示用的文件名修复常见乱码；指纹与路径仍用原始文件名
+    const rawName = path.basename(file), ext = path.extname(file).toLowerCase();
+    const name = fixMojibake(rawName);
     const kind = KIND_OF.get(ext) || 'ppt';
     const unit = kind === 'word' ? '节' : '页';
     let author = '', title = '';
@@ -800,7 +810,8 @@ class AgentService extends EventEmitter {
         return 'failed';
       }
     }
-    const fp = this.fingerprint(name, st.size, st.mtimeMs, author);
+    const fp = this.fingerprint(rawName, st.size, st.mtimeMs, author); // 指纹用原始文件名与作者，与以前的记录一致
+    author = fixMojibake(author); title = fixMojibake(title);
     const existing = this.store.fileByPath(file);
     if (force) log.info(`${tag} 用户确认重新解析：${file}`);
     if (!force && existing && existing.fingerprint === fp && (existing.status === 'parsed' || existing.status === 'duplicate')) {
@@ -872,6 +883,9 @@ class AgentService extends EventEmitter {
         log.warn(`${tag} 解析失败：${file}（${e.message}）`);
         return 'failed';
       }
+      // 乱码兼容：文档属性、页标题、正文、讲解词中的常见乱码在入库前修复
+      const nFixed = fixParsed(parsed);
+      if (nFixed) log.info(`${tag} 修复了 ${nFixed} 处乱码文字：${file}`);
       if (LEGACY.has(ext)) { author = parsed.props.author; title = parsed.props.title; }
       const slides = parsed.slides;
 
@@ -1137,7 +1151,8 @@ class AgentService extends EventEmitter {
     const target = f.status === 'duplicate' && f.dup_of ? this.store.getFile(f.dup_of) : f;
     const slides = this.store.slidesOf(target.id);
     const cp = this.store.counterparts(slides.map((s) => s.id));
-    return { file: f, source: target, slides: slides.map((s) => ({ ...s, counterpart: cp.get(s.id) || null })) };
+    const summary = this.store.db.prepare('SELECT md_path, model, at FROM doc_summaries WHERE file_id = ?').get(target.id) || null; // 智能总结（与原文件关联）
+    return { file: f, source: target, summary, slides: slides.map((s) => ({ ...s, counterpart: cp.get(s.id) || null })) };
   }
 
   slideDetail(id) {
@@ -1181,7 +1196,8 @@ class AgentService extends EventEmitter {
   }
 
   async searchQuery(q, opts = {}) {
-    const useLlm = opts.useLlm !== false && this.config.llm.enabled && this.config.llm.useForQuery;
+    // 查询扩展走 AI 调用模块（AI 脚本勾选“用于智能搜索”，或联网版的大模型接口）
+    const useLlm = opts.useLlm !== false && this.ai.can('expandQuery');
     // 检索范围：taskIds 为多选的任务（取这些任务解析文件的并集），为空表示所有资料库；taskId 兼容旧的单个任务
     const taskIds = (opts.taskIds && opts.taskIds.length ? opts.taskIds : opts.taskId ? [opts.taskId] : []).map(Number);
     const fileIds = taskIds.length ? [...new Set(taskIds.flatMap((id) => [...this.taskFileIds(id)]))] : null;
@@ -1199,6 +1215,17 @@ class AgentService extends EventEmitter {
     logger.child('search').info(`检索「${q}」：中文词 ${r.analysis.zh.slice(0, 8).join('/')}；英文词 ${r.analysis.en.slice(0, 8).join('/')}；文件 ${r.files.length}，页面 白底 ${r.slides.light.length} / 黑底 ${r.slides.dark.length} / Word ${r.slides.word.length}，召回 ${r.retrievers.join(' ')}，${r.timing.total}ms`);
     // 智能总结插件生成的文档总结也参与检索（“文档总结”页签）
     try { r.summaries = this.summary.search([...(r.analysis.zh || []), ...(r.analysis.en || [])], fileIds); } catch (e) { r.summaries = []; this.log.warn('检索文档总结失败', e); }
+    // 总结与原文件关联：命中的文件带上总结；只有总结命中的文件也列入结果（“总结命中”）
+    try {
+      const sumOf = new Map(this.store.db.prepare('SELECT file_id, md_path FROM doc_summaries').all().map((x) => [x.file_id, x.md_path]));
+      for (const f of r.files) if (sumOf.has(f.file.id)) f.summary = sumOf.get(f.file.id);
+      const have = new Set(r.files.map((f) => f.file.id));
+      for (const h of r.summaries) {
+        if (have.has(h.file_id)) { const f = r.files.find((x) => x.file.id === h.file_id); if (f) f.summaryHit = true; continue; }
+        const file = this.store.getFile(h.file_id);
+        if (file) { r.files.push({ file: { ...file, terms: undefined }, tier: 4, tierLabel: '总结命中', nameScore: 0, tagScore: 0, contentScore: 0, hits: 0, matched: h.matched, summary: h.md_path, summaryHit: true }); have.add(h.file_id); }
+      }
+    } catch (e) { this.log.warn('关联文档总结失败', e); }
     if (opts.record !== false) r.historyId = this.recordSearch(q, opts, useLlm, r);
     return r;
   }
@@ -1466,9 +1493,13 @@ class AgentService extends EventEmitter {
     const vecs = new Map(this.store.slideVectors().filter((v) => v.kind === 'ppt').map((v) => [v.id, v]));
     const pool = new Map();
     let analysis = null;
-    if (intent.topic || !intent.formats.length) {
-      const r = await this.searchQuery(intent.topic || desc, { useLlm: opts.useLlm, slideLimit: 300, record: false });
+    // AI 理解需求（AI 脚本勾选“用于智能生成”时）：把描述整理为检索关键词，再按关键词找页面
+    const aiKw = await this.ai.generateKeywords(desc).catch(() => null);
+    if (intent.topic || !intent.formats.length || aiKw) {
+      const query = aiKw ? [intent.topic || '', ...aiKw.keywords].filter(Boolean).join(' ') : intent.topic || desc;
+      const r = await this.searchQuery(query, { useLlm: opts.useLlm, slideLimit: 300, record: false });
       analysis = r.analysis;
+      if (aiKw) analysis.aiKeywords = aiKw.keywords;
       for (const x of [...r.slides.light, ...r.slides.dark]) pool.set(x.id, x.score);
     }
     let all = null;
@@ -1872,6 +1903,41 @@ class AgentService extends EventEmitter {
     if (all) ids = this.store.db.prepare("SELECT id FROM files WHERE status = 'parsed' ORDER BY id").all().map((r) => r.id);
     else if (taskIds.length) ids = [...new Set(taskIds.flatMap((t) => [...this.taskFileIds(t)]))];
     return this.summary.start(ids, { force });
+  }
+
+  /** 修复资料库中已有记录的乱码（文件名、标题、作者、页标题 / 正文 / 讲解词），分页执行不阻塞界面；返回修复数量 */
+  async repairTextEncoding(log = this.log) {
+    const tk = ticker(20);
+    let files = 0, slides = 0;
+    const fileRows = this.store.db.prepare('SELECT id, name, title, author, dir FROM files').all();
+    const upd = this.store.db.prepare('UPDATE files SET name = ?, title = ?, author = ? WHERE id = ?');
+    const meta = new Map();
+    for (const f of fileRows) {
+      const p = tk(); if (p) await p;
+      const n = fixMojibake(f.name || ''), t = fixMojibake(f.title || ''), a = fixMojibake(f.author || '');
+      if (n !== (f.name || '') || t !== (f.title || '') || a !== (f.author || '')) { upd.run(n, t, a, f.id); files++; }
+      meta.set(f.id, `${n} ${path.basename(f.dir || '')}`);
+    }
+    const sel = this.store.db.prepare('SELECT id, file_id, title, text, notes FROM slides WHERE id > ? ORDER BY id LIMIT ?');
+    const updS = this.store.db.prepare('UPDATE slides SET title = ?, text = ?, notes = ? WHERE id = ?');
+    let last = -1;
+    for (;;) {
+      const rows = sel.all(last, 2000);
+      for (const r of rows) {
+        const t = fixMojibake(r.title || ''), x = fixMojibake(r.text || ''), no = fixMojibake(r.notes || '');
+        if (t !== (r.title || '') || x !== (r.text || '') || no !== (r.notes || '')) {
+          updS.run(t, x, no, r.id);
+          this.store.updateFts(r.id, { title: tokenize(t).join(' '), body: tokenize(x).join(' '), notes: tokenize(no).join(' '), meta: tokenize(meta.get(r.file_id) || '').join(' ') });
+          slides++;
+        }
+      }
+      if (rows.length < 2000) break;
+      last = rows[rows.length - 1].id;
+      await new Promise((r) => setImmediate(r));
+    }
+    if (files || slides) { this.search.invalidate(); this.libraryDirty = true; this.kickLibraryRefresh(); }
+    log.info(`[乱码修复] 检查 ${fileRows.length} 个文档：修复文件名 / 标题 / 作者 ${files} 个，页面文字 ${slides} 页`);
+    return { files, slides, checked: fileRows.length };
   }
 
   /** 插件脚本：检查（试运行一次示例文档）；通过后才把“生效”打开 */

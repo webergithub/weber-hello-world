@@ -46,10 +46,11 @@ function contains(hay, term) {
 }
 
 class SearchEngine {
-  constructor(store, getConfig, log) {
+  constructor(store, getConfig, log, getAi = () => null) {
     this.store = store;
     this.getConfig = getConfig;
     this.log = log;
+    this.getAi = getAi; // AI 调用模块（查询扩展）
     this.cache = null;
   }
 
@@ -109,10 +110,10 @@ class SearchEngine {
       }
     }
     let intent = '', llmUsed = false, llmError = null;
-    const client = useLlm ? llm.client(this.getConfig().llm) : null;
-    if (client && raw) {
+    const ai = useLlm ? this.getAi() : null;
+    if (ai && raw) {
       try {
-        const r = await client.expandQuery(raw);
+        const r = await ai.expandQuery(raw);
         if (r) {
           llmUsed = true;
           intent = r.intent || '';

@@ -67,7 +67,7 @@ async function check(cfg) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppta-plugin-'));
   try {
     const input = path.join(dir, 'input.json'), output = path.join(dir, 'output.md');
-    fs.writeFileSync(input, JSON.stringify({ version: 1, file: { id: 0, name: '示例文档.pptx', path: '', kind: 'ppt', pages: 2, author: '', category: '', tags: ['示例'], markdown: '' },
+    fs.writeFileSync(input, JSON.stringify({ version: 1, task: 'summarize', file: { id: 0, name: '示例文档.pptx', path: '', kind: 'ppt', pages: 2, author: '', category: '', tags: ['示例'], markdown: '' },
       pages: [{ idx: 1, title: '示例：项目概览', text: '这是用于检查插件脚本的示例内容。', notes: '' }, { idx: 2, title: '示例：下一步计划', text: '确认脚本能读取输入并写出 Markdown 总结。', notes: '' }], output }), 'utf8');
     const r = await run(cfg, { input, output, file: '', md: '' }, { timeoutMs: Math.min(120, Math.max(5, Number(cfg.timeout) || 300)) * 1000 });
     if (!r.ok) return { ok: false, error: r.error, ms: r.ms };

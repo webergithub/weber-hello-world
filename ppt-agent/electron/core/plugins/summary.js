@@ -8,9 +8,6 @@ const fs = require('fs');
 const path = require('path');
 const { EventEmitter } = require('events');
 const { Worker } = require('worker_threads');
-const { client } = require('../llm');
-const { OFFLINE_ONLY } = require('../offline');
-const runner = require('./scriptRunner');
 
 const isFake = () => process.env.PPTA_FAKE_LLM === '1'; // 测试用：工作线程用本地替身生成总结，不联网
 
@@ -47,16 +44,10 @@ class SummaryPlugin extends EventEmitter {
 
   get store() { return this.svc.store; }
 
+  /** 是否可用：统一由 AI 调用模块判断（脚本 / 大模型接口 / 测试替身） */
   available() {
-    const c = this.cfg();
-    if (c.enabled && c.script) {
-      const err = runner.validate(c);
-      return err ? { ok: false, reason: `总结脚本不可用：${err}`, engine: 'script' } : { ok: true, engine: 'script', model: `脚本：${path.basename(c.script)}` };
-    }
-    if (isFake()) return { ok: true, engine: 'worker', model: '本地测试替身' };
-    const llm = this.svc.config.llm || {};
-    if (!OFFLINE_ONLY && client(llm)) return { ok: true, engine: 'worker', model: llm.model };
-    return { ok: false, reason: c.script ? '总结脚本已设置但未生效：请在“设置 → 常规 → 插件：智能总结脚本”中点“生效”' : '还没有设置总结脚本：请在“设置 → 常规 → 插件：智能总结脚本”中选择脚本并点“生效”' };
+    const e = this.svc.ai.engine();
+    return e.ok ? { ok: true, engine: e.engine === 'script' ? 'script' : 'worker', model: e.model } : { ok: false, reason: e.reason, engine: e.engine };
   }
 
   /** 解析任务每解析完一个文档调用：开启“自动总结”时加入队列（任何错误都不影响解析任务） */
@@ -139,32 +130,23 @@ class SummaryPlugin extends EventEmitter {
   outPath(j) { return path.join(this.dir, `${j.fileId}_${safeName(path.parse(j.name).name)}_总结.md`); }
 
   /** 脚本方式：写出输入 JSON，子进程运行脚本，读取输出的 Markdown */
+  /** 脚本方式：交给 AI 调用模块（ai.run('summarize')）在子进程中执行 */
   async runScript(j) {
-    const c = this.cfg();
-    const jobDir = path.join(this.dir, '.jobs');
-    fs.mkdirSync(jobDir, { recursive: true });
     const f = this.store.getFile(j.fileId) || {};
-    const input = path.join(jobDir, `${j.id}.json`);
-    const output = path.join(jobDir, `${j.id}.md`);
-    fs.rmSync(output, { force: true });
     const pages = this.store.slidesOf(j.fileId, true).map((sl) => ({ idx: sl.idx, title: sl.title || '', text: sl.text || '', notes: sl.notes || '' }));
-    fs.writeFileSync(input, JSON.stringify({ version: 1, file: { id: f.id, name: f.name, path: f.path, kind: f.kind || 'ppt', pages: pages.length, author: f.author || '', category: f.category || '', tags: f.tags || [], markdown: f.md_path || '' }, pages, output }), 'utf8');
-    const r = await runner.run(c, { input, output, file: f.path || '', md: f.md_path || '' }, { onSpawn: (ch) => { this.child = ch; } });
+    const file = { id: f.id, name: f.name, path: f.path, kind: f.kind || 'ppt', pages: pages.length, author: f.author || '', category: f.category || '', tags: f.tags || [], markdown: f.md_path || '' };
+    const r = await this.svc.ai.run('summarize', { file, pages }, { onSpawn: (ch) => { this.child = ch; } });
     this.child = null;
     if (this.aborted) {
       // 手动暂停打断：不算失败，放回队列
       this.aborted = false;
-      fs.rmSync(input, { force: true }); fs.rmSync(output, { force: true });
       Object.assign(j, { status: 'queued', startedAt: null });
       this.busy = null;
       this.changed();
       return;
     }
-    let md = '';
-    if (r.ok) md = fs.existsSync(output) ? fs.readFileSync(output, 'utf8') : r.stdout;
-    fs.rmSync(input, { force: true }); fs.rmSync(output, { force: true });
-    if (r.ok && md.trim()) this.onMessage({ type: 'done', id: j.id, md, ms: r.ms });
-    else this.onMessage({ type: 'error', id: j.id, ms: r.ms, error: r.ok ? '脚本没有输出 Markdown' : r.error });
+    if (r.ok) this.onMessage({ type: 'done', id: j.id, md: r.text, ms: r.ms });
+    else this.onMessage({ type: 'error', id: j.id, ms: r.ms, error: r.error });
   }
 
   failBusy(error) {
@@ -184,9 +166,13 @@ class SummaryPlugin extends EventEmitter {
       fs.mkdirSync(this.dir, { recursive: true });
       const out = this.outPath(j);
       this.failStreak = 0;
-      fs.writeFileSync(out, m.md, 'utf8');
       const model = this.available().model || '';
-      this.store.db.prepare('INSERT OR REPLACE INTO doc_summaries(file_id, md_path, summary, model, at, ms) VALUES (?,?,?,?,?,?)').run(j.fileId, out, m.md, model, Date.now(), m.ms);
+      // 与原文件、解析出的 Markdown 建立关联：总结文件头部写明来源，入库时记录原文件路径与解析 MD 路径
+      const f = this.store.getFile(j.fileId) || {};
+      const body = String(m.md).replace(/^---\n[\s\S]*?\n---\n/, '');
+      const head = `---\n原文件: ${f.path || ''}\n解析 Markdown: ${f.md_path || ''}\n文档编号: ${j.fileId}\n生成方式: ${model}\n生成时间: ${new Date().toLocaleString('zh-CN', { hour12: false })}\n---\n\n`;
+      fs.writeFileSync(out, head + body, 'utf8');
+      this.store.db.prepare('INSERT OR REPLACE INTO doc_summaries(file_id, md_path, summary, model, at, ms, src_path, src_md) VALUES (?,?,?,?,?,?,?,?)').run(j.fileId, out, body, model, Date.now(), m.ms, f.path || '', f.md_path || '');
       Object.assign(j, { status: 'done', mdPath: out, ms: m.ms });
       this.svc.log.info(`[智能总结] 完成：${j.name}（${m.ms}ms）→ ${out}`);
     } else {
@@ -200,7 +186,7 @@ class SummaryPlugin extends EventEmitter {
       } else this.mutedFails++;
       if (this.failStreak >= 3 && !this.paused) {
         this.paused = true;
-        this.notice('error', '智能总结连续 3 个文档失败，已自动暂停；请检查“设置 → 常规 → 插件：智能总结脚本”后在“智能总结”页面点“继续”');
+        this.notice('error', '智能总结连续 3 个文档失败，已自动暂停；请检查“设置 → 常规 → AI 调用脚本”后在“智能总结”页面点“继续”');
         this.svc.log.warn('[智能总结] 连续失败 3 次，已自动暂停');
       }
     }
@@ -220,7 +206,7 @@ class SummaryPlugin extends EventEmitter {
 
   /** 已入库的总结（“已生成的总结”列表） */
   list() {
-    return this.store.db.prepare('SELECT s.file_id, s.md_path, s.model, s.at, s.ms, f.name, f.path, f.kind, f.slide_count, substr(s.summary, 1, 400) AS preview FROM doc_summaries s LEFT JOIN files f ON f.id = s.file_id ORDER BY s.at DESC').all();
+    return this.store.db.prepare('SELECT s.file_id, s.md_path, s.model, s.at, s.ms, s.src_md, f.name, f.path, f.md_path AS file_md, f.kind, f.slide_count, substr(s.summary, 1, 400) AS preview FROM doc_summaries s LEFT JOIN files f ON f.id = s.file_id ORDER BY s.at DESC').all();
   }
 
   /** 检索总结内容（智能搜索的“文档总结”页签 / RAG）：按命中的检索词数排序 */
@@ -229,13 +215,13 @@ class SummaryPlugin extends EventEmitter {
     if (!list.length) return [];
     const scope = fileIds ? new Set(fileIds) : null;
     const out = [];
-    for (const r of this.store.db.prepare('SELECT s.file_id, s.md_path, s.summary, s.at, f.name, f.path, f.kind FROM doc_summaries s JOIN files f ON f.id = s.file_id WHERE f.status = \'parsed\'').all()) {
+    for (const r of this.store.db.prepare('SELECT s.file_id, s.md_path, s.summary, s.at, f.name, f.path, f.md_path AS file_md, f.kind FROM doc_summaries s JOIN files f ON f.id = s.file_id WHERE f.status = \'parsed\'').all()) {
       if (scope && !scope.has(r.file_id)) continue;
       const low = r.summary.toLowerCase();
       const matched = list.filter((t) => low.includes(t));
       if (!matched.length) continue;
       const i = low.indexOf(matched[0]);
-      out.push({ file_id: r.file_id, name: r.name, path: r.path, kind: r.kind, md_path: r.md_path, at: r.at, matched, score: matched.length / list.length, snippet: r.summary.slice(Math.max(0, i - 60), i + 160) });
+      out.push({ file_id: r.file_id, name: r.name, path: r.path, kind: r.kind, md_path: r.md_path, file_md: r.file_md, at: r.at, matched, score: matched.length / list.length, snippet: r.summary.slice(Math.max(0, i - 60), i + 160) });
     }
     return out.sort((a, b) => b.score - a.score).slice(0, 100);
   }

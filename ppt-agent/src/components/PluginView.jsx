@@ -46,6 +46,7 @@ export default function PluginView() {
       {row.mdPath || row.md_path ? <button className="btn tiny" onClick={() => api.openPath(row.mdPath || row.md_path)}>打开 MD</button> : null}
       {row.mdPath || row.md_path ? <button className="btn tiny" title="在资源管理器中显示" onClick={() => api.showItem(row.mdPath || row.md_path)}>📂</button> : null}
       {row.path && <button className="btn tiny ghost" onClick={() => api.openPath(row.path)}>原文件</button>}
+      {(row.file_md || row.src_md) && <button className="btn tiny ghost" title="解析出的 Markdown" onClick={() => api.openPath(row.file_md || row.src_md)}>解析 MD</button>}
     </>
   );
   const jobCols = [

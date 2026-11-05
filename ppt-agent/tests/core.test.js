@@ -617,6 +617,89 @@ test('智能搜索进度：按阶段推送进度，最后为 100% 完成；列�
   svc.close();
 });
 
+test('乱码兼容：修复 GBK / UTF-8 被错认的文件名与文字，正常西文不变；按声明编码解码 XML；解析与存量修复', async () => {
+  const { fixMojibake, decodeXml } = require('../electron/core/textfix');
+  const cp437 = 'ÇüéâäàåçêëèïîìÄÅÉæÆôöòûùÿÖÜ¢£¥₧ƒáíóúñÑªº¿⌐¬½¼¡«»░▒▓│┤╡╢╖╕╣║╗╝╜╛┐└┴┬├─┼╞╟╚╔╩╦╠═╬╧╨╤╥╙╘╒╓╫╪┘┌█▄▌▐▀αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■\u00a0';
+  const gbkBytes = (t) => Buffer.from(execFileSync('iconv', ['-f', 'utf-8', '-t', 'gbk'], { input: t }));
+  const as437 = (b) => [...b].map((x) => (x < 128 ? String.fromCharCode(x) : cp437[x - 128])).join('');
+  const as1252 = (b) => new TextDecoder('windows-1252').decode(b);
+  for (const t of ['测试文档.pptx', '2024年度经营分析汇报.pptx', '机场运营_航班过站保障方案（终版）.pptx']) {
+    assert.strictEqual(fixMojibake(as437(gbkBytes(t))), t, 'GBK 被当成 CP437');
+    assert.strictEqual(fixMojibake(as1252(gbkBytes(t))), t, 'GBK 被当成 Windows-1252');
+    assert.strictEqual(fixMojibake(as1252(Buffer.from(t))), t, 'UTF-8 被当成 Windows-1252');
+  }
+  for (const t of ['Größe Übersicht.pptx', 'Café à la carte', 'naïve résumé', 'Señor Muñoz', 'Plan B — Q3 “Roadmap”.pptx', '正常中文.pptx', 'Normal.pptx']) assert.strictEqual(fixMojibake(t), t, '正常文字不变：' + t);
+  assert.strictEqual(decodeXml(Buffer.concat([Buffer.from('<?xml version="1.0" encoding="GB2312"?><a>'), gbkBytes('中文标题'), Buffer.from('</a>')])), '<?xml version="1.0" encoding="GB2312"?><a>中文标题</a>');
+  assert.strictEqual(decodeXml(Buffer.from('\ufeff<a>中文</a>', 'utf16le')), '<a>中文</a>');
+  // 解析：乱码文件名显示为正确中文，原路径不变
+  const { AgentService } = require('../electron/core/service');
+  const lib = path.join(tmp, 'libmoji');
+  fs.mkdirSync(lib, { recursive: true });
+  const garbled = as437(gbkBytes('航班保障方案')) + '.pptx';
+  const src = fs.readdirSync(P('机场运营')).filter((n) => n.endsWith('.pptx')).sort()[0];
+  fs.copyFileSync(P('机场运营', src), path.join(lib, garbled));
+  const svc = new AgentService(path.join(tmp, 'datamoji'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const id = svc.addTask(lib);
+  const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  const f = svc.store.listFiles({ status: 'parsed' })[0];
+  assert.strictEqual(f.name, '航班保障方案.pptx');
+  assert.strictEqual(path.basename(f.path), garbled, '原文件路径不变（仍能打开）');
+  // 存量修复：已入库的乱码文件名 / 页面文字
+  svc.store.db.prepare('UPDATE files SET name = ? WHERE id = ?').run(garbled, f.id);
+  const sl = svc.store.slidesOf(f.id)[0];
+  svc.store.db.prepare('UPDATE slides SET title = ? WHERE id = ?').run(as1252(Buffer.from('关键里程碑')), sl.id);
+  const r = await svc.repairTextEncoding();
+  assert.ok(r.files >= 1 && r.slides >= 1);
+  assert.strictEqual(svc.store.getFile(f.id).name, '航班保障方案.pptx');
+  assert.strictEqual(svc.store.getSlide(sl.id).title, '关键里程碑');
+  assert.ok(svc.store.ftsSearch('"里程碑"', 10).some((x) => x.id === sl.id), '修复后的文字可被检索');
+  svc.close();
+});
+
+test('AI 调用模块：脚本统一给智能总结、智能搜索（查询扩展）、智能生成（关键词）复用；总结与原文件 / 解析 MD 关联', async () => {
+  const { AgentService } = require('../electron/core/service');
+  delete process.env.PPTA_FAKE_LLM;
+  const svc = new AgentService(path.join(tmp, 'dataai'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  assert.strictEqual(svc.ai.engine().ok, false);
+  assert.strictEqual(svc.ai.can('expandQuery'), false);
+  const en = await svc.pluginEnable(true, { script: svc.pluginExample(), auto: true });
+  assert.ok(en.enabled, en.error);
+  assert.ok(svc.ai.can('summarize') && !svc.ai.can('expandQuery') && !svc.ai.can('generate'), '用于搜索 / 生成默认关闭');
+  const id = svc.addTask(P('机场运营'));
+  const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  for (let i = 0; i < 100; i++) { const st = svc.summary.state(); if (!st.counts.queued && !st.counts.running) break; await new Promise((r) => setTimeout(r, 200)); }
+  // 总结与原文件、解析 MD 关联
+  const list = svc.summary.list();
+  assert.ok(list.length >= 3);
+  for (const x of list) {
+    const md = fs.readFileSync(x.md_path, 'utf8');
+    assert.ok(md.startsWith('---\n原文件: ') && md.includes('解析 Markdown: ') && md.includes(`文档编号: ${x.file_id}`), '总结文件头部写明来源');
+    assert.ok(x.src_md && x.src_md === x.file_md, '入库时记录解析 MD');
+  }
+  const d = await svc.fileDetail(list[0].file_id, { record: false });
+  assert.ok(d.summary && d.summary.md_path === list[0].md_path, '文件详情带总结');
+  let q = await svc.searchQuery('航班过站', { record: false });
+  assert.ok(q.files.some((f) => f.summary), '搜索结果中的文件带总结');
+  assert.strictEqual(q.analysis.llmUsed, false, '未勾选“用于智能搜索”时不调用');
+  // 勾选“用于智能搜索 / 智能生成”后，同一个脚本参与查询扩展与需求理解
+  svc.setConfig({ plugins: { summary: { useForSearch: true, useForGenerate: true } } });
+  assert.ok(svc.ai.can('expandQuery') && svc.ai.can('generate'));
+  q = await svc.searchQuery('航班 过站 保障', { record: false });
+  assert.strictEqual(q.analysis.llmUsed, true, '查询扩展走 AI 脚本');
+  const kw = await svc.ai.generateKeywords('航班过站保障 关键里程碑');
+  assert.ok(kw && kw.keywords.includes('关键里程碑'));
+  const g = await svc.smartCandidates('航班过站保障 关键里程碑', {});
+  assert.ok(g.analysis && Array.isArray(g.analysis.aiKeywords), '智能生成使用 AI 关键词');
+  assert.ok(svc.ai.state().calls.ok >= 3);
+  svc.close();
+});
+
 test('定时监测更新：增量扫描新增 / 修改 / 删除；移出资料库的文档不自动加回', async () => {
   const { AgentService } = require('../electron/core/service');
   const lib = path.join(tmp, 'lib3');

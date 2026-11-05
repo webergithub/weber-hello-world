@@ -227,6 +227,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 <button className="btn small" onClick={() => app.basket.add([slide.id])}>＋ 加入导出篮</button>
                 <button className="btn small" onClick={() => app.openSlide(slide.id, files.map((f) => f.id))}>⛶ 逐页浏览</button>
                 {slide.file && <button className="btn small ghost" onClick={() => api.openPath(slide.file.path)}>打开原文件</button>}
+                {detail && detail.summary && <button className="btn small ghost" title="打开该文档的智能总结（Markdown）" onClick={() => api.openPath(detail.summary.md_path)}>🧠 智能总结</button>}
               </div>
               {(back.length > 0 || outside) && (
                 <div className="hint-bar">🔗 正在查看推荐的页面{outside ? '（该文档不在当前列表中）' : ''}{back.length > 0 && <> · <button className="btn small" onClick={goBack}>↩ 返回 {back[back.length - 1].label}</button></>}{back.length > 1 && <button className="btn small" onClick={goOrigin}>⤒ 回到最初：{back[0].label}</button>}</div>
