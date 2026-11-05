@@ -1082,10 +1082,10 @@ class AgentService extends EventEmitter {
     return list.map((p) => latest.get(p) || { link_path: p, path: p, name: path.basename(p), dir: path.dirname(p), ext: path.extname(p).toLowerCase(), kind: KIND_OF.get(path.extname(p).toLowerCase()), action: 'pending', message: '待处理' });
   }
 
-  taskDetail(id) {
+  async taskDetail(id) {
     const task = this.store.getTask(id);
     if (!task) return null;
-    const files = this.store.taskFiles(id);
+    const files = await this.store.taskFilesLiteAsync(id); // 精简行、分页读取，避免上万条记录拖慢界面
     const parsedIds = [...new Set(files.filter((f) => f.id && (f.status === 'parsed')).map((f) => f.id))];
     const st = { files: files.length, parsed: 0, skipped: 0, duplicate: 0, failed: 0, slides: 0, notes: 0, videos: 0, dark: 0, light: 0, size: 0, hidden: 0, subtitles: 0, byExt: {}, byCategory: {} };
     for (const f of files) {
@@ -1094,15 +1094,19 @@ class AgentService extends EventEmitter {
       st.byExt[f.ext || path.extname(f.link_path)] = (st.byExt[f.ext || path.extname(f.link_path)] || 0) + 1;
       if (f.status === 'parsed') st.byCategory[f.category || '其他'] = (st.byCategory[f.category || '其他'] || 0) + 1;
     }
-    for (const fid of parsedIds) {
-      const f = this.store.getFile(fid);
-      st.slides += f.slide_count; st.notes += f.notes_count; st.videos += f.video_count; st.dark += f.dark_slides; st.light += f.light_slides;
+    // 处理记录已带文件字段，不再逐个查询文件（上万个文件时逐个查询会让主进程卡住数秒）
+    const seenF = new Set();
+    for (const f of files) {
+      if (!f.id || f.status !== 'parsed' || seenF.has(f.id)) continue;
+      seenF.add(f.id);
+      st.slides += f.slide_count || 0; st.notes += f.notes_count || 0; st.videos += f.video_count || 0; st.dark += f.dark_slides || 0; st.light += f.light_slides || 0;
     }
-    const agg = parsedIds.length ? this.store.db.prepare(`SELECT SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (${parsedIds.join(',')})`).get() : { h: 0, s: 0 };
-    st.hidden = agg.h || 0; st.subtitles = agg.s || 0;
-    // 每个文件的隐藏页 / 含字幕页数，供统计数字下钻
+    // 每个文件的隐藏页 / 含字幕页数（供统计数字下钻），合计即任务的隐藏页 / 含字幕页
+    st.hidden = 0; st.subtitles = 0;
     if (parsedIds.length) {
-      const per = new Map(this.store.db.prepare(`SELECT file_id, SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (${parsedIds.join(',')}) GROUP BY file_id`).all().map((r) => [r.file_id, r]));
+      await new Promise((r) => setImmediate(r));
+      const per = new Map(this.store.db.prepare(`SELECT file_id, SUM(hidden) h, SUM(CASE WHEN media LIKE '%"cues"%' THEN 1 ELSE 0 END) s FROM slides WHERE file_id IN (SELECT DISTINCT file_id FROM task_files WHERE task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)) GROUP BY file_id`).all(id, id).map((r) => [r.file_id, r]));
+      for (const r of per.values()) { st.hidden += r.h || 0; st.subtitles += r.s || 0; }
       for (const f of files) { const r = f.id && f.status === 'parsed' ? per.get(f.id) : null; f.hidden_count = r ? r.h || 0 : 0; f.subtitle_count = r ? r.s || 0 : 0; }
     }
     return { task: { ...task, running: this.runningSet.has(id) }, files, stats: st };
@@ -1120,7 +1124,7 @@ class AgentService extends EventEmitter {
   }
   /** 资料库文件；taskId：只返回该任务解析到的文件 */
   async library({ taskId } = {}) {
-    const all = (await this.store.listAllFilesAsync()).filter((f) => f.status !== 'recycled');
+    const all = await this.store.listLibraryAsync(); // 精简行：上万个文件时完整行有十几 MB，界面会卡住
     if (!taskId) return all;
     const own = new Set(this.store.taskFiles(taskId).map((f) => f.id).filter(Boolean));
     return all.filter((f) => own.has(f.id));
@@ -1146,18 +1150,19 @@ class AgentService extends EventEmitter {
     return { ...s, file: f, counterpart };
   }
 
+  /** 分类与标签统计（只返回数量，界面按分类筛选时用已加载的文件列表） */
   categories({ taskId } = {}) {
-    let files = this.store.listFiles({ status: 'parsed' });
+    let files = this.store.db.prepare("SELECT id, category, tags FROM files WHERE status = 'parsed'").all().map((r) => { let tags = []; try { tags = JSON.parse(r.tags || '[]'); } catch { /* ignore */ } return { id: r.id, category: r.category, tags }; });
     if (taskId) { const own = this.taskFileIds(taskId); files = files.filter((f) => own.has(f.id)); }
     const cats = {};
     const tagCount = {};
     for (const f of files) {
-      (cats[f.category || '其他'] = cats[f.category || '其他'] || []).push(f);
+      cats[f.category || '其他'] = (cats[f.category || '其他'] || 0) + 1;
       for (const t of f.tags || []) tagCount[t] = (tagCount[t] || 0) + 1;
     }
     const isAttr = (t) => /^(白底|黑底|黑白混合|含视频|含字幕|含表格|含图表|含讲解词|全页讲解词|含批注|Word文档|中文|英文|中英双语|大文件|\d+[页节]以内|\d+-\d+[页节]|\d+[页节]以上)$|^目录:/.test(t);
     const tags = Object.entries(tagCount).sort((a, b) => b[1] - a[1]).slice(0, 400).map(([tag, n]) => ({ tag, n, attr: isAttr(tag) }));
-    return { categories: Object.entries(cats).map(([name, list]) => ({ name, files: list })).sort((a, b) => b.files.length - a.files.length), tags };
+    return { categories: Object.entries(cats).map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count), tags };
   }
 
   async groups({ sort = 'name', order = 'asc', taskId } = {}) {
@@ -1183,7 +1188,11 @@ class AgentService extends EventEmitter {
     opts = { ...opts, taskIds, taskId: taskIds.length === 1 ? taskIds[0] : null };
     const t0 = Date.now();
     let r;
-    try { r = await this.search.search(q, { ...opts, useLlm, fileIds }); } catch (e) {
+    // 检索进度（v3.8）：界面传入 progressId 时按阶段推送 searchProgress 事件
+    const pid = opts.progressId;
+    const onProgress = pid ? (p) => this.emit('searchProgress', { id: pid, q, ...p }) : null;
+    try { r = await this.search.search(q, { ...opts, useLlm, fileIds, onProgress }); } catch (e) {
+      if (pid) this.emit('searchProgress', { id: pid, q, error: String(e.message || e), finished: true });
       if (opts.record !== false) this.store.db.prepare('INSERT INTO search_history(q, task_id, task_ids, use_llm, at, ms, status, error) VALUES (?,?,?,?,?,?,?,?)').run(q, opts.taskId || null, JSON.stringify(taskIds), useLlm ? 1 : 0, Date.now(), Date.now() - t0, 'failed', String(e.message || e));
       throw e;
     }
@@ -1843,10 +1852,10 @@ class AgentService extends EventEmitter {
     return { now, files, viewTimes: this.store.viewDaily(since), history: this.store.historyDaily(since) };
   }
 
-  /** 资料库总览：每个任务及全部任务识别到的文档 */
-  async overview() {
-    const files = await this.store.listAllFilesAsync();
-    const tasks = this.store.listTasksLite().map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: [...new Set(this.store.taskFiles(t.id).map((f) => f.id).filter(Boolean))] }));
+  /** 资料库总览：tasksOnly 时只返回任务与其文件 id（界面复用已加载的文件列表） */
+  async overview({ tasksOnly = false } = {}) {
+    const files = tasksOnly ? [] : await this.store.listLibraryAsync();
+    const tasks = this.store.listTasksLite().filter((t) => !t.parent_id).map((t) => ({ id: t.id, name: t.name, dir: t.dir, status: t.status, fileIds: this.store.taskFileIdList(t.id) }));
     return { tasks, files: files.filter((f) => f.status !== 'recycled') };
   }
 

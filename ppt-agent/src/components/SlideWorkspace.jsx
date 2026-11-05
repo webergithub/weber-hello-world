@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useIncremental } from '../useIncremental';
 import { api, fmtSize, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
 import { renderMarkdown } from '../md';
@@ -46,6 +47,8 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
     const f = filter.trim().toLowerCase();
     return files.filter((x) => !f || x.name.toLowerCase().includes(f) || (x.dir || '').toLowerCase().includes(f) || (x.tags || []).some((t) => t.toLowerCase().includes(f)));
   }, [files, filter]);
+  // 文件很多时分批显示（当前文件所在位置之前的都显示出来）
+  const inc = useIncremental(visible, { step: 200, resetKey: filter, keepIndex: useMemo(() => visible.findIndex((x) => x.id === fileId), [visible, fileId]) });
 
   useEffect(() => { if (initialFileId) setFileId(initialFileId); }, [initialFileId]);
   useEffect(() => { if (initialSlideId) setSlideId(initialSlideId); }, [initialSlideId]);
@@ -167,7 +170,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
         <div className="ws-files">
           <div className="col-head"><span>文件名</span><button className="icon-btn tiny" title="折叠文件列" onClick={() => setCol('files', false)}>«</button></div>
           {visible.length === 0 && <div className="empty-tip">{emptyText}</div>}
-          {visible.map((f) => (
+          {inc.items.map((f) => (
             <div key={f.id} className={`file-item ${f.id === fileId ? 'active' : ''} ${f.status}`} onClick={() => setFileId(f.id)} title={f.path}>
               <div className="fi-name">{f.name}</div>
               <div className="fi-meta">
@@ -180,6 +183,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
               </div>
             </div>
           ))}
+          {inc.sentinel}
         </div>)}
         {!cols.slides ? <div className="col-collapsed" onClick={() => setCol('slides', true)} title="展开页面列"><span>▸ {isWord ? '章节' : 'PPT 页数'}（{slides.length}）</span></div> : (
         <div className="ws-slides" ref={listRef} tabIndex={0} onKeyDown={onKey}>

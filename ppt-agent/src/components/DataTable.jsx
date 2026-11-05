@@ -147,6 +147,10 @@ function FilterPop({ col, kind, values, value, onChange, onClose, anchor, onSort
  */
 // 会话内记住每个列表的筛选、关键字、滚动位置与“上次查看”的行：从详情返回时恢复到原来的位置
 const SESSION = new Map();
+// 大列表分批显示：先渲染 PAGE 行，滚动接近底部时再追加（上万行一次渲染会让界面卡住十几秒）
+const PAGE = 300;
+// 排序比较用 Intl.Collator（比逐次调用 localeCompare 快很多）
+const COLLATOR = new Intl.Collator('zh-CN', { numeric: true });
 
 export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, i) => r.id ?? i, rowClass, onRowClick, empty = '暂无数据', defaultSort = null, toolbar = null, maxHeight, selectable = false, selected, onSelect, selectableRow = () => true, actions = null }) {
   const sk = sessionKey || id;
@@ -268,10 +272,21 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
     const val = (r) => { const v = get(r); return v === undefined || v === null ? '' : v; };
     return [...rows].sort((a, b) => {
       const x = val(a), y = val(b);
-      const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), 'zh-CN', { numeric: true });
+      const c = typeof x === 'number' && typeof y === 'number' ? x - y : COLLATOR.compare(String(x), String(y));
       return c * sort.d;
     });
   }, [filtered, sort, columns]);
+  // 分批显示：limit 行；“上次查看”的行在后面时直接显示到那一行
+  const [limit, setLimit] = useState(() => Math.max(PAGE, sess.limit || 0));
+  useEffect(() => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), limit }); }, [limit, sk]);
+  useEffect(() => {
+    if (lastRow === null || lastRow === undefined) return;
+    const i = sorted.findIndex((r, k) => String(rowKey(r, k)) === String(lastRow));
+    if (i >= limit) setLimit(i + 50);
+  }, [sorted]); // eslint-disable-line react-hooks/exhaustive-deps
+  const page = sorted.length > limit ? sorted.slice(0, limit) : sorted;
+  const more = sorted.length - page.length;
+  const onScrollMore = (el) => { if (more > 0 && el.scrollTop + el.clientHeight > el.scrollHeight - 600) setLimit((n) => n + PAGE * 2); };
   const clickHead = (c) => {
     if (c.nosort) return;
     if (!sort || sort.k !== c.key) setSort({ k: c.key, d: 1 });
@@ -330,7 +345,7 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
           {kw.trim() && <span className="chip">关键字：{kw}<b onClick={() => setKw('')}>×</b></span>}
         </div>
       )}
-      <div className="table-wrap" ref={wrapRef} style={maxHeight ? { maxHeight } : undefined} onScroll={(e) => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), scroll: e.currentTarget.scrollTop }); }}>
+      <div className="table-wrap" ref={wrapRef} style={maxHeight ? { maxHeight } : undefined} onScroll={(e) => { SESSION.set(sk, { ...(SESSION.get(sk) || {}), scroll: e.currentTarget.scrollTop }); onScrollMore(e.currentTarget); }}>
         <table ref={tableRef} className={`grid ${widths ? 'fixed' : ''}`} style={widths ? { width: (selectable ? 34 : 0) + visible.reduce((a, c) => a + (widths[c.key] || 120), 0) } : undefined}>
           <thead>
             <tr>{selectable && <th className="sel-col"><input type="checkbox" checked={allOn} onChange={() => onSelect(allOn ? new Set() : new Set(keys))} title="全选" /></th>}{visible.map((c) => (
@@ -342,7 +357,7 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
             ))}</tr>
           </thead>
           <tbody>
-            {sorted.map((r, i) => (
+            {page.map((r, i) => (
               <tr key={rowKey(r, i)} data-rk={String(rowKey(r, i))} className={`${rowClass ? rowClass(r) : ''} ${selectable && sel.has(rowKey(r, i)) ? 'row-sel' : ''} ${lastRow !== null && String(rowKey(r, i)) === String(lastRow) ? 'row-last' : ''}`}
                 onMouseDown={() => { const k = rowKey(r, i); setLastRow(k); SESSION.set(sk, { ...(SESSION.get(sk) || {}), last: k }); }} onClick={onRowClick ? () => onRowClick(r) : undefined}>
                 {selectable && <td className="sel-col">{selectableRow(r) ? <input type="checkbox" checked={sel.has(rowKey(r, i))} onClick={(e) => { e.stopPropagation(); pick(rowKey(r, i), e); }} readOnly /> : null}</td>}
@@ -351,6 +366,7 @@ export default function DataTable({ id, sessionKey, columns, rows, rowKey = (r, 
             ))}
           </tbody>
         </table>
+        {more > 0 && <div className="dt-more">已显示 {page.length} / {sorted.length} 条，滚动到底部继续显示 <button className="btn tiny" onClick={() => setLimit((n) => n + 2000)}>再显示 2000 条</button></div>}
         {!rows.length && <div className="empty-tip">{empty}</div>}
         {rows.length > 0 && !sorted.length && <div className="empty-tip">没有符合筛选条件的记录 <button className="btn tiny" onClick={() => { setFilters({}); setKw(''); }}>清除筛选</button></div>}
       </div>

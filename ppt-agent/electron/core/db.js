@@ -170,6 +170,27 @@ class Store {
   handledSince(taskId, since) {
     return new Set(this.q('SELECT path FROM task_files WHERE task_id = ? AND at >= ?').all(taskId, since || 0).map((r) => r.path));
   }
+  taskFileIdList(taskId) { return this.q('SELECT DISTINCT file_id FROM task_files WHERE file_id IS NOT NULL AND task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)').all(taskId, taskId).map((r) => r.file_id); }
+  /** 同 taskFilesLite，分页读取并在页之间让出主进程（上万条记录时不卡界面） */
+  async taskFilesLiteAsync(taskId, size = 2000) {
+    const cols = this.liteCols().split(', ').map((c) => `f.${c}`).join(', ');
+    const stmt = this.db.prepare(`SELECT tf.rowid AS _rid, tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) AND tf.rowid > ? ORDER BY tf.rowid LIMIT ?`);
+    const out = [];
+    let last = -1;
+    for (;;) {
+      const rows = stmt.all(taskId, taskId, last, size);
+      for (const r of rows) { const row = this.liteRow(r); delete row._rid; out.push(row); }
+      if (rows.length < size) break;
+      last = rows[rows.length - 1]._rid;
+      await new Promise((r) => setImmediate(r));
+    }
+    return out;
+  }
+  /** 任务的处理记录（界面用的精简行） */
+  taskFilesLite(taskId) {
+    const cols = this.liteCols().split(', ').map((c) => `f.${c}`).join(', ');
+    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) ORDER BY tf.rowid`).all(taskId, taskId).map(this.liteRow);
+  }
   taskFiles(taskId) {
     // 总任务包含其全部子任务的处理记录
     return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) ORDER BY tf.rowid`).all(taskId, taskId).map(this.fileRow);
@@ -330,6 +351,17 @@ class Store {
     }
     return out;
   }
+  /** 列表用的文件行（界面上的资料库 / 任务清单）：不带检索词、向量、指纹，meta 只保留页面尺寸等少量字段 */
+  liteCols() {
+    if (!this._liteCols) this._liteCols = this.db.prepare('PRAGMA table_info(files)').all().map((c) => c.name).filter((n) => !['terms', 'vec', 'emb', 'fingerprint'].includes(n)).map((n) => `"${n}"`).join(', ');
+    return this._liteCols;
+  }
+  liteRow = (r) => {
+    if (!r) return null;
+    const m = J(r.meta, {});
+    return { ...r, tags: J(r.tags, []), meta: { slideSize: m.slideSize, legacy: m.legacy }, preview: J(r.preview, null) };
+  };
+  async listLibraryAsync() { return (await this.paged(`SELECT ${this.liteCols()} FROM files WHERE status != 'recycled'`, [], this.liteRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
   async listAllFilesAsync() { return (await this.paged('SELECT * FROM files WHERE 1 = 1', [], this.fileRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
   listFilesAsync(status) { return this.paged('SELECT * FROM files WHERE status = ?', [status], this.fileRow); }
   fileTermsAsync() { return this.paged("SELECT id, terms FROM files WHERE status = 'parsed'", [], (r) => ({ id: r.id, terms: J(r.terms, {}) })); }

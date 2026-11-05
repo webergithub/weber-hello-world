@@ -111,7 +111,7 @@ test('服务：去重（已解析过 / 重复文件）、标签 20 个、分组�
   svc.on('progress', (p) => stages.add(p.stage));
   svc.startTask(id);
   await done(id);
-  const d = svc.taskDetail(id);
+  const d = await svc.taskDetail(id);
   assert.ok(d.stats.duplicate >= 1);
   const ok = d.files.filter((f) => f.action === 'parsed' && f.slide_count >= 3);
   assert.ok(ok.length >= 7);
@@ -427,7 +427,7 @@ test('大任务拆分为子任务：按文件夹不超过上限；子任务单�
   assert.strictEqual(parent.parsed + parent.skipped + parent.duplicate + parent.failed, kids.reduce((a, c) => a + c.parsed + c.skipped + c.duplicate + c.failed, 0));
   assert.ok(parent.message.startsWith('子任务 4/4 已完成'), parent.message);
   // 总任务的文件清单、资料库范围包含全部子任务
-  assert.strictEqual(new Set(svc.taskDetail(id).files.map((f) => f.link_path)).size, 9);
+  assert.strictEqual(new Set((await svc.taskDetail(id)).files.map((f) => f.link_path)).size, 9);
   assert.ok(svc.subtaskFiles(first).every((f) => f.action !== 'pending'));
   // 不拆分：文件数不超过上限时与以前一样
   svc.setConfig({ split: { size: 1000 } });
@@ -579,6 +579,41 @@ test('插件·智能总结脚本：检查后生效；解析完成自动异步总
   // 失效：不再自动总结
   await svc.pluginEnable(false);
   assert.strictEqual(svc.summary.available().ok, false);
+  svc.close();
+});
+
+test('智能搜索进度：按阶段推送进度，最后为 100% 完成；列表接口返回精简行', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'dataprog'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  const id = svc.addTask(P('机场运营'));
+  const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+  svc.startTask(id);
+  await done;
+  const evs = [];
+  svc.on('searchProgress', (p) => evs.push(p));
+  const r = await svc.searchQuery('航班过站', { record: false, useLlm: false, progressId: 'p1' });
+  assert.ok(r.files.length > 0);
+  assert.ok(evs.length >= 6 && evs.every((e) => e.id === 'p1'));
+  const last = evs[evs.length - 1];
+  assert.ok(last.finished && last.pct === 100);
+  assert.deepStrictEqual(last.stages.map((x) => x.key), ['load', 'analyze', 'meta', 'fts', 'vector', 'score', 'rank']);
+  assert.ok(last.stages.every((x) => x.status === 'done'), JSON.stringify(last.stages.map((x) => x.status)));
+  assert.ok(evs.some((e) => !e.finished && e.stage === 'vector'));
+  // 没有 progressId 时不推送
+  evs.length = 0;
+  await svc.searchQuery('航班', { record: false, useLlm: false });
+  assert.strictEqual(evs.length, 0);
+  // 精简行：不带检索词、向量、指纹；分类只返回数量
+  const lib = await svc.library();
+  assert.ok(lib.length && lib.every((f) => f.terms === undefined && f.vec === undefined && f.fingerprint === undefined && f.meta && !('props' in f.meta)));
+  const cats = svc.categories({});
+  assert.ok(cats.categories.every((c) => typeof c.count === 'number' && !c.files));
+  const ov = await svc.overview({ tasksOnly: true });
+  assert.strictEqual(ov.files.length, 0);
+  assert.ok(ov.tasks[0].fileIds.length >= 1);
+  const td = await svc.taskDetail(id);
+  assert.ok(td.files.length >= 1 && td.stats.slides > 0);
   svc.close();
 });
 

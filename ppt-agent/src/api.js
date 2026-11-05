@@ -1,11 +1,26 @@
 // 渲染进程与主进程之间的接口封装
 const bridge = window.ppta;
 
+// 正在进行的接口调用（v3.8）：超过 0.3 秒的显示“正在加载…”提示（对话框、轮询类接口除外）
+const NO_BUSY = new Set(['selectDir', 'selectFiles', 'saveFile', 'confirm', 'selectScript', 'queueState', 'tasks', 'pluginState', 'logTail', 'clientLog', 'search', 'pluginCheck', 'pluginEnable']);
+const inflight = new Map();
+let callSeq = 0;
+const busySubs = new Set();
+const busyEmit = () => { for (const f of busySubs) f(); };
+export const busy = {
+  subscribe: (f) => { busySubs.add(f); return () => busySubs.delete(f); },
+  oldest: () => { let o = null; for (const c of inflight.values()) if (!o || c.t0 < o.t0) o = c; return o; },
+};
+
 export const api = new Proxy({}, {
   get: (_t, method) => (...args) => {
     if (!bridge) return Promise.reject(new Error('请在 PPT智能体 桌面程序中运行'));
+    const track = !NO_BUSY.has(method);
+    const id = ++callSeq;
+    if (track) { inflight.set(id, { method, t0: Date.now() }); busyEmit(); }
     // 去掉 Electron 附加的“Error invoking remote method …”前缀，只保留可读的错误信息
-    return bridge.call(method, ...args).catch((e) => { throw new Error(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); });
+    return bridge.call(method, ...args).catch((e) => { throw new Error(String((e && e.message) || e).replace(/^Error invoking remote method '[^']+': (Error: )?/, '')); })
+      .finally(() => { if (track) { inflight.delete(id); busyEmit(); } });
   },
 });
 

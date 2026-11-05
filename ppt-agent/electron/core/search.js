@@ -4,6 +4,33 @@ const glossary = require('./glossary');
 const { tokenize, cut, detectLang, ZH_STOP, EN_STOP, HAS_CJK } = require('./textproc');
 const { hashVector, cosine, embedder } = require('./vectors');
 const llm = require('./llm');
+const { ticker } = require('./yieldy');
+
+// 检索进度的阶段（v3.8）：[key, 名称, 权重]，界面按权重显示总进度
+const STAGES = [['load', '准备检索索引', 10], ['analyze', '解析查询', 5], ['meta', '文件名 / 标签匹配', 15], ['fts', '全文检索（BM25）', 10], ['vector', '向量召回', 25], ['score', '页面打分', 25], ['rank', '排序与黑白底对应', 10]];
+
+/** 进度报告：阶段开始 / 结束、阶段内计数（限流 120ms），onProgress 收到 { pct, stage, label, done, total, elapsed, stages } */
+function progressReporter(onProgress) {
+  const t0 = Date.now();
+  const stages = STAGES.map(([key, label, w]) => ({ key, label, w, status: 'wait', done: 0, total: 0, ms: 0, note: '' }));
+  const W = stages.reduce((a, x) => a + x.w, 0);
+  let cur = null, last = 0;
+  const emit = (force) => {
+    if (!onProgress) return;
+    const now = Date.now();
+    if (!force && now - last < 120) return;
+    last = now;
+    let p = 0;
+    for (const st of stages) p += st.status === 'done' ? st.w : st.status === 'run' && st.total ? st.w * Math.min(1, st.done / st.total) : 0;
+    try { onProgress({ pct: Math.round((p / W) * 100), stage: cur && cur.key, label: cur && cur.label, done: cur ? cur.done : 0, total: cur ? cur.total : 0, elapsed: now - t0, stages: stages.map(({ w, ...x }) => x) }); } catch { /* ignore */ }
+  };
+  return {
+    start(key, total = 0, note = '') { if (cur && cur.status === 'run') this.end(); cur = stages.find((x) => x.key === key); cur.status = 'run'; cur.total = total; cur.done = 0; cur.note = note; cur.t = Date.now(); emit(true); },
+    tick(done) { if (cur) { cur.done = done; emit(false); } },
+    end(note) { if (!cur) return; cur.status = 'done'; cur.ms = Date.now() - cur.t; if (cur.total) cur.done = cur.total; if (note !== undefined) cur.note = note; emit(true); },
+    finish() { if (cur && cur.status === 'run') this.end(); for (const st of stages) if (st.status === 'wait') st.status = 'skip'; cur = null; if (onProgress) { const now = Date.now(); try { onProgress({ pct: 100, stage: 'done', label: '检索完成', done: 0, total: 0, elapsed: now - t0, stages: stages.map(({ w, ...x }) => x), finished: true }); } catch { /* ignore */ } } },
+  };
+}
 
 const ASCII = /^[\x00-\x7f]+$/;
 function escapeRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
@@ -27,6 +54,15 @@ class SearchEngine {
   }
 
   invalidate() { this.cache = null; }
+
+  /** 异步加载检索索引（分页读取，不阻塞主进程） */
+  async loadAsync() {
+    if (this.cache) return this.cache;
+    const files = await this.store.listFilesAsync('parsed');
+    const vecs = await this.store.slideVectorsAsync();
+    if (!this.cache) this.cache = { files, fileMap: new Map(files.map((f) => [f.id, f])), vecs };
+    return this.cache;
+  }
 
   load() {
     if (this.cache) return this.cache;
@@ -104,18 +140,28 @@ class SearchEngine {
 
   async search(q, opts = {}) {
     const t0 = Date.now();
-    const { files, fileMap, vecs } = this.load();
+    const P = progressReporter(opts.onProgress);
+    const tk = ticker(20); // 每约 20ms 让出一次主进程，检索上万页时界面不卡
+    const y = async () => { const p = tk(); if (p) await p; };
+    P.start('load', 0, this.cache ? '已缓存' : '');
+    const { files, fileMap, vecs } = await this.loadAsync();
+    P.end(`${files.length} 个文档 · ${vecs.length} 页`);
+    P.start('analyze');
     const analysis = await this.analyze(q, opts);
     const groups = analysis.groups;
+    P.end(`中文词 ${analysis.zh.length} · 英文词 ${analysis.en.length}${analysis.llmUsed ? ' · 大模型扩展' : ''}`);
     const result = { analysis, files: [], slides: { light: [], dark: [], word: [], pdf: [] }, totalSlides: 0, timing: {} };
-    if (!groups.length) return result;
+    if (!groups.length) { P.finish(); return result; }
     // opts.fileIds：只在这些文件中检索（任务范围）
     const scope = opts.fileIds ? new Set(opts.fileIds) : null;
     const filterFile = (f) => (!scope || scope.has(f.id)) && (!opts.folder || f.dir.startsWith(opts.folder)) && (!opts.category || f.category === opts.category);
 
     // 第 1 层：文件名；第 2 层：标签
     const fileScores = new Map();
+    P.start('meta', files.length);
+    let fi = 0;
     for (const f of files) {
+      if ((++fi & 255) === 0) { P.tick(fi); await y(); }
       if (!filterFile(f)) continue;
       const name = `${f.name} ${f.title || ''}`.toLowerCase();
       const nameCov = this.coverage(name, groups);
@@ -124,18 +170,28 @@ class SearchEngine {
       fileScores.set(f.id, { nameScore: nameCov.score, nameMatched: nameCov.matched, tagScore: tagCov.score, tagMatched: tagCov.matched, content: 0, hits: 0, pages: 0 });
     }
     result.timing.meta = Date.now() - t0;
+    P.end(`${[...fileScores.values()].filter((x) => x.nameScore || x.tagScore).length} 个文档的名称或标签命中`);
 
     // 第 3 层：内容 —— BM25 + 哈希向量 + 可选语义向量
     const synonyms = [...new Set(groups.flatMap((g) => g.synonyms))];
     const tokens = [...new Set(synonyms.flatMap((s) => tokenize(s)))].slice(0, 80);
     const lists = [];
+    P.start('fts');
     if (tokens.length) {
       const match = tokens.map((t) => `"${t.replace(/"/g, '')}"`).join(' OR ');
       lists.push({ w: 1.0, ids: this.store.ftsSearch(match, scope ? 5000 : 500).map((r) => r.id), name: 'bm25' });
     }
+    P.end(`${lists.length ? lists[0].ids.length : 0} 页`);
     const qv = hashVector(synonyms.join(' '));
     const pool = scope ? vecs.filter((v) => scope.has(v.file_id)) : vecs;
-    const hv = pool.map((v) => ({ id: v.id, s: cosine(qv, v.vec) })).filter((x) => x.s > 0.08).sort((a, b) => b.s - a.s).slice(0, 400);
+    P.start('vector', pool.length);
+    const hvAll = [];
+    for (let i = 0; i < pool.length; i++) {
+      if ((i & 511) === 0 && i) { P.tick(i); await y(); }
+      const sc = cosine(qv, pool[i].vec);
+      if (sc > 0.08) hvAll.push({ id: pool[i].id, s: sc });
+    }
+    const hv = hvAll.sort((a, b) => b.s - a.s).slice(0, 400);
     lists.push({ w: 0.7, ids: hv.map((x) => x.id), name: 'vector' });
     const emb = embedder(this.getConfig().embedding);
     if (emb && vecs.some((v) => v.emb)) {
@@ -147,13 +203,17 @@ class SearchEngine {
       } catch (e) { this.log.warn('语义向量检索失败，已回退', e); analysis.semanticError = e.message; }
     }
     result.timing.retrieve = Date.now() - t0;
+    P.end(`${hv.length} 页`);
     const rrf = new Map();
     for (const l of lists) l.ids.forEach((id, rank) => rrf.set(id, (rrf.get(id) || 0) + l.w / (60 + rank)));
     const maxR = Math.max(1e-9, ...rrf.values());
     const candIds = [...rrf.keys()];
     const slides = this.store.getSlides(candIds);
     const scored = [];
+    P.start('score', slides.length);
+    let si = 0;
     for (const s of slides) {
+      if ((++si & 63) === 0) { P.tick(si); await y(); }
       const f = fileMap.get(s.file_id);
       if (!f || !filterFile(f)) continue;
       if (opts.theme && s.theme !== opts.theme) continue;
@@ -167,6 +227,8 @@ class SearchEngine {
       if (cov.score > 0) { fs_.content = Math.max(fs_.content, score); fs_.hits++; }
     }
     scored.sort((a, b) => b.score - a.score);
+    P.end(`候选 ${slides.length} 页 · 命中 ${scored.length} 页`);
+    P.start('rank');
 
     // 文件分层排序
     const ranked = [];
@@ -207,6 +269,8 @@ class SearchEngine {
     result.totalSlides = scored.length;
     result.retrievers = lists.map((l) => `${l.name}:${l.ids.length}`);
     result.timing.total = Date.now() - t0;
+    P.end(`${result.files.length} 个文档 · ${all.length} 页`);
+    P.finish();
     return result;
   }
 

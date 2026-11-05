@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { api, fmtSize, fmtTime, THEME_LABEL } from '../api';
+import { api, on, fmtSize, fmtTime, THEME_LABEL } from '../api';
+import SearchProgress from './SearchProgress';
 import { useApp } from '../ctx';
 import { highlight } from '../md';
 import SlidePreview from './SlidePreview';
@@ -23,11 +24,18 @@ function snippet(text, terms, n = 140) {
 }
 
 /** 智能搜索（总览分析模块）：默认在所有资料库中检索，可切换为只搜当前选择的任务 */
+// 最近一次检索的进度（切换页面再回来时仍显示）
+let LAST_PROG = null;
+
 export default function SearchView({ state, setState, taskId, taskName, defaultAll = false }) {
   const app = useApp();
   const { q = '', result = null, tab = 'light' } = state;
   const [input, setInput] = useState(q);
   const [busy, setBusy] = useState(false);
+  // 检索进度（v3.8）：主进程按阶段推送，只显示本页发起的这一次
+  const [prog, setProg] = useState(LAST_PROG);
+  const progId = useRef(null);
+  useEffect(() => on('searchProgress', (p) => { if (p.id === progId.current) { LAST_PROG = p; setProg(p); } }), []);
   const [useLlm, setUseLlm] = useState(true);
   const [sel, setSel] = useState(() => new Set());
   const [flash, setFlash] = useState(null);
@@ -71,7 +79,11 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const run = async (text = input, scope = curScope()) => {
     if (!text.trim()) return;
     setBusy(true);
-    try { show(text.trim(), await api.search(text.trim(), { useLlm: scope.useLlm, taskIds: scope.taskIds || [] })); } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
+    const pid = `sp-${Date.now()}-${Math.round(Math.random() * 1e6)}`;
+    progId.current = pid;
+    LAST_PROG = { id: pid, pct: 0, label: '准备中', elapsed: 0, stages: null };
+    setProg(LAST_PROG);
+    try { show(text.trim(), await api.search(text.trim(), { useLlm: scope.useLlm, taskIds: scope.taskIds || [], progressId: pid })); } catch (e) { app.toast('检索失败：' + e.message, 'error'); } finally { setBusy(false); }
   };
   const enqueue = () => { if (!input.trim()) return; searchQueue.add(input, curScope()); app.toast(`已加入搜索队列：${input.trim()}`); setTasksOpen(true); };
   // 查看历史 / 队列中某次搜索的结果
@@ -142,6 +154,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
               onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && run()} />
             <button className="btn primary sl-btn" disabled={busy} onClick={() => run()}>{busy ? '检索中…' : '搜索'}</button>
           </div>
+          {busy && <SearchProgress prog={prog} />}
           <div className="row center sl-actions">{scopeSeg}<button className="btn" disabled={!input.trim()} title="加入搜索队列，按顺序依次执行" onClick={enqueue}>＋ 加入队列</button>{tasksBtn}</div>
           {recent.length > 0 && <div className="chips sl-recent"><span className="muted small">最近搜索：</span>{recent.map((h) => <span key={h.id} className="chip link" title={`${fmtTime(h.at)} · 文件 ${h.files}`} onClick={() => viewHistory(h.id)}>🕘 {h.q}</span>)}</div>}
           {llmOn && <label className="chk"><input type="checkbox" checked={useLlm} onChange={(e) => setUseLlm(e.target.checked)} /> 大模型解析查询</label>}
@@ -161,6 +174,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
           <button className="btn ghost" title="清空结果，回到搜索首页" onClick={() => { setState({}); setInput(''); }}>✕ 清空</button>
         </div>
       )}
+      {result && prog && <SearchProgress prog={prog} />}
       {result && (
         <div className="search-result">
           <div className="analysis">

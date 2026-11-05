@@ -16,6 +16,7 @@ import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
 import PluginView from './components/PluginView';
+import BusyHint from './components/BusyHint';
 import AnalyticsView from './components/AnalyticsView';
 import RecycleView from './components/Recycle';
 import SettingsView from './components/SettingsView';
@@ -527,6 +528,7 @@ export default function App() {
           </div>
         )}
         {drill && <DrillDialog spec={drill} onClose={() => setDrill(null)} />}
+        <BusyHint />
         {feedback && <FeedbackDialog onClose={() => setFeedback(false)} />}
         {welcome && config && <WelcomeDialog onClose={onWelcomeClose} />}
         {tour && <Tour onClose={() => setTour(false)} go={setView} setLibMode={setAllLibMode} onHelp={() => setView({ type: 'help' })} />}

@@ -1447,3 +1447,24 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .plugin-check.ok { color: var(--ok-fg); }
 .plugin-check.bad { color: var(--danger-fg); }
 .plugin-check pre { margin: 4px 0 0; padding: 6px 8px; background: var(--bg3); border-radius: 6px; color: var(--fg2); white-space: pre-wrap; max-height: 120px; overflow: auto; }
+
+/* ---- v3.8 大列表分批显示 / 加载提示 / 搜索进度 ---- */
+.dt-more { padding: 10px 12px; text-align: center; color: var(--fg3); font-size: 12.5px; }
+.dt-more .btn { margin-left: 8px; }
+.inc-more { padding: 10px; text-align: center; color: var(--fg3); font-size: 12px; cursor: pointer; }
+.busy-hint { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); z-index: 9000; display: flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 999px; background: var(--bg2); border: 1px solid var(--line); box-shadow: var(--sh-md); font-size: 13px; color: var(--fg2); pointer-events: none; }
+.busy-hint .spin { width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: busy-spin .8s linear infinite; }
+@keyframes busy-spin { to { transform: rotate(360deg); } }
+.search-prog { margin: 8px 0 4px; padding: 6px 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); font-size: 12.5px; }
+.search-prog.finished { background: transparent; border-style: dashed; }
+.search-prog.error { border-color: var(--danger); }
+.search-prog .sp-head { display: flex; align-items: center; gap: 10px; }
+.search-prog .sp-bar { flex: 0 0 260px; height: 6px; }
+.search-prog .sp-pct { font-weight: 600; min-width: 34px; color: var(--accent-fg); }
+.search-prog .sp-line { flex: 1; color: var(--fg2); }
+.search-prog .sp-stages { margin-top: 6px; display: grid; gap: 2px; }
+.search-prog .sp-stage { display: grid; grid-template-columns: 20px 150px 130px 1fr 60px; gap: 8px; padding: 2px 0; color: var(--fg2); }
+.search-prog .sp-stage.st-wait, .search-prog .sp-stage.st-skip { color: var(--fg3); }
+.search-prog .sp-stage.st-run { color: var(--accent-fg); font-weight: 600; }
+.search-prog .sp-stage.st-done .sp-ic { color: var(--ok-fg); }
+.search-prog .sp-ms { text-align: right; }

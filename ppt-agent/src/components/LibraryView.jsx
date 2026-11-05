@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { useIncremental } from '../useIncremental';
 import { api, fmtSize, fmtTime, THEME_LABEL, KIND_LABEL, KIND_ICON, STATUS_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import SlideWorkspace from './SlideWorkspace';
@@ -11,6 +12,7 @@ import TagList from './TagList';
 
 const SIDE_W = 240;
 
+const NAME_COLLATOR = new Intl.Collator('zh-CN');
 const MODES = { overview: '📋 总览', gallery: '🖼 PPT 总览库', folder: '📂 按文件夹', name: '🔤 按文件名称', tags: '🏷 按名称与内容归类（标签）' };
 
 /** 资料库浏览：taskId 为空时是“所有资料库”（全部解析过的文档），否则只显示该任务解析到的文档 */
@@ -26,7 +28,7 @@ export default function LibraryView({ mode, setMode, taskId, title = '📚 资�
       </div>
       <div className="lib-tabs">{Object.entries(MODES).map(([k, v]) => <button key={k} className={mode === k ? 'on' : ''} onClick={() => setMode(k)}>{v}</button>)}</div>
       <div className="tab-body lib-body">
-        {mode === 'overview' && <OverviewMode scopeTask={taskId} />}
+        {mode === 'overview' && <OverviewMode scopeTask={taskId} files={files} />}
         {mode === 'gallery' && <GalleryMode key={taskId || 'all'} files={files} />}
         {mode === 'folder' && <FolderMode files={files} />}
         {mode === 'name' && <NameMode files={files} />}
@@ -115,7 +117,7 @@ function initialOf(name) {
 
 function NameMode({ files }) {
   const [letter, setLetter] = useState('');
-  const sorted = useMemo(() => [...files].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files]);
+  const sorted = useMemo(() => [...files].sort((a, b) => NAME_COLLATOR.compare(a.name, b.name)), [files]);
   const groups = useMemo(() => { const m = new Map(); for (const f of sorted) { const k = initialOf(f.name); m.set(k, (m.get(k) || 0) + 1); } return m; }, [sorted]);
   const list = letter ? sorted.filter((f) => initialOf(f.name) === letter) : sorted;
   const [open, setOpen] = useSideCollapse();
@@ -145,7 +147,7 @@ function TagMode({ files, cats }) {
       <SideShell open={open} setOpen={setOpen} label="分类与标签">
         <div className="side-title">内容分类</div>
         <div className={`tree-row ${!cat ? 'active' : ''}`} onClick={() => setCat('')}>全部分类</div>
-        {cats.categories.map((c) => <div key={c.name} className={`tree-row ${cat === c.name ? 'active' : ''}`} onClick={() => setCat(c.name)}>🏷 {c.name} <span className="muted small">({c.files.length})</span></div>)}
+        {cats.categories.map((c) => <div key={c.name} className={`tree-row ${cat === c.name ? 'active' : ''}`} onClick={() => setCat(c.name)}>🏷 {c.name} <span className="muted small">({c.count})</span></div>)}
         <div className="side-title">标签云 {tag && <button className="btn tiny" onClick={() => setTag('')}>清除</button>}</div>
         <div className="tag-cloud">
           {content.slice(0, 150).map((t) => (
@@ -169,7 +171,7 @@ function TagMode({ files, cats }) {
 function GalleryMode({ files }) {
   const app = useApp();
   const [kind, setKind] = useState('');
-  const list = useMemo(() => files.filter((f) => f.status === 'parsed' && f.slide_count > 0 && (!kind || (f.kind || 'ppt') === kind)).sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')), [files, kind]);
+  const list = useMemo(() => files.filter((f) => f.status === 'parsed' && f.slide_count > 0 && (!kind || (f.kind || 'ppt') === kind)).sort((a, b) => NAME_COLLATOR.compare(a.name, b.name)), [files, kind]);
   const [cur, setCur] = useState(null);
   const [shown, setShown] = useState(null);
   // 左侧文件名一栏可拖动调整宽度（记住）
@@ -186,13 +188,15 @@ function GalleryMode({ files }) {
   };
   const ids = list.map((f) => f.id);
   const start = cur && ids.includes(cur) ? cur : ids[0];
+  const inc = useIncremental(list, { step: 300, resetKey: kind, keepIndex: list.findIndex((f) => f.id === (shown || start)) });
   useEffect(() => { const el = document.querySelector(`.gallery-side [data-gid="${shown}"]`); if (el) el.scrollIntoView({ block: 'nearest' }); }, [shown]);
   return (
     <div className="gallery" style={{ gridTemplateColumns: `${sideW}px 6px 1fr` }}>
       <div className="gallery-side">
         <div className="col-head"><span>文档（{list.length}）</span>
           <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}><option value="">全部</option><option value="ppt">PPT</option><option value="word">Word</option><option value="pdf">PDF</option></select></div>
-        {list.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{KIND_ICON[f.kind || 'ppt']} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
+        {inc.items.map((f) => <div key={f.id} data-gid={f.id} className={`tree-row ${f.id === (shown || start) ? 'active' : ''}`} title={f.path} onClick={() => setCur(f.id)}>{KIND_ICON[f.kind || 'ppt']} {f.name} <span className="muted small">{f.slide_count}</span></div>)}
+        {inc.sentinel}
       </div>
       <div className="v-split" title="拖动调整宽度，双击恢复" onMouseDown={startSide} onDoubleClick={() => setSideW(SIDE_W)} />
       <div className="gallery-main">{start ? <SlideViewer key={start} fileIds={ids} initialFileId={start} active={!app.modalOpen} compact onFileChange={setShown} /> : <div className="empty-tip">资料库还没有已解析的文档</div>}</div>
@@ -201,15 +205,17 @@ function GalleryMode({ files }) {
 }
 
 // 总览：每个任务 / 全部任务识别到的所有文档的汇总信息
-function OverviewMode({ scopeTask }) {
+function OverviewMode({ scopeTask, files }) {
   const app = useApp();
-  const [data, setData] = useState({ tasks: [], files: [] });
+  const [tasksData, setData] = useState({ tasks: [] });
+  // 文件列表复用资料库页面已加载的那份（不再重复读取上万条记录）
+  const data = useMemo(() => ({ tasks: tasksData.tasks, files: files || [] }), [tasksData, files]);
   const [pick, setTaskId] = useState('all');
   const taskId = scopeTask || pick;
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
   const [sel, setSel] = useState(() => new Set());
-  useEffect(() => { api.overview().then(setData); }, [app.taskTick]);
+  useEffect(() => { api.overview({ tasksOnly: true }).then(setData); }, [app.taskTick]);
   const byId = useMemo(() => new Map(data.files.map((f) => [f.id, f])), [data]);
   const scope = taskId === 'all' ? data.files : ((data.tasks.find((t) => String(t.id) === String(taskId)) || { fileIds: [] }).fileIds.map((id) => byId.get(id)).filter(Boolean));
   const rows = useMemo(() => {
