@@ -2,8 +2,8 @@
 
 把电脑上的 PPT（以及 Word、PDF 文档） **按页解析 → 归档入库 → 中英文智能检索（RAG）→ 多选页面编排导出新 PPT** 的桌面工具（Windows 便携版 exe，Electron 构建）。
 
-> 下载：[`download/PPT-Agent-3.7.0-win-x64-portable.exe`](download/PPT-Agent-3.7.0-win-x64-portable.exe)（免安装，双击运行）。
-> 直接下载链接：<https://github.com/webergithub/weber-hello-world/raw/claude/trusting-dijkstra-6yrvoy/ppt-agent/download/PPT-Agent-3.7.0-win-x64-portable.exe>
+> 下载：[`download/PPT-Agent-3.9.0-win-x64-portable.exe`](download/PPT-Agent-3.9.0-win-x64-portable.exe)（免安装，双击运行）。
+> 直接下载链接：<https://github.com/webergithub/weber-hello-world/raw/claude/trusting-dijkstra-6yrvoy/ppt-agent/download/PPT-Agent-3.9.0-win-x64-portable.exe>
 > 也可在 GitHub Actions 的 **PPT Agent Windows Build** 工作流里下载在 Windows 上构建的同版本产物。
 
 ## v1.6 新增
@@ -118,7 +118,7 @@ Electron 主进程 (electron/main.js)
 
 ## 使用
 
-1. 运行 `PPT-Agent-3.7.0-win-x64-portable.exe`（未签名，第一次运行时 Windows SmartScreen 提示请选择“更多信息 → 仍要运行”；之后程序会自动解除下载锁定，不再每次提示）。
+1. 运行 `PPT-Agent-3.9.0-win-x64-portable.exe`（未签名，第一次运行时 Windows SmartScreen 提示请选择“更多信息 → 仍要运行”；之后程序会自动解除下载锁定，不再每次提示）。
 2. 点击左上角 **＋ 添加目录解析**（可多选目录），任务在左侧列表中显示进度。
 3. 解析完成后在任务的三个页签中查看页面 / 文件统计 / 日志；或进入「智能搜索」「资料库浏览」「相似分组」。
 4. 多选页面 → **导出为新 PPT** 或加入 **导出篮**。
