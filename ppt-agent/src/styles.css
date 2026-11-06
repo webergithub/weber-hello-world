@@ -1482,3 +1482,8 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .eta-row { margin-top: 4px; }
 .plugin-progress .eta-line { margin-left: 8px; }
 .ls-top .eta-line { font-size: 12px; }
+
+/* v3.10.1 后台 Office 进程 */
+.toast.warn { border-left-color: var(--warn); }
+.office-procs .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.office-procs .dt { max-height: 260px; }

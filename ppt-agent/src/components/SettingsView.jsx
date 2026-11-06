@@ -5,6 +5,7 @@ import { useApp } from '../ctx';
 import KeymapEditor from './KeymapEditor';
 import WatchSettings from './WatchSettings';
 import PluginSettings from './PluginSettings';
+import OfficeProcs from './OfficeProcs';
 import { LANG_NAMES } from './Panels';
 
 const LLM_PRESETS = [
@@ -21,7 +22,7 @@ const LLM_PRESETS = [
 ];
 
 const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
-const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', procs: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
 
 export default function SettingsView({ focus }) {
@@ -33,6 +34,7 @@ export default function SettingsView({ focus }) {
   const langRef = useRef(null);
   const [closedN, setClosedN] = useState(() => dismissedCount());
   const pluginRef = useRef(null);
+  const procsRef = useRef(null);
   const [mailBusy, setMailBusy] = useState(false);
   const [fbSt, setFbSt] = useState(null);
   useEffect(() => { api.feedbackStatus().then(setFbSt).catch(() => {}); }, []);
@@ -48,7 +50,7 @@ export default function SettingsView({ focus }) {
   const [tab, setTab] = useState(() => FOCUS_TAB[focus] || LAST_TAB.k || 'general');
   const pickTab = (k) => { LAST_TAB.k = k; setTab(k); };
   useEffect(() => { if (FOCUS_TAB[focus]) pickTab(FOCUS_TAB[focus]); }, [focus]);
-  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'langs' ? langRef : focus === 'plugin' ? pluginRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
+  useEffect(() => { const r = focus === 'keys' ? keysRef : focus === 'langs' ? langRef : focus === 'plugin' ? pluginRef : focus === 'procs' ? procsRef : focus === 'watch' ? watchRef : focus === 'agent' ? agentRef : focus === 'mail' ? mailRef : null; if (cfg && r && r.current) r.current.scrollIntoView({ block: 'start' }); }, [!!cfg, focus, tab]);
   if (!cfg) return null;
   const offline = !!cfg.offlineOnly;
   const set = (patch) => setCfg({ ...cfg, ...patch });
@@ -104,6 +106,12 @@ export default function SettingsView({ focus }) {
           <h3>AI 调用脚本（智能总结 / 智能搜索 / 智能生成）</h3>
           <PluginSettings />
         </section>
+        {eng && eng.procsCheck ? (
+          <section data-sec="procs" ref={procsRef} className={focus === 'procs' ? 'flash-sec' : ''}>
+            <h3>后台 Word / PowerPoint 进程</h3>
+            <OfficeProcs />
+          </section>
+        ) : null}
         <section>
           <h3>页面截图（PPT 原始页预览）</h3>
           <p className="muted">优先使用 PowerPoint 导出每页截图（保真度最高），其次 LibreOffice；均不可用时使用内置版式渲染。截图也会用于更准确地判断黑底/白底。</p>

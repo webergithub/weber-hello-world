@@ -216,6 +216,17 @@ app.whenReady().then(async () => {
   logger = require('./core/logger');
   const { AgentService } = require('./core/service');
   service = new AgentService(dataDir);
+  // 外部进程登记（v3.10.1）：退出时结束全部外部进程；上次异常退出留下的 Word / PowerPoint 后台进程启动时清理
+  const procs = require('./core/procs');
+  procs.configure({ file: path.join(app.getPath('userData'), 'office-procs.json'), logger: logger.child('procs') });
+  setTimeout(async () => {
+    await procs.cleanupStale().catch(() => 0);
+    const others = (await procs.findOrphans().catch(() => [])).filter((o) => !o.ours);
+    if (others.length) {
+      logger.child('procs').warn(`发现 ${others.length} 个后台 Word / PowerPoint 进程（没有窗口）：${others.map((o) => `${o.image}#${o.pid} ${o.memMB}MB`).join('，')}`);
+      send('appNotice', { msg: `发现 ${others.length} 个后台运行的 Word / PowerPoint 进程（没有窗口，约 ${others.reduce((a, o) => a + o.memMB, 0)} MB）`, kind: 'warn', label: '查看并结束', link: { type: 'view', view: { type: 'settings', focus: 'procs' } }, cat: '系统' });
+    }
+  }, 8000);
   logger.child('app').info(`PPT智能体 v${app.getVersion()} 启动（Electron ${process.versions.electron}，${process.platform}）`);
   // 去掉程序 exe 的下载标记，以后启动不再每次弹出 SmartScreen（便携版为外层 exe）
   const mark = require('./core/winmark').clearDownloadMark(process.env.PORTABLE_EXECUTABLE_FILE || process.execPath);
@@ -295,6 +306,8 @@ app.whenReady().then(async () => {
 
   const api = {
     stats: () => service.stats(),
+    officeProcs: () => require('./core/procs').findOrphans(),
+    killOfficeProcs: (list) => require('./core/procs').killOrphans(list),
     tasks: () => service.tasks(),
     addTask: (dir, opts) => service.addTask(dir, opts),
     addAllLocalTask: (opts) => service.addAllLocalTask(opts),
@@ -485,9 +498,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => { quitting = true; });
+// 退出时结束程序启动的全部外部进程（PowerShell / Word / PowerPoint / LibreOffice / pdftoppm / ffmpeg / AI 脚本），
+// app.exit()（切换数据目录后重启）不触发 will-quit，由 process 'exit' 兜底
+const killChildren = () => { try { require('./core/procs').killAll(); } catch { /* ignore */ } };
+app.on('will-quit', killChildren);
+process.on('exit', killChildren);
 app.on('window-all-closed', () => {
   if (booting) return; // 启动选择数据目录的窗口关闭后才创建主窗口
   if (logger) logger.child('app').info('程序退出');
+  killChildren();
   if (service) service.close();
   app.quit();
 });

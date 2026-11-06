@@ -85,7 +85,7 @@ class SummaryPlugin extends EventEmitter {
   /** 手动暂停：立即结束正在运行的脚本，该文档放回队列（继续时重新总结） */
   pause() {
     this.paused = true;
-    if (this.child) { this.aborted = true; try { this.child.kill(); } catch { /* ignore */ } }
+    if (this.child) { this.aborted = true; require('../procs').killTree(this.child.pid); }
     this.changed();
   }
   resume() { this.paused = false; this.failStreak = 0; this.changed(); setImmediate(() => this.kick()); }

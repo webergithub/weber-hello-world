@@ -1,10 +1,11 @@
 'use strict';
-// 插件脚本调用：按脚本类型选择运行方式，在单独的子进程中异步执行（不阻塞解析任务），超时结束进程。
+// 插件脚本调用：按脚本类型选择运行方式，在单独的子进程中异步执行（不阻塞解析任务），超时 / 暂停 / 程序退出时结束整个进程树（procs）。
 // 参数模板中的占位符：{input} 输入 JSON 路径，{output} 输出 Markdown 路径，{file} 原文件路径，{md} 解析出的 Markdown 路径。
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
+const procs = require('../procs');
 
 const isWin = process.platform === 'win32';
 
@@ -47,12 +48,13 @@ function run(cfg, vars, { timeoutMs, onSpawn } = {}) {
     let stdout = '', stderr = '', done = false;
     let child;
     try {
-      child = spawn(c.cmd, args, { cwd: path.dirname(cfg.script), windowsHide: true, env: { ...process.env, ...(c.env || {}), PPTA_INPUT: vars.input || '', PPTA_OUTPUT: vars.output || '' } });
+      child = spawn(c.cmd, args, { cwd: path.dirname(cfg.script), windowsHide: true, detached: !isWin, env: { ...process.env, ...(c.env || {}), PPTA_INPUT: vars.input || '', PPTA_OUTPUT: vars.output || '' } });
     } catch (e) { resolve({ ok: false, error: `无法启动脚本：${e.message}`, ms: 0 }); return; }
+    procs.track(child, `AI 脚本 ${path.basename(cfg.script)}`);
     if (onSpawn) onSpawn(child);
     const finish = (r) => { if (done) return; done = true; clearTimeout(timer); resolve({ ms: Date.now() - t0, stdout, stderr: stderr.slice(-4000), ...r }); };
     const limit = timeoutMs || Math.max(5, Number(cfg.timeout) || 300) * 1000;
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* ignore */ } finish({ ok: false, error: `脚本运行超时（${Math.round(limit / 1000)} 秒）` }); }, limit);
+    const timer = setTimeout(() => { procs.killTree(child.pid); finish({ ok: false, error: `脚本运行超时（${Math.round(limit / 1000)} 秒）` }); }, limit);
     child.stdout.on('data', (d) => { if (stdout.length < 4e6) stdout += d; });
     child.stderr.on('data', (d) => { if (stderr.length < 1e5) stderr += d; });
     child.on('error', (e) => finish({ ok: false, error: `无法启动脚本：${e.message}` }));

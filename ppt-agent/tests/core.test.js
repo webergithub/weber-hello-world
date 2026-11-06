@@ -943,3 +943,102 @@ test('讲解词批量写回：同一文件多页一次写入（整段替换 + �
   assert.strictEqual(p.slides[0].notes.replace(/\r/g, ''), '第一行修正\n第二行修正');
   assert.ok(p.slides[1].notes.includes('【English】') && p.slides[1].notes.includes('Revenue by business line'));
 });
+
+// 进程是否还在运行（已结束但未被回收的僵尸进程算已结束：容器的 1 号进程可能不回收孤儿进程）
+function procAlive(pid) {
+  try { process.kill(pid, 0); } catch { return false; }
+  try { return !/^\d+ \(.*\) Z/.test(fs.readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return true; }
+}
+
+test('外部进程（v3.10.1）：超时结束整个进程树；程序退出结束全部登记的进程', async () => {
+  const procs = require('../electron/core/procs');
+  const { run } = require('../electron/core/office');
+  const alive = procAlive;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  procs._reset();
+  // 子进程再启动一个孙进程：超时后两个都要结束
+  const r = await run('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { timeout: 400, name: 'test' });
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.timedOut, true);
+  const grand = Number(r.stdout.trim());
+  assert.ok(grand > 0);
+  await wait(200);
+  assert.strictEqual(alive(grand), false, '孙进程应已结束');
+  assert.strictEqual(procs.state().children.length, 0);
+  // 正常结束：返回输出、移出登记
+  const ok = await run('/bin/sh', ['-c', 'echo hi; echo err 1>&2'], { timeout: 5000 });
+  assert.strictEqual(ok.ok, true);
+  assert.strictEqual(ok.stdout.trim(), 'hi');
+  assert.match(ok.stderr, /err/);
+  const bad = await run('/bin/sh', ['-c', 'exit 3']);
+  assert.strictEqual(bad.ok, false);
+  assert.strictEqual(bad.code, 3);
+  const none = await run('/nonexistent/ppta-cmd', []);
+  assert.strictEqual(none.ok, false);
+  // 程序退出：运行中的进程（含孙进程）全部结束
+  const p = run('/bin/sh', ['-c', 'sleep 30 & echo $!; wait'], { timeout: 0, onLine: (l) => { p.grand = Number(l); } });
+  await wait(300);
+  assert.strictEqual(procs.state().children.length, 1);
+  const k = procs.killAll('测试退出');
+  assert.strictEqual(k.children, 1);
+  await p;
+  await wait(200);
+  assert.strictEqual(alive(p.grand), false);
+  procs._reset();
+});
+
+test('Word / PowerPoint 自动化（v3.10.1）：只关闭自己启动的实例，未正常收尾时按 PID + 启动时间结束，异常退出后下次启动清理', async () => {
+  const procs = require('../electron/core/procs');
+  const { ps, comScript } = require('../electron/core/office');
+  const calls = [];
+  procs._reset({ runner: (script) => { calls.push(script); const out = (script.match(/Get-Process -Id (\d+)/g) || []).map((m) => `KILLED:${m.match(/\d+/)[0]}`).join('\n'); return Promise.resolve(out); } });
+  const state = path.join(tmp, 'office-procs.json');
+  procs.configure({ file: state });
+  // 脚本报告了新启动的 Word，但被超时结束（没有 PPTA_DONE）→ 核对 PID + 启动时间后结束，记录清除
+  let seen = null;
+  const fakeRun = (cmd, args, { onLine }) => { onLine('PPTA_PID:1234:133700000000000001:WINWORD'); seen = JSON.parse(fs.readFileSync(state, 'utf8')); return Promise.resolve({ ok: false, timedOut: true, stdout: '', stderr: '' }); };
+  await ps('x', {}, 1000, fakeRun);
+  assert.strictEqual(seen.length, 1, '运行中先记到文件里（程序异常退出后下次启动清理）');
+  assert.strictEqual(seen[0].start, '133700000000000001');
+  assert.strictEqual(calls.length, 1);
+  assert.match(calls[0], /Get-Process -Id 1234 .*ToFileTimeUtc\(\) -eq 133700000000000001/);
+  assert.strictEqual(fs.existsSync(state), false);
+  // 脚本正常收尾（PPTA_DONE）→ 不再额外结束
+  await ps('x', {}, 1000, (c, a, { onLine }) => { onLine('PPTA_PID:1235:133700000000000002:WINWORD'); onLine('PPTA_DONE'); return Promise.resolve({ ok: true, stdout: 'OK', stderr: '' }); });
+  assert.strictEqual(calls.length, 1);
+  assert.strictEqual(procs.state().office.length, 0);
+  // 无效的 PID / 启动时间不会进入脚本
+  assert.strictEqual(procs.reapScript([{ pid: '1; Stop-Computer', start: '1' }, { pid: 5, start: '1 -or $true' }]), '');
+  // 异常退出后下次启动：读取记录文件并清理
+  fs.writeFileSync(state, JSON.stringify([{ pid: 77, start: '133700000000000077', image: 'POWERPNT' }]));
+  assert.strictEqual(await procs.cleanupStale(), 1);
+  assert.match(calls[1], /Get-Process -Id 77 /);
+  assert.strictEqual(fs.existsSync(state), false);
+  // 退出时同步结束仍在使用的 Office 进程
+  procs._reset({ runner: (script, { sync }) => { calls.push(script); return sync ? 'KILLED:88' : Promise.resolve('KILLED:88'); } });
+  procs.addOffice({ pid: 88, start: '133700000000000088', image: 'WINWORD' });
+  assert.strictEqual(procs.killAll().office, 1);
+  // 自动化脚本：关闭提示框、禁用宏、本次启动的实例一律 Quit 并确认退出，不再因为已有 Word 在运行而跳过 Quit
+  const s = comScript({ image: 'WINWORD', progId: 'Word.Application', setup: '$app.DisplayAlerts=0', body: '$doc=1', cleanup: '', idle: '$false' });
+  assert.ok(!/\$was/.test(s));
+  assert.match(s, /\$quit=\$mine\.Count -gt 0/);
+  assert.match(s, /FinalReleaseComObject/);
+  assert.match(s, /WaitForExit\(8000\)/);
+  assert.match(s, /PPTA_DONE/);
+  procs._reset();
+  procs.configure({ file: null });
+});
+
+test('AI 调用脚本（v3.10.1）：超时结束脚本及其启动的子进程', async () => {
+  const runner = require('../electron/core/plugins/scriptRunner');
+  const sh = path.join(tmp, 'slow-ai.sh');
+  fs.writeFileSync(sh, '#!/bin/sh\nsleep 30 &\necho $! > "$1"\nwait\n');
+  fs.chmodSync(sh, 0o755);
+  const pidFile = path.join(tmp, 'slow-ai.pid');
+  const r = await runner.run({ script: sh, args: '"{output}"' }, { output: pidFile }, { timeoutMs: 500 });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /超时/);
+  await new Promise((res) => setTimeout(res, 300));
+  const grand = Number(fs.readFileSync(pidFile, 'utf8'));
+  assert.strictEqual(procAlive(grand), false);
+});
