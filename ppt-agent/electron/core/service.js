@@ -2264,7 +2264,7 @@ class AgentService extends EventEmitter {
     const jobCount = new Map();
     if (active.length) {
       const rows = this.store.db.prepare('SELECT DISTINCT tf.task_id tid, tf.file_id fid FROM task_files tf WHERE tf.file_id IN (SELECT value FROM json_each(?))').all(JSON.stringify([...jobBy.keys()]));
-      const parentOf = new Map(this.store.listTasks().map((t) => [t.id, t.parent_id]));
+      const parentOf = new Map(this.store.listTasksLite().map((t) => [t.id, t.parent_id]));
       const add = (tid, st) => { const c = jobCount.get(tid) || { queued: 0, running: 0, failed: 0 }; c[st]++; jobCount.set(tid, c); };
       const seen = new Set();
       for (const r of rows) {
@@ -2275,8 +2275,10 @@ class AgentService extends EventEmitter {
       }
     }
     const scopes = new Set(this.summary.scopes());
-    return this.store.listTasks().filter((t) => !t.deleted).map((t) => {
-      const kids = !t.parent_id && this.store.children(t.id).length > 0;
+    const lite = this.store.listTasksLite();
+    const hasKids = new Set(lite.filter((t) => t.parent_id).map((t) => t.parent_id));
+    return lite.filter((t) => !t.deleted).map((t) => {
+      const kids = !t.parent_id && hasKids.has(t.id);
       const c = (kids ? fam.get(t.id) : per.get(t.id)) || { docs: 0, done: 0 };
       const j = jobCount.get(t.id) || { queued: 0, running: 0, failed: 0 };
       return { id: t.id, name: t.name, dir: t.dir, parent_id: t.parent_id || null, part_no: t.part_no || null, part_label: t.part_label || '', status: t.status, hasChildren: kids,

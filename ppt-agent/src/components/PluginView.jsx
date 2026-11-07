@@ -28,13 +28,15 @@ export default function PluginView() {
   useEffect(() => {
     api.pluginState().then(setSt);
     loadList(); loadTasks();
-    let last = 0, lastT = 0;
+    let last = 0, lastT = '', tm = null;
     const off = on('plugin', (s) => {
       setSt(s);
+      const key = `${s.counts.done}/${s.counts.failed}/${s.counts.queued}/${s.counts.running}`;
       if (s.counts.done !== last) { last = s.counts.done; loadList(); }
-      if (Date.now() - lastT > 1500) { lastT = Date.now(); loadTasks(); }
+      // 任务表的数量：队列状态变化时刷新（最多每 0.8 秒一次，最后一次变化一定刷新）
+      clearTimeout(tm); tm = setTimeout(() => { if (key !== lastT) { lastT = key; loadTasks(); } }, 800);
     });
-    return off;
+    return () => { off(); clearTimeout(tm); };
   }, []);
   useEffect(() => { loadTasks(); }, [app.taskTick]);
   // 总任务在前，其子任务紧随其后（缩进显示）
@@ -136,7 +138,7 @@ export default function PluginView() {
         {st.eta && <EtaLine eta={st.eta} />}
       </div>
       <div className="tabs">
-        <button className={tab === 'tasks' ? 'on' : ''} onClick={() => setTab('tasks')}>选择任务（{rows.length}）</button>
+        <button className={tab === 'tasks' ? 'on' : ''} onClick={() => { setTab('tasks'); loadTasks(); }}>选择任务（{rows.length}）</button>
         <button className={tab === 'jobs' ? 'on' : ''} onClick={() => setTab('jobs')}>进度（{st.jobs.length}）</button>
         <button className={tab === 'list' ? 'on' : ''} onClick={() => setTab('list')}>已生成的总结（{st.stored}）</button>
       </div>

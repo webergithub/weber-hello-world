@@ -147,7 +147,7 @@ class Store {
   listTasks() { return this.q('SELECT * FROM tasks WHERE deleted IS NULL OR deleted = 0 ORDER BY id DESC').all(); }
   // 给界面用的任务行：不含 scan_list（上万个文件时有数 MB，逐文件推送会拖垮主进程与界面）
   taskCols() {
-    if (!this._taskCols) this._taskCols = this.db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name).filter((n) => n !== 'scan_list').map((n) => `"${n}"`).join(', ');
+    if (!this._taskCols) this._taskCols = this.db.prepare('PRAGMA table_info(tasks)').all().map((c) => c.name).filter((n) => n !== 'scan_list' && n !== 'roots').map((n) => `"${n}"`).join(', '); // v3.11：roots（子任务的文件清单 + 大小）也不带，refreshParent 每次都读全部子任务
     return this._taskCols;
   }
   getTaskLite(id) { return this.q(`SELECT ${this.taskCols()}, scan_list IS NOT NULL AS has_scan FROM tasks WHERE id = ?`).get(id) || null; }

@@ -67,7 +67,7 @@ class AiGateway {
     const t0 = Date.now();
     let r;
     if (e.engine === 'script') r = await this.runScript(task, input, { timeoutMs, onSpawn });
-    else if (e.engine === 'fake') { await new Promise((res) => setTimeout(res, 15)); r = { ok: true, text: fakeRun(task, input) }; } // 测试替身：模拟一点耗时
+    else if (e.engine === 'fake') { await new Promise((res) => setTimeout(res, 120)); r = { ok: true, text: fakeRun(task, input) }; } // 测试替身：模拟一点耗时
     else r = await this.runLlm(task, input, { timeoutMs, signal }).catch((err) => ({ ok: false, error: String(err.message || err) }));
     r = { ...r, ms: Date.now() - t0, engine: e.engine };
     this.calls[r.ok ? 'ok' : 'failed']++;
