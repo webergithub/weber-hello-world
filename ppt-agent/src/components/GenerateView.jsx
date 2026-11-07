@@ -105,7 +105,6 @@ export default function GenerateView({ state, setState }) {
             <button className="btn primary" disabled={!!unifying} onClick={() => unify('light')}>{unifying === 'light' ? '转换中…' : '⬜ 统一为白底'}</button>
             <button className="btn primary" disabled={!!unifying} onClick={() => unify('dark')}>{unifying === 'dark' ? '转换中…' : '⬛ 统一为黑底'}</button>
             <button className="btn small ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(made.path); }}>📂</button><button className="btn" onClick={() => api.openPath(made.path)}>打开</button>
-            <button className="btn" onClick={() => api.showItem(made.path)}>📂 位置</button>
             <button className="btn ghost" onClick={() => set({ made: null })}>← 返回继续挑选</button>
           </div>
           {['light', 'dark'].filter((k) => made.outputs[k]).map((k) => (

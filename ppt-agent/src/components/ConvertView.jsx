@@ -140,7 +140,6 @@ export default function ConvertView() {
       <button className="btn tiny primary" onClick={() => viewHist(h.id)}>查看结果</button>
       {h.inLibrary && <button className="btn tiny" onClick={() => app.openFile(h.file_id)}>⛶ 逐页浏览</button>}
       <button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(h.out_path); }}>📂</button><button className="btn tiny" disabled={!h.exists} onClick={() => api.openPath(h.out_path)}>打开原文件</button>
-      <button className="btn tiny" disabled={!h.exists} title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(h.out_path)}>📂 位置</button>
     </> },
   ];
   return (
