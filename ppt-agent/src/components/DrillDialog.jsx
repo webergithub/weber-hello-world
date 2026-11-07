@@ -49,7 +49,7 @@ export default function DrillDialog({ spec, onClose }) {
     { key: 'category', label: '主题分类', hidden: true },
     { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', hidden: true, render: (r) => <TagList tags={r.tags} /> },
     { key: 'message', label: '说明', sort: (r) => r.error || r.message || '', className: 'small muted', render: (r) => r.error || r.message || '' },
-    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (r) => (pathOf(r) ? <><button className="btn tiny" onClick={() => api.openPath(pathOf(r))}>打开</button><button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(pathOf(r))}>📂 位置</button></> : null) },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (r) => (pathOf(r) ? <><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(pathOf(r)); }}>📂</button><button className="btn tiny" onClick={() => api.openPath(pathOf(r))}>打开</button><button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(pathOf(r))}>📂 位置</button></> : null) },
   ];
   const picked = (rows || []).filter((r, i) => sel.has(rk(r, i)));
   return (

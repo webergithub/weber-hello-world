@@ -39,6 +39,15 @@ export default function StartupDataDir() {
   });
   const usable = (x) => x.exists || x.isNew || x.current; // 上次使用 / 新选择的目录不存在时会自动创建
   const status = (x) => (x.hasData ? '已有解析数据' : usable(x) ? '新建资料库' : '目录已不存在');
+  // 存储空间（v3.11）：磁盘剩余空间；已有任务的预计需要空间（新目录按最近一次任务的估算提示）
+  const gb = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : `${Math.round((n || 0) / 1048576)} MB`);
+  const need = (x) => (x.space ? x.space.need : !x.hasData && info && info.lastEstimate ? info.lastEstimate.need : null);
+  const space = (x) => {
+    if (x.free == null) return null;
+    const n = need(x);
+    const low = n && n > x.free * 0.9;
+    return <span className={`dd-space ${low ? 'low' : ''}`}>磁盘剩余 {gb(x.free)}{n ? ` · ${x.space ? `已有 ${x.space.tasks} 个任务预计共需约` : `按最近一个任务（${info.lastEstimate.name}）估算约需`} ${gb(n)}` : ''}{low ? ' · 空间可能不够' : ''}</span>;
+  };
   return (
     <div className="boot-dd">
       <div className="boot-head">
@@ -51,7 +60,7 @@ export default function StartupDataDir() {
             <input type="radio" name="dd" checked={pick === x.dir} disabled={!usable(x)} onChange={() => setPick(x.dir)} />
             <div className="dd-main">
               <div className="dd-path" title={x.dir}>{x.dir}</div>
-              <div className="small muted">{x.current ? <span className="tag ok">上次使用</span> : null}{x.isNew ? <span className="tag accent">新选择</span> : null}{info && x.dir === info.defaultDir ? <span className="tag">默认目录</span> : null}{status(x)}</div>
+              <div className="small muted">{x.current ? <span className="tag ok">上次使用</span> : null}{x.isNew ? <span className="tag accent">新选择</span> : null}{info && x.dir === info.defaultDir ? <span className="tag">默认目录</span> : null}{status(x)}{space(x)}</div>
             </div>
           </label>
         ))}

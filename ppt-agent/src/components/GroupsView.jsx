@@ -15,6 +15,16 @@ export default function GroupsView({ taskId }) {
   const [onlyTheme, setOnlyTheme] = useState(false);
   const [curId, setCurId] = useState(MEMO.cur);
   useEffect(() => { api.groups({ sort: 'name', order: 'asc', taskId }).then(setGroups); }, [app.taskTick, taskId]);
+  // 重新扫描（v3.11）：检查原文件是否还在并重新计算相似分组，提示与上次相比的变化
+  const [rescanning, setRescanning] = useState(false);
+  const rescan = async () => {
+    setRescanning(true);
+    try {
+      const r = await api.rescanGroups();
+      setGroups(await api.groups({ sort: 'name', order: 'asc', taskId }));
+      app.toast(`重新扫描完成：现在 ${r.after} 组相似 PPT（之前 ${r.before} 组；仍相似 ${r.unchanged}，成员变化 ${r.changed}，新出现 ${r.added}，不再相似 ${r.gone}）${r.missing.length ? `；${r.missing.length} 个文档的原文件已不存在，未参与分组` : ''}`, 'info', { cat: '相似分组' });
+    } catch (e) { app.toast(e.message, 'error'); } finally { setRescanning(false); }
+  };
   const list = onlyTheme ? groups.filter((g) => g.hasThemeVariants) : groups;
   const [sel, setSel] = useState(() => new Set());
   const memberCols = [
@@ -27,7 +37,7 @@ export default function GroupsView({ taskId }) {
     { key: 'author', label: '作者', sort: (m) => m.file.author, render: (m) => m.file.author, hidden: true },
     { key: 'score', label: '相似度', sort: (m) => m.score, render: (m) => `${Math.round(m.score * 100)}%` },
     { key: 'reasons', label: '依据', sort: (m) => m.reasons.join('、'), filterList: (m) => m.reasons, className: 'small ellipsis', render: (m) => <span title={m.reasons.join('、')}>{m.reasons.join('、')}</span> },
-    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (m) => <><button className="btn tiny" onClick={() => api.openPath(m.file.path)}>打开</button><button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(m.file.path)}>📂 位置</button></> },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (m) => <><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(m.file.path); }}>📂</button><button className="btn tiny" onClick={() => api.openPath(m.file.path)}>打开</button><button className="btn tiny" title="在资源管理器中显示并选中该文件" onClick={() => api.showItem(m.file.path)}>📂 位置</button></> },
   ];
   // 分组较多时：左侧分组列表（可排序 / 筛选），右侧铺满显示所选分组的文件
   const cur = list.find((g) => g.id === curId) || list[0] || null;
@@ -45,6 +55,7 @@ export default function GroupsView({ taskId }) {
       <div className="view-head">
         <div className="vh-title">🧩 相似 PPT 分组 <span className="muted small">{list.length} 组 · {list.reduce((a, g) => a + g.members.length, 0)} 个文件</span></div>
         <div className="spacer" />
+        <button className="btn small" disabled={rescanning} onClick={rescan}>{rescanning ? '扫描中…' : '🔄 重新扫描'}</button>
         {sel.size > 0 && <span className="badge">已选 {sel.size}</span>}
         {sel.size > 0 && <button className="btn small ghost" onClick={() => setSel(new Set())}>清空选择</button>}
         <CompareButton ids={[...sel]} />

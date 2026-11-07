@@ -229,7 +229,7 @@ export default function CompareView({ fileIds, starts = {}, onClose }) {
                 <div className="spacer" />
                 {s && unit === '页' && <span className={`tag theme-${s.theme}`}>{THEME_LABEL[s.theme]}</span>}
                 <button className={`btn tiny ${inBasket ? 'primary' : ''}`} disabled={!s} onClick={() => toggleBasket(i)}>{inBasket ? '✓ 导出篮' : '＋ 导出篮'}</button>
-                {d && <button className="btn tiny ghost" onClick={() => api.openPath(d.file.path)}>打开</button>}
+                {d && <><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(d.file.path); }}>📂</button><button className="btn tiny ghost" onClick={() => api.openPath(d.file.path)}>打开</button></>}
               </div>
               <div className="cmp-title ellipsis" title={s ? s.title : ''}>{s ? s.title || `第 ${s.idx} ${unit}` : ''}</div>
               <div className="cmp-stage" style={{ '--ratio': slideRatio(s, d && d.source) }}>

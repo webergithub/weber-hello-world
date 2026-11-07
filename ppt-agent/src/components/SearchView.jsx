@@ -206,7 +206,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     <span>{f.file.slide_count} 页</span><span>{fmtSize(f.file.size)}</span>{f.hits ? <span>命中 {f.hits} 页</span> : null}
                   </div>
                   <div className="fi-tags">{(f.file.tags || []).slice(0, 8).map((t) => <span key={t} className={`tag ${terms.some((k) => t.toLowerCase().includes(k.toLowerCase())) ? 'hit' : ''}`}>{t}</span>)}</div>
-                  <div className="fi-actions"><button className="btn tiny" onClick={(e) => { e.stopPropagation(); app.openFile(f.file.id); }}>查看全部页</button><button className="btn tiny" onClick={(e) => { e.stopPropagation(); api.openPath(f.file.path); }}>打开原文件</button></div>
+                  <div className="fi-actions"><button className="btn tiny" onClick={(e) => { e.stopPropagation(); app.openFile(f.file.id); }}>查看全部页</button><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={(e) => { e.stopPropagation(); api.showItem(f.file.path); }}>📂</button><button className="btn tiny" onClick={(e) => { e.stopPropagation(); api.openPath(f.file.path); }}>打开原文件</button></div>
                 </div>
               ))}
             </div>
@@ -249,7 +249,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
                     <div className="sh-head"><span className="link" title={h.path} onClick={() => app.openFile(h.file_id)}>🧠 {h.name}</span><span className="spacer" />
                       <button className="btn tiny" onClick={() => api.openPath(h.md_path)}>打开总结 MD</button>
                       <button className="btn tiny" onClick={() => app.openFile(h.file_id)}>查看文档</button>
-                      {h.path && <button className="btn tiny" onClick={() => api.openPath(h.path)}>打开原文件</button>}
+                      {h.path && <><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(h.path); }}>📂</button><button className="btn tiny" onClick={() => api.openPath(h.path)}>打开原文件</button></>}
                       {h.file_md && <button className="btn tiny ghost" onClick={() => api.openPath(h.file_md)}>解析 MD</button>}
                       <button className="btn tiny" title="在资源管理器中显示总结文件" onClick={() => api.showItem(h.md_path)}>📂</button></div>
                     <div className="sc-snippet" dangerouslySetInnerHTML={{ __html: highlight(esc(h.snippet), terms) }} />

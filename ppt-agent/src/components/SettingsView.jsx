@@ -6,6 +6,7 @@ import KeymapEditor from './KeymapEditor';
 import WatchSettings from './WatchSettings';
 import PluginSettings from './PluginSettings';
 import OfficeProcs from './OfficeProcs';
+import PerfSettings from './PerfSettings';
 import { LANG_NAMES } from './Panels';
 
 const LLM_PRESETS = [
@@ -22,8 +23,10 @@ const LLM_PRESETS = [
 ];
 
 const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
-const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', procs: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', procs: 'general', perf: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
+
+const fmtGB = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : `${Math.round((n || 0) / 1048576)} MB`);
 
 export default function SettingsView({ focus }) {
   const app = useApp();
@@ -105,6 +108,10 @@ export default function SettingsView({ focus }) {
         <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
           <h3>AI 调用脚本（智能总结 / 智能搜索 / 智能生成）</h3>
           <PluginSettings />
+        </section>
+        <section data-sec="perf" className={focus === 'perf' ? 'flash-sec' : ''}>
+          <h3>资源与优先级</h3>
+          <PerfSettings />
         </section>
         {eng && eng.procsCheck ? (
           <section data-sec="procs" ref={procsRef} className={focus === 'procs' ? 'flash-sec' : ''}>
@@ -227,6 +234,7 @@ export default function SettingsView({ focus }) {
         <section>
           <h3>数据保存目录（解析结果 · 数据库 · 本地 RAG 索引）</h3>
           <p className="muted">解析出的页面、Markdown、标签、全文索引与向量都保存在本地 SQLite 数据库中，检索完全在本机进行（本地 RAG）。可把数据目录放到空间更大的磁盘。切换后程序会自动重启。</p>
+          {dd && dd.free != null && <p className="small muted">磁盘剩余 {fmtGB(dd.free)}{dd.space ? ` · ${dd.space.tasks} 个任务预计共需约 ${fmtGB(dd.space.need)}` : ''}{dd.space && dd.space.need > dd.free * 0.9 ? <span className="tag warn">空间可能不够</span> : null}</p>}
           {dd && <p>当前目录：<code>{dd.current}</code>{dd.env ? '（由环境变量 PPTA_DATA_DIR 指定）' : dd.bootstrap ? '（自定义）' : dd.portable ? '（便携版默认：exe 同级目录）' : '（默认）'}</p>}
           <div className="row"><label>新目录</label><input className="input wide" value={newDir} placeholder="选择或输入目录路径" onChange={(e) => setNewDir(e.target.value)} />
             <button className="btn" onClick={async () => { const r = await api.selectDir('选择数据保存目录', true); if (r && r[0]) setNewDir(r[0]); }}>浏览…</button></div>

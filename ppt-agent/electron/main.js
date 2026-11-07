@@ -156,7 +156,26 @@ function noteDataDir(dir) {
   try { writeBootstrap({ ...rest, dataDirHistory: hist }); } catch { /* ignore */ }
 }
 
-const dirInfo = (d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')) });
+// 目录所在磁盘的剩余空间（目录还不存在时取最近的上级目录）
+function freeOf(d) {
+  let p = path.resolve(d);
+  for (let i = 0; i < 30; i++) {
+    try { const s = fs.statfsSync(p); return Number(s.bavail) * Number(s.bsize); } catch { const up = path.dirname(p); if (up === p) return null; p = up; }
+  }
+  return null;
+}
+// 存储空间预估（v3.11）：任务第一次执行时估算的需要空间记在 bootstrap.json 的 estimates[数据目录].tasks 中，选择数据目录时提示
+function spaceNeed(d) {
+  const e = (readBootstrap().estimates || {})[path.resolve(d)];
+  const list = e && e.tasks ? Object.values(e.tasks) : [];
+  return list.length ? { need: list.reduce((a, t) => a + (t.need || 0), 0), tasks: list.length } : null;
+}
+const dirInfo = (d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')), free: freeOf(d), space: spaceNeed(d) });
+function lastEstimate() {
+  let best = null;
+  for (const e of Object.values(readBootstrap().estimates || {})) for (const t of Object.values(e.tasks || {})) if (!best || t.at > best.at) best = t;
+  return best;
+}
 
 // 启动时是否先选择数据目录：未勾选“记住选择”、不是刚刚主动切换目录后的重启；使用环境变量 PPTA_DATA_DIR 时不询问（PPTA_ASK_DIR=1 强制询问）
 // v3.4 起选择在加载资料库之前进行；旧版本勾选过“记住选择”的，升级后重新询问一次
@@ -193,7 +212,7 @@ function chooseDataDirAtStartup(current) {
       if (method === 'info') {
         const b = readBootstrap();
         const hist = (b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(current));
-        return { version: app.getVersion(), current: { ...dirInfo(current), current: true }, history: hist.map(dirInfo), defaultDir: path.join(app.getPath('userData'), 'data') };
+        return { version: app.getVersion(), current: { ...dirInfo(current), current: true }, history: hist.map(dirInfo), defaultDir: path.join(app.getPath('userData'), 'data'), lastEstimate: lastEstimate() };
       }
       if (method === 'selectDir') {
         const r = await dialog.showOpenDialog(bw, { title: '选择保存解析数据的目录', properties: ['openDirectory', 'createDirectory'] });
@@ -317,6 +336,17 @@ app.whenReady().then(async () => {
   service.on('progress', (p) => { progBuf.push(p); scheduleFlush(); });
   service.on('library', (e) => send('library', e));
   service.on('searchProgress', (p) => send('searchProgress', p));
+  service.on('notice', (n) => send('appNotice', n)); // 解析任务的提示（空间不足等，v3.11）
+  service.on('spaceEstimate', (e) => {
+    try {
+      const b = readBootstrap();
+      const key = path.resolve(e.dataDir);
+      const est = (b.estimates = b.estimates || {});
+      est[key] = est[key] || { tasks: {} };
+      est[key].tasks[e.taskId] = { need: e.need, name: e.name, bytesTotal: e.bytesTotal, at: e.at };
+      writeBootstrap(b);
+    } catch { /* ignore */ }
+  });
   service.summary.on('update', (st) => send('plugin', st));
   service.summary.on('notice', (n) => send('pluginNotice', n));
   service.on('watch', (w) => send('watch', w));
@@ -399,7 +429,7 @@ app.whenReady().then(async () => {
     dataDirInfo: () => {
       const b = readBootstrap();
       const history = (b.dataDirHistory || []).map((d) => ({ dir: d, exists: fs.existsSync(d), hasData: fs.existsSync(path.join(d, 'ppt-agent.db')), current: path.resolve(d) === path.resolve(service.dataDir) }));
-      return { current: service.dataDir, bootstrap: b.dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null, history, ask: b.askDataDir !== false };
+      return { current: service.dataDir, free: freeOf(service.dataDir), space: spaceNeed(service.dataDir), bootstrap: b.dataDir || null, env: process.env.PPTA_DATA_DIR || null, defaultDir: path.join(app.getPath('userData'), 'data'), portable: process.env.PORTABLE_EXECUTABLE_DIR || null, history, ask: b.askDataDir !== false };
     },
     setDataDirAsk: (ask) => { writeBootstrap({ ...readBootstrap(), askDataDir: !!ask }); return true; },
     removeDataDirHistory: (dir) => { const b = readBootstrap(); writeBootstrap({ ...b, dataDirHistory: (b.dataDirHistory || []).filter((d) => path.resolve(d) !== path.resolve(dir)) }); return true; },
@@ -444,6 +474,7 @@ app.whenReady().then(async () => {
     testLlm: (cfg) => service.testLlm(cfg),
     categories: (opts) => service.categories(opts),
     groups: (opts) => service.groups(opts),
+    rescanGroups: () => service.rescanGroups(),
     search: (q, opts) => service.searchQuery(q, opts),
     searchHistory: (opts) => service.searchHistory(opts),
     searchHistoryResult: (id) => service.searchHistoryResult(id),

@@ -1487,3 +1487,9 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .toast.warn { border-left-color: var(--warn); }
 .office-procs .row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .office-procs .dt { max-height: 260px; }
+
+/* v3.11 数据目录空间提示 */
+.dd-space { margin-left: 10px; color: var(--fg3); }
+.dd-space.low { color: var(--danger-fg); font-weight: 600; }
+.perf-settings .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.perf-settings .dt { max-height: 240px; }

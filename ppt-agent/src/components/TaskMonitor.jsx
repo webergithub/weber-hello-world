@@ -74,6 +74,7 @@ function QueuePanel({ initial, onLive }) {
           <span className={`status s-${t.status}`}>{STATUS_LABEL[t.status] || t.status}{t.queuePos > 0 ? ` · 第 ${t.queuePos} 位` : ''}</span>
         </div>
         <div className="muted small ellipsis" title={t.dir}>{t.dir}</div>
+        {t.bytes_total > 0 && <div className="small muted">文件大小 {fmtSize(t.bytes_done || 0)} / {fmtSize(t.bytes_total)}</div>}
         {isActive(t) && (
           <div className="progress-wrap">
             <div className="progress"><div style={{ width: `${t.total ? ((live && live.index ? live.index - 1 : done) / t.total) * 100 : 3}%` }} /></div>

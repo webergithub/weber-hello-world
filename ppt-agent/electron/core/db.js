@@ -106,6 +106,10 @@ class Store {
     if (!t.has('parent_id')) this.db.exec('ALTER TABLE tasks ADD COLUMN parent_id INTEGER');
     if (!t.has('part_no')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_no INTEGER');
     if (!t.has('part_label')) this.db.exec('ALTER TABLE tasks ADD COLUMN part_label TEXT');
+    // 文件大小统计（v3.11）：本轮要处理的文件总大小、已处理的大小（字节）
+    if (!t.has('bytes_total')) this.db.exec('ALTER TABLE tasks ADD COLUMN bytes_total INTEGER DEFAULT 0');
+    if (!t.has('bytes_done')) this.db.exec('ALTER TABLE tasks ADD COLUMN bytes_done INTEGER DEFAULT 0');
+    if (!t.has('space_need')) this.db.exec('ALTER TABLE tasks ADD COLUMN space_need INTEGER DEFAULT 0');
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_tasks_parent ON tasks(parent_id)');
     // 智能总结与原文件 / 解析 Markdown 的关联（v3.9）
     const ds = cols('doc_summaries');

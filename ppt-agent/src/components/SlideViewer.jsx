@@ -237,7 +237,7 @@ export default function SlideViewer({ fileIds, initialFileId, initialSlideId, te
         </>}
         {slide && slide.counterpart && <button className="btn small" onClick={() => switchCounterpart(slide.counterpart)}>⇄ 切换到{THEME_LABEL[slide.counterpart.theme]}版本</button>}
         <button className={`btn small ${inBasket ? 'primary' : ''}`} disabled={!slide} onClick={toggleBasket} title={keysLabel(keys.map, 'basket')}>{inBasket ? '✓ 已在导出篮' : '＋ 加入导出篮'}</button>
-        {detail && <button className="btn small ghost" onClick={() => api.openPath(detail.file.path)}>打开原文件</button>}
+        {detail && <><button className="btn small ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(detail.file.path); }}>📂</button><button className="btn small ghost" onClick={() => api.openPath(detail.file.path)}>打开原文件</button></>}
         <div className="seg small" title={`三个模块的排列方式（${keysLabel(keys.map, 'layout')} 切换）`}>
           <button className={layout.mode === 'tb' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'tb' }))}>上1下2</button>
           <button className={layout.mode === 'lr' ? 'on' : ''} onClick={() => setLayout((l) => ({ ...l, mode: 'lr' }))}>左1右2</button>

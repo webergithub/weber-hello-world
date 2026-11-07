@@ -91,6 +91,9 @@ const DEFAULT_CONFIG = {
   // bigFileMB 超过这个大小的文件同一时间只解析一个
   perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 3072, bigFileMB: 64 },
 };
+const MIN_FREE_BYTES = 512 * 1024 * 1024; // 数据目录所在磁盘至少保留 512MB，低于时暂停解析任务
+const fmtBytes = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${Math.round(n / 1048576)} MB` : `${Math.round((n || 0) / 1024)} KB`);
+
 // 主动回收内存（内存超过上限时用）：运行时打开 gc 接口，10 秒内最多一次
 let gcFn = null, gcAt = 0;
 try { require('v8').setFlagsFromString('--expose_gc'); gcFn = require('vm').runInNewContext('gc'); } catch { gcFn = null; }
@@ -335,7 +338,7 @@ class AgentService extends EventEmitter {
   refreshParent(pid, { quiet = false } = {}) {
     const kids = this.store.children(pid);
     if (!kids.length) return;
-    const sum = { total: 0, parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
+    const sum = { total: 0, parsed: 0, skipped: 0, duplicate: 0, failed: 0, bytes_total: 0, bytes_done: 0 };
     for (const c of kids) for (const k of Object.keys(sum)) sum[k] += c[k] || 0;
     const st = (s) => kids.some((c) => c.status === s);
     const running = (c) => this.runningSet.has(c.id);
@@ -660,7 +663,7 @@ class AgentService extends EventEmitter {
     this.incrementalRuns.delete(id);
     const prevList = incremental && task.scan_list ? JSON.parse(task.scan_list) : null;
     if (resume) this.store.updateTask(id, { status: 'running', started_at: t0 });
-    else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: null, parsed: 0, skipped: 0, duplicate: 0, failed: 0 });
+    else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: null, parsed: 0, skipped: 0, duplicate: 0, failed: 0, bytes_done: 0 });
     let roots = null;
     try { roots = task.roots ? JSON.parse(task.roots) : null; } catch { roots = null; }
     const explicit = roots && !Array.isArray(roots) ? roots : null;
@@ -681,6 +684,12 @@ class AgentService extends EventEmitter {
       if (!this.cancelled.has(id)) this.store.updateTask(id, { scan_list: JSON.stringify(files) });
     }
     this.store.updateTask(id, { total: files.length });
+    // 文件大小（v3.11）：统计本轮要处理的文件总大小；第一次执行的任务估算需要的存储空间并提示
+    let sizes = explicit && explicit.sizes ? new Map(Object.entries(explicit.sizes)) : null;
+    if (!sizes && !this.cancelled.has(id)) sizes = await this.statSizes(files, () => this.cancelled.has(id), (n) => this.emitTask(id, { current: `统计文件大小：${n}/${files.length}` }));
+    const bytesTotal = sizes ? [...sizes.values()].reduce((a, b) => a + b, 0) : 0;
+    this.store.updateTask(id, { bytes_total: bytesTotal });
+    if (!task.parent_id && !resume && !this.cancelled.has(id)) this.checkSpace(id, task, bytesTotal, files.length, log, tag);
     const byKind = {};
     for (const f of files) { const k = KIND_OF.get(path.extname(f).toLowerCase()); byKind[k] = (byKind[k] || 0) + 1; }
     log.info(`${tag} 发现 ${files.length} 个文档（${Object.entries(byKind).map(([k, n]) => `${DOC_TYPES[k].label} ${n}`).join('，')}）`);
@@ -689,6 +698,7 @@ class AgentService extends EventEmitter {
     const prev = this.store.getTask(id);
     const counts = resume ? { parsed: prev.parsed || 0, skipped: prev.skipped || 0, duplicate: prev.duplicate || 0, failed: prev.failed || 0 } : { parsed: 0, skipped: 0, duplicate: 0, failed: 0 };
     const handled = resume ? this.store.handledSince(id, task.run_started) : new Set();
+    let bytesDone = resume ? prev.bytes_done || 0 : 0;
     if (resume) log.info(`${tag} 本轮已处理 ${handled.size} 个，剩余 ${files.filter((f) => !handled.has(f)).length} 个`);
     let changed = false;
     let stoppedAt = -1;
@@ -712,7 +722,7 @@ class AgentService extends EventEmitter {
     // 文件太多：按盘符 / 文件夹拆分为子任务，依次执行（每个子任务可单独暂停、继续）
     const split = this.config.split || DEFAULT_CONFIG.split;
     if (!task.parent_id && !explicit && split.enabled && files.length > split.size && !this.cancelled.has(id)) {
-      this.splitIntoChildren(id, task, files, roots || [task.dir], { size: split.size, incremental, removed: inc.removed, log, tag });
+      this.splitIntoChildren(id, task, files, roots || [task.dir], { size: split.size, incremental, removed: inc.removed, log, tag, sizes });
       return;
     }
     this.inLoop.add(id);
@@ -742,11 +752,18 @@ class AgentService extends EventEmitter {
         if (r !== 'parsed') this.emitProgress(id, { stage: 'result', file, action: r, index: i + 1, total: files.length });
         if (r === 'parsed' || r === 'duplicate') changed = true;
       } catch (e) {
+        if (e && (e.code === 'ENOSPC' || /SQLITE_FULL|disk is full|no space left/i.test(String(e.message)))) {
+          // 磁盘空间不足：暂停任务（当前文件不计入已处理），清理空间后可从断点继续
+          this.pauseForSpace(id, task, log, tag, '写入数据时磁盘空间不足');
+          stoppedAt = i;
+          break;
+        }
         counts.failed++;
         log.error(`${tag} 处理失败 ${file}`, e);
       }
       finally { if (release) release(); }
-      this.store.updateTask(id, counts);
+      bytesDone += sizes ? sizes.get(file) || 0 : 0;
+      this.store.updateTask(id, { ...counts, bytes_done: bytesDone });
       await new Promise((r) => setImmediate(r));
     }
     } finally { this.inLoop.delete(id); }
@@ -777,12 +794,13 @@ class AgentService extends EventEmitter {
   }
 
   /** 总任务扫描后拆分为子任务：旧的子任务移除（解析历史保留），新子任务插到队列最前面依次执行 */
-  splitIntoChildren(id, task, files, roots, { size, incremental, removed = 0, log, tag }) {
+  splitIntoChildren(id, task, files, roots, { size, incremental, removed = 0, log, tag, sizes = null }) {
     for (const c of this.store.children(id)) this.store.deleteTask(c.id);
     const groups = splitFiles(files, roots, size);
     const ids = groups.map((g, i) => {
       const cid = this.store.createTask(g.dir, `${task.name} · ${g.label}`);
-      this.store.updateTask(cid, { parent_id: id, part_no: i + 1, part_label: g.label, roots: JSON.stringify({ files: g.files, sub: true }), status: 'pending', total: g.files.length });
+      const sz = sizes ? Object.fromEntries(g.files.map((f) => [f, sizes.get(f) || 0])) : null;
+      this.store.updateTask(cid, { parent_id: id, part_no: i + 1, part_label: g.label, roots: JSON.stringify({ files: g.files, sub: true, ...(sz ? { sizes: sz } : {}) }), status: 'pending', total: g.files.length, bytes_total: sz ? Object.values(sz).reduce((a, b) => a + b, 0) : 0 });
       if (incremental) this.incrementalRuns.set(cid, incremental);
       return cid;
     });
@@ -1072,8 +1090,37 @@ class AgentService extends EventEmitter {
     return { tags: s.tags || [], kind: (own && own.kind) || 'ppt', withWord: types.includes('ppt') && (types.includes('word') || types.includes('pdf')), ppt: items.filter((x) => x.linkKind === 'ppt'), word: items.filter((x) => x.linkKind === 'word') };
   }
 
-  async computeGroupsNow() {
-    const files = [...await this.store.listFilesAsync('parsed'), ...await this.store.listFilesAsync('duplicate')];
+  /**
+   * 相似分组“重新扫描”（v3.11）：先检查每个文档的原文件是否还在（已删除 / 移走的不再参与分组），再重新计算，
+   * 返回与上次结果的对比：仍相似的组、成员有变化的组、新出现的组、已不再相似的组，以及原文件已不存在的文档。
+   */
+  async rescanGroups() {
+    const key = (g) => g.members.map((m) => (m.file ? m.file.id : m.id)).sort((a, b) => a - b).join(',');
+    const before = this.groupsCache || await this.computeGroupsNow();
+    const prevKeys = new Set(before.map(key));
+    const prevFiles = new Map(); // 文件 → 上次所在组
+    before.forEach((g, i) => g.members.forEach((m) => prevFiles.set(m.file ? m.file.id : m.id, i)));
+    const missing = [];
+    const tk = ticker(15);
+    for (const f of [...await this.store.listFilesAsync('parsed'), ...await this.store.listFilesAsync('duplicate')]) {
+      if (!prevFiles.has(f.id)) continue;
+      try { await fs.promises.access(f.path); } catch { missing.push({ id: f.id, name: f.name, path: f.path }); }
+      const y = tk(); if (y) await y;
+    }
+    const after = await this.computeGroupsNow({ exclude: new Set(missing.map((m) => m.id)) });
+    const nowKeys = new Set(after.map(key));
+    const unchanged = after.filter((g) => prevKeys.has(key(g))).length;
+    const added = after.filter((g) => !prevKeys.has(key(g)) && !g.members.some((m) => prevFiles.has(m.file ? m.file.id : m.id))).length;
+    const changed = after.length - unchanged - added;
+    const gone = before.filter((g) => !nowKeys.has(key(g))).length - changed;
+    const r = { before: before.length, after: after.length, unchanged, changed, added, gone: Math.max(0, gone), missing };
+    this.log.info(`[相似分组] 重新扫描：之前 ${r.before} 组，现在 ${r.after} 组（仍相似 ${unchanged}，成员变化 ${changed}，新出现 ${added}，不再相似 ${r.gone}）；原文件已不存在 ${missing.length} 个`);
+    return r;
+  }
+
+  async computeGroupsNow({ exclude = null } = {}) {
+    let files = [...await this.store.listFilesAsync('parsed'), ...await this.store.listFilesAsync('duplicate')];
+    if (exclude && exclude.size) files = files.filter((f) => !exclude.has(f.id));
     const vecs = new Map((await this.store.fileVectorsAsync()).map((v) => [v.id, v.vec]));
     const titles = new Map();
     for (const v of await this.store.slideVectorsAsync()) {
@@ -1982,6 +2029,9 @@ class AgentService extends EventEmitter {
     }
     let size = 0;
     try { size = (await fs.promises.stat(file)).size; } catch { /* 文件不存在：后面按失败处理 */ }
+    // 磁盘空间（v3.11）：数据目录所在磁盘剩余不足时暂停任务，可从断点继续
+    const free = this.freeSpace();
+    if (free !== null && free < Math.max(MIN_FREE_BYTES, size * 0.5)) { this.pauseForSpace(id, null, log, tag, `数据目录所在磁盘剩余 ${fmtBytes(free)}`); return null; }
     if (size > (Number(p.bigFileMB) || 64) * 1048576) {
       if (this.bigBusy) wait(`等待其他大文件解析完成：${path.basename(file)}（${Math.round(size / 1048576)}MB）`);
       const release = await this.acquireBig();
@@ -1989,6 +2039,85 @@ class AgentService extends EventEmitter {
       return release;
     }
     return null;
+  }
+
+  /** 并发读取文件大小（每批 64 个，批与批之间让出主进程）：返回 Map(路径 → 字节数) */
+  async statSizes(files, isCancelled = () => false, onProgress = null) {
+    const out = new Map();
+    let last = Date.now();
+    for (let i = 0; i < files.length; i += 64) {
+      if (isCancelled()) break;
+      const batch = files.slice(i, i + 64);
+      const st = await Promise.all(batch.map((f) => fs.promises.stat(f).then((x) => x.size, () => 0)));
+      batch.forEach((f, k) => out.set(f, st[k]));
+      if (onProgress && Date.now() - last > 500) { last = Date.now(); onProgress(Math.min(files.length, i + 64)); }
+    }
+    return out;
+  }
+
+  /** 数据目录所在磁盘的剩余空间（字节）；不支持时返回 null */
+  freeSpace(dir = this.dataDir) {
+    try { const s = fs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize); } catch { return null; }
+  }
+
+  /**
+   * 估算解析这些文件需要的存储空间：按已有资料库的“数据目录大小 / 已解析原文件大小”比例估算；
+   * 资料库还很小时用经验值（不生成截图约 3%，生成页面截图约 25%）
+   */
+  estimateSpace(bytesTotal, fileCount) {
+    const parsed = this.store.db.prepare("SELECT COUNT(*) n, COALESCE(SUM(size), 0) b FROM files WHERE status = 'parsed'").get();
+    const thumbs = (this.config.thumbnails || 'auto') !== 'off';
+    let ratio = thumbs ? 0.25 : 0.03;
+    if (parsed.n >= 50 && parsed.b > 0 && this.dataUsage) ratio = Math.min(1, Math.max(0.01, this.dataUsage / parsed.b));
+    const need = Math.round(bytesTotal * ratio + fileCount * 20 * 1024); // 每个文档另加约 20KB（数据库记录 / Markdown）
+    return { need, ratio, free: this.freeSpace(), thumbs };
+  }
+
+  /** 第一次执行任务时估算需要的存储空间：写日志、发通知，并记下来（启动选择数据目录时提示） */
+  checkSpace(id, task, bytesTotal, fileCount, log, tag) {
+    const est = this.estimateSpace(bytesTotal, fileCount);
+    const msg = `预计需要存储空间约 ${fmtBytes(est.need)}（${fileCount} 个文档，原文件共 ${fmtBytes(bytesTotal)}${est.thumbs ? '，含页面截图' : ''}）；数据目录所在磁盘剩余 ${est.free === null ? '未知' : fmtBytes(est.free)}`;
+    log.info(`${tag} ${msg}`);
+    this.store.updateTask(id, { space_need: est.need });
+    this.emit('spaceEstimate', { dataDir: this.dataDir, taskId: id, name: task.name, need: est.need, free: est.free, bytesTotal, at: Date.now() });
+    if (est.free !== null && est.need > est.free * 0.9) this.emit('notice', { kind: 'warn', msg: `任务「${task.name}」${msg}，空间可能不够：解析中空间不足时任务会自动暂停，清理空间或换到更大的数据目录后可从断点继续`, link: { type: 'view', view: { type: 'settings', focus: 'datadir' } }, label: '数据目录', cat: '任务' });
+    // 后台更新“数据目录大小”，用于下次估算比例
+    this.measureDataUsage().catch(() => {});
+  }
+
+  /** 数据目录占用（字节，异步分片统计；用于估算比例） */
+  async measureDataUsage() {
+    if (this.measuring) return this.dataUsage;
+    this.measuring = true;
+    try {
+      let total = 0;
+      const tk = ticker(15);
+      const stack = [this.dataDir];
+      while (stack.length) {
+        const d = stack.pop();
+        let list = [];
+        try { list = await fs.promises.readdir(d, { withFileTypes: true }); } catch { continue; }
+        for (const e of list) {
+          const p = path.join(d, e.name);
+          if (e.isDirectory()) stack.push(p);
+          else { try { total += (await fs.promises.stat(p)).size; } catch { /* ignore */ } }
+          const y = tk(); if (y) await y;
+        }
+      }
+      this.dataUsage = total;
+      return total;
+    } finally { this.measuring = false; }
+  }
+
+  /** 磁盘空间不足：暂停任务并通知（继续时从断点开始） */
+  pauseForSpace(id, task, log, tag, why) {
+    if (this.spacePaused && this.spacePaused.has(id)) return;
+    (this.spacePaused = this.spacePaused || new Set()).add(id);
+    setTimeout(() => this.spacePaused.delete(id), 5000);
+    const t = task || this.store.getTask(id) || {};
+    log.warn(`${tag} ${why}，已暂停任务；清理空间（或在“设置 → 目录与数据”换到更大的磁盘）后点击“继续”从断点继续`);
+    try { this.pauseTask(t.parent_id || id); } catch { /* ignore */ }
+    this.emit('notice', { kind: 'error', msg: `磁盘空间不足（${why}），任务「${t.name || id}」已暂停；清理空间后点击“继续”从断点继续`, link: { type: 'task', id: t.parent_id || id }, label: '查看任务', cat: '任务' });
   }
 
   /** 大文件锁：同一时间只解析一个大文件 */

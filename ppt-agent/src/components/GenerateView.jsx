@@ -104,14 +104,14 @@ export default function GenerateView({ state, setState }) {
             <div className="spacer" />
             <button className="btn primary" disabled={!!unifying} onClick={() => unify('light')}>{unifying === 'light' ? '转换中…' : '⬜ 统一为白底'}</button>
             <button className="btn primary" disabled={!!unifying} onClick={() => unify('dark')}>{unifying === 'dark' ? '转换中…' : '⬛ 统一为黑底'}</button>
-            <button className="btn" onClick={() => api.openPath(made.path)}>打开</button>
+            <button className="btn small ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(made.path); }}>📂</button><button className="btn" onClick={() => api.openPath(made.path)}>打开</button>
             <button className="btn" onClick={() => api.showItem(made.path)}>📂 位置</button>
             <button className="btn ghost" onClick={() => set({ made: null })}>← 返回继续挑选</button>
           </div>
           {['light', 'dark'].filter((k) => made.outputs[k]).map((k) => (
             <div key={k} className="gm-out"><span className={`tag theme-${k}`}>{k === 'light' ? '白底版' : '黑底版'}</span><b title={made.outputs[k].path}>{fileName(made.outputs[k].path)}</b>
               <span className="muted small">转换 {made.outputs[k].converted}/{made.outputs[k].slides} 页{made.outputs[k].size ? ` · ${fmtSize(made.outputs[k].size)}` : ''}</span>
-              <button className="btn tiny" onClick={() => api.openPath(made.outputs[k].path)}>打开</button><button className="btn tiny" onClick={() => api.showItem(made.outputs[k].path)}>📂 位置</button></div>
+              <button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(made.outputs[k].path); }}>📂</button><button className="btn tiny" onClick={() => api.openPath(made.outputs[k].path)}>打开</button><button className="btn tiny" onClick={() => api.showItem(made.outputs[k].path)}>📂 位置</button></div>
           ))}
           <div className="gm-pages">
             {made.pages.map((it, k) => (

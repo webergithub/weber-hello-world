@@ -85,7 +85,7 @@ export default function TaskView({ taskId, back, onBack }) {
       <div className="tab-body">
         {curTab === 'subs' && <SubtaskPanel task={task} />}
         {curTab === 'slides' && <SlideWorkspace key={`ws-${taskId}`} files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
-        {curTab === 'files' && <FilesStats files={files} stats={stats} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
+        {curTab === 'files' && <FilesStats files={files} stats={stats} task={task} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
         {curTab === 'log' && <LogView taskId={taskId} />}
       </div>
     </div>
@@ -101,7 +101,7 @@ function dedupe(rows) {
   return [...m.values()];
 }
 
-export function FilesStats({ files, stats, onOpen, title = '' }) {
+export function FilesStats({ files, stats, onOpen, title = '', task = null }) {
   const app = useApp();
   const [q, setQ] = useState('');
   const [act, setAct] = useState('');
@@ -116,7 +116,7 @@ export function FilesStats({ files, stats, onOpen, title = '' }) {
   const cards = [
     ['文件总数', stats.files, () => true], ['本次解析', stats.parsed || 0, byAct('parsed')], ['已解析过·跳过', stats.skipped || 0, byAct('skipped')], ['重复文件', stats.duplicate || 0, byAct('duplicate')], ['失败', stats.failed || 0, byAct('failed')],
     ['页面总数', stats.slides, ok, ['slide_count']], ['含备注页', stats.notes, (r) => ok(r) && r.notes_count > 0, ['notes_count']], ['视频', stats.videos, (r) => ok(r) && r.video_count > 0, ['video_count']], ['含字幕页', stats.subtitles, (r) => ok(r) && r.subtitle_count > 0, ['subtitle_count']],
-    ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`, (r) => ok(r) && r.kind !== 'word', ['dark_slides', 'light_slides']], ['隐藏页', stats.hidden, (r) => ok(r) && r.hidden_count > 0, ['hidden_count']], ['文件总大小', fmtSize(stats.size), () => true],
+    ['黑底页 / 白底页', `${stats.dark} / ${stats.light}`, (r) => ok(r) && r.kind !== 'word', ['dark_slides', 'light_slides']], ['隐藏页', stats.hidden, (r) => ok(r) && r.hidden_count > 0, ['hidden_count']], ['文件总大小', fmtSize(stats.size), () => true], ...(task && task.bytes_total ? [['已处理 / 本轮总大小', `${fmtSize(task.bytes_done || 0)} / ${fmtSize(task.bytes_total)}`, () => true]] : []),
   ];
   const drill = (k, pick, show) => app.drill({ key: `task-${title}-${k}`, title: `${title ? `${title} · ` : ''}${k}`, rows: files.filter(pick), show, sort: k === '文件总大小' ? { k: 'size', d: -1 } : show ? { k: show[0], d: -1 } : undefined });
   const columns = [
@@ -138,8 +138,7 @@ export function FilesStats({ files, stats, onOpen, title = '' }) {
     { key: 'at', label: '处理时间', sort: (r) => r.at || 0, render: (r) => fmtTime(r.at), className: 'small nowrap', hidden: true },
     { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => (
       <>
-        {r.path && <button className="btn tiny" onClick={() => api.openPath(r.path)}>打开</button>}
-        {r.path && <button className="btn tiny" onClick={() => api.showItem(r.path)}>📂 位置</button>}
+        {r.path && <><button className="btn tiny ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(r.path); }}>📂</button><button className="btn tiny" onClick={() => api.openPath(r.path)}>打开</button></>}
         {r.md_path && <button className="btn tiny" onClick={() => api.openPath(r.md_path)}>MD</button>}
       </>
     ) },
