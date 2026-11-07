@@ -131,6 +131,21 @@ async function confirmQuit(skipAsk = false) {
   app.quit();
 }
 
+/**
+ * 各进程内存（v3.11）：Electron 程序固定由多个进程组成——主进程（解析、数据库、检索都在这里）、界面（渲染进程）、
+ * GPU 进程（界面绘制加速）、网络服务进程（Chromium 自带，单机版不联网也会存在）；解析时另有 PowerShell / LibreOffice 等外部进程。
+ */
+const PROC_LABEL = { Browser: '主进程（解析 / 数据库 / 检索）', Tab: '界面（窗口内容）', GPU: 'GPU 进程（界面绘制加速）', Utility: '辅助进程', Zygote: '进程孵化器（Linux）' };
+function memInfo() {
+  const rows = app.getAppMetrics().map((m) => ({
+    pid: m.pid, type: m.type, name: m.serviceName || m.name || '',
+    label: m.type === 'Utility' && /network/i.test(m.serviceName || m.name || '') ? '网络服务进程（Chromium 自带）' : PROC_LABEL[m.type] || m.type,
+    mb: Math.round(((m.memory && m.memory.workingSetSize) || 0) / 1024), cpu: Math.round(((m.cpu && m.cpu.percentCPUUsage) || 0) * 10) / 10,
+  }));
+  const ext = require('./core/procs').state().children.map((c) => ({ pid: c.pid, type: 'External', name: c.name, label: `外部程序：${c.name}`, mb: null, cpu: null }));
+  return { rows: [...rows, ...ext], totalMB: rows.reduce((a, r) => a + r.mb, 0), main: process.memoryUsage() };
+}
+
 const send = (ch, data) => { if (win && !win.isDestroyed()) win.webContents.send(ch, data); };
 
 // 记录使用过的数据目录（最多 10 个）；去掉“刚刚主动切换目录、本次不询问”的一次性标记
@@ -233,6 +248,13 @@ app.whenReady().then(async () => {
   if (mark.result === 'cleared') logger.child('app').info(`已去掉程序文件的下载标记（等同于“属性 → 解除锁定”），以后启动不再弹出 SmartScreen：${mark.file}`);
   else if (mark.result === 'failed') logger.child('app').warn(`无法去掉程序文件的下载标记（SmartScreen 可能每次启动都会询问，可右键 exe → 属性 → 勾选“解除锁定”）：${mark.error}`);
   setTimeout(() => service.flushFeedback().catch(() => {}), 15000);
+  // 内存监控（v3.11）：每分钟检查一次，总内存超过 1.5GB 时把各进程占用写入运行日志，便于定位
+  setInterval(() => {
+    try {
+      const m = memInfo();
+      if (m.totalMB > 1536) logger.child('app').warn(`内存占用较高：合计 ${m.totalMB}MB（${m.rows.filter((r) => r.mb).map((r) => `${r.label} ${r.mb}MB`).join('，')}）`);
+    } catch { /* ignore */ }
+  }, 60000).unref();
 
   protocol.handle('ppta', (req) => {
     const u = new URL(req.url);
@@ -307,6 +329,8 @@ app.whenReady().then(async () => {
   const api = {
     stats: () => service.stats(),
     officeProcs: () => require('./core/procs').findOrphans(),
+    userActivity: () => service.userActivity(),
+    memInfo: () => memInfo(),
     killOfficeProcs: (list) => require('./core/procs').killOrphans(list),
     tasks: () => service.tasks(),
     addTask: (dir, opts) => service.addTask(dir, opts),

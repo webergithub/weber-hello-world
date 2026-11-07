@@ -74,8 +74,10 @@ CREATE TABLE IF NOT EXISTS doc_summaries (
 );
 `;
 
-const toBlob = (v) => (v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : null);
-const fromBlob = (b) => (b && ArrayBuffer.isView(b) ? new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)) : null);
+const { sparsify, SparseVec } = require('./vectors');
+const toBlob = (v) => { if (v instanceof SparseVec) v = v.toDense(); return v ? Buffer.from(v.buffer, v.byteOffset, v.byteLength) : null; };
+// 读出的向量转为稀疏形式（v3.11，内存降为约 1/10；只通过 vectors.cosine 使用）
+const fromBlob = (b) => (b && ArrayBuffer.isView(b) ? sparsify(new Float32Array(b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength))) : null);
 const J = (s, d = null) => { try { return s ? JSON.parse(s) : d; } catch { return d; } };
 
 class Store {
@@ -158,7 +160,7 @@ class Store {
     if (!keys.length) return;
     const vals = keys.map((k) => {
       const v = f[k];
-      if (v instanceof Float32Array) return toBlob(v);
+      if (v instanceof Float32Array || v instanceof SparseVec) return toBlob(v);
       if (ArrayBuffer.isView(v)) return v;
       if (v && typeof v === 'object') return JSON.stringify(v);
       if (typeof v === 'boolean') return v ? 1 : 0;
@@ -174,11 +176,13 @@ class Store {
   handledSince(taskId, since) {
     return new Set(this.q('SELECT path FROM task_files WHERE task_id = ? AND at >= ?').all(taskId, since || 0).map((r) => r.path));
   }
-  taskFileIdList(taskId) { return this.q('SELECT DISTINCT file_id FROM task_files WHERE file_id IS NOT NULL AND task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?)').all(taskId, taskId).map((r) => r.file_id); }
+  // 任务的文件清单（v3.11）：只取当前这一轮——未删除的子任务（重新拆分前的旧子任务不算），且每个任务只取本轮开始（run_started）之后的记录；
+  // 以前每次增量扫描都会把上一轮的记录也带上，几轮之后上万条重复记录让任务页面假死。完整记录仍在“解析历史”（history）。
+  taskFileIdList(taskId) { return this.q(`SELECT DISTINCT tf.file_id FROM task_files tf WHERE tf.file_id IS NOT NULL AND tf.task_id IN (SELECT id FROM tasks WHERE (id = ? OR parent_id = ?) AND (deleted IS NULL OR deleted = 0)) AND tf.at >= (SELECT COALESCE(t2.run_started, 0) FROM tasks t2 WHERE t2.id = tf.task_id)`).all(taskId, taskId).map((r) => r.file_id); }
   /** 同 taskFilesLite，分页读取并在页之间让出主进程（上万条记录时不卡界面） */
   async taskFilesLiteAsync(taskId, size = 2000) {
     const cols = this.liteCols().split(', ').map((c) => `f.${c}`).join(', ');
-    const stmt = this.db.prepare(`SELECT tf.rowid AS _rid, tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) AND tf.rowid > ? ORDER BY tf.rowid LIMIT ?`);
+    const stmt = this.db.prepare(`SELECT tf.rowid AS _rid, tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE (id = ? OR parent_id = ?) AND (deleted IS NULL OR deleted = 0)) AND tf.at >= (SELECT COALESCE(t2.run_started, 0) FROM tasks t2 WHERE t2.id = tf.task_id) AND tf.rowid > ? ORDER BY tf.rowid LIMIT ?`);
     const out = [];
     let last = -1;
     for (;;) {
@@ -193,11 +197,11 @@ class Store {
   /** 任务的处理记录（界面用的精简行） */
   taskFilesLite(taskId) {
     const cols = this.liteCols().split(', ').map((c) => `f.${c}`).join(', ');
-    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) ORDER BY tf.rowid`).all(taskId, taskId).map(this.liteRow);
+    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, ${cols} FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE (id = ? OR parent_id = ?) AND (deleted IS NULL OR deleted = 0)) AND tf.at >= (SELECT COALESCE(t2.run_started, 0) FROM tasks t2 WHERE t2.id = tf.task_id) ORDER BY tf.rowid`).all(taskId, taskId).map(this.liteRow);
   }
   taskFiles(taskId) {
     // 总任务包含其全部子任务的处理记录
-    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE id = ? OR parent_id = ?) ORDER BY tf.rowid`).all(taskId, taskId).map(this.fileRow);
+    return this.q(`SELECT tf.action, tf.message, tf.path AS link_path, tf.at, tf.task_id AS link_task, f.* FROM task_files tf LEFT JOIN files f ON f.id = tf.file_id WHERE tf.task_id IN (SELECT id FROM tasks WHERE (id = ? OR parent_id = ?) AND (deleted IS NULL OR deleted = 0)) AND tf.at >= (SELECT COALESCE(t2.run_started, 0) FROM tasks t2 WHERE t2.id = tf.task_id) ORDER BY tf.rowid`).all(taskId, taskId).map(this.fileRow);
   }
 
   history({ limit = 5000, action, q, taskId } = {}) {
@@ -241,7 +245,7 @@ class Store {
     const keys = Object.keys(f);
     const r = this.q(`INSERT INTO files(${keys.join(', ')}) VALUES (${keys.map(() => '?').join(', ')})`).run(...keys.map((k) => {
       const v = f[k];
-      if (v instanceof Float32Array) return toBlob(v);
+      if (v instanceof Float32Array || v instanceof SparseVec) return toBlob(v);
       if (ArrayBuffer.isView(v)) return v;
       if (v && typeof v === 'object') return JSON.stringify(v);
       return v === undefined ? null : v;
@@ -342,13 +346,14 @@ class Store {
       .map((r) => this.relationRow(r));
   }
   // ---------- 大批量分页读取：按 id 每次读 2000 行，页与页之间让出事件循环（上万个文件时一次性读取会卡住界面） ----------
-  async paged(sql, params, map, idCol = 'id', size = 2000) {
+  async paged(sql, params, map, idCol = 'id', size = 2000, onPage = null) {
     const stmt = this.db.prepare(`${sql} AND ${idCol} > ? ORDER BY ${idCol} LIMIT ?`);
     const out = [];
     let last = -1;
     for (;;) {
       const rows = stmt.all(...params, last, size);
       for (const r of rows) out.push(map(r));
+      if (onPage) onPage(out.length);
       if (rows.length < size) break;
       last = rows[rows.length - 1].id;
       await new Promise((r) => setImmediate(r));
@@ -367,12 +372,16 @@ class Store {
   };
   async listLibraryAsync() { return (await this.paged(`SELECT ${this.liteCols()} FROM files WHERE status != 'recycled'`, [], this.liteRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
   async listAllFilesAsync() { return (await this.paged('SELECT * FROM files WHERE 1 = 1', [], this.fileRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
-  listFilesAsync(status) { return this.paged('SELECT * FROM files WHERE status = ?', [status], this.fileRow); }
+  listFilesAsync(status, onPage) { return this.paged('SELECT * FROM files WHERE status = ?', [status], this.fileRow, 'id', 2000, onPage); }
   fileTermsAsync() { return this.paged("SELECT id, terms FROM files WHERE status = 'parsed'", [], (r) => ({ id: r.id, terms: J(r.terms, {}) })); }
   fileVectorsAsync() { return this.paged("SELECT id, vec, emb FROM files WHERE status = 'parsed'", [], (r) => ({ id: r.id, vec: fromBlob(r.vec), emb: fromBlob(r.emb) })); }
-  slideVectorsAsync() {
+  slideVectorsAsync(onPage) {
     return this.paged("SELECT s.id, s.file_id, s.theme, s.title, s.vec, s.emb, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'", [],
-      (r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb) }), 's.id');
+      (r) => ({ id: r.id, file_id: r.file_id, theme: r.theme, title: r.title, kind: r.kind || 'ppt', vec: fromBlob(r.vec), emb: fromBlob(r.emb) }), 's.id', 4000, onPage);
+  }
+  /** 检索缓存需要读取的行数（用于“准备检索索引”的进度） */
+  searchLoadCounts() {
+    return { files: this.q("SELECT COUNT(*) n FROM files WHERE status = 'parsed'").get().n, slides: this.q("SELECT COUNT(*) n FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'").get().n };
   }
   async relationRowsAsync() {
     return this.paged("SELECT s.id, s.file_id, s.title, s.text, s.notes, s.theme, s.vec, s.emb, s.kw, s.tags, f.kind FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed'", [], (r) => this.relationRow(r), 's.id');

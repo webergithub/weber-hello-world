@@ -86,13 +86,43 @@ function textLines(items) {
 }
 
 /**
+ * 按需读取（v3.11，降低内存）：不再把整个 PDF 读进内存，pdf.js 需要哪一段就从磁盘读哪一段（PDFDataRangeTransport）。
+ * 只提取文字时不会读取图片数据，扫描版 / 图片很多的大 PDF 只占很少内存。
+ */
+function openRange(lib, file, chunk = 256 * 1024) {
+  const fd = fs.openSync(file, 'r');
+  const length = fs.fstatSync(fd).size;
+  const head = Buffer.alloc(Math.min(length, chunk));
+  fs.readSync(fd, head, 0, head.length, 0);
+  const transport = new lib.PDFDataRangeTransport(length, new Uint8Array(head.buffer, head.byteOffset, head.length));
+  let closed = false;
+  transport.requestDataRange = (begin, end) => {
+    setImmediate(() => {
+      if (closed) return;
+      try {
+        const n = Math.max(0, Math.min(end, length) - begin);
+        const b = Buffer.alloc(n);
+        fs.readSync(fd, b, 0, n, begin);
+        transport.onDataRange(begin, new Uint8Array(b.buffer, b.byteOffset, n));
+      } catch { /* 文件被删除 / 读取失败：pdf.js 会报错，该文件记为失败 */ }
+    });
+  };
+  return { params: { range: transport, length, rangeChunkSize: chunk, disableAutoFetch: true, disableStream: true }, length, close: () => { closed = true; try { fs.closeSync(fd); } catch { /* ignore */ } } };
+}
+
+/** 平均每页超过这么多字节时视为图片型 PDF（扫描件等）：不做底色判断（底色判断会解码页面图片，占用大量内存） */
+const IMAGE_HEAVY_BYTES_PER_PAGE = 1.5 * 1024 * 1024;
+
+/**
  * 解析 PDF（只读）：返回 { props, size, slides, mediaKey, kind: 'pdf' }。
  * 每页：标题 = 本页最大字号的前几行（页眉页码等很短的数字行除外），正文 = 其余行。
  */
 async function parsePdf(file, opts = {}) {
   const lib = await loadLib();
-  const data = new Uint8Array(fs.readFileSync(file));
-  const doc = await lib.getDocument({ data, ...dataFiles(), cMapPacked: true, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0, stopAtErrors: false }).promise;
+  const src = openRange(lib, file);
+  let doc;
+  try { doc = await lib.getDocument({ ...src.params, ...dataFiles(), cMapPacked: true, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, verbosity: 0, stopAtErrors: false }).promise; } catch (e) { src.close(); throw e; }
+  const checkBg = src.length / Math.max(1, doc.numPages) < IMAGE_HEAVY_BYTES_PER_PAGE;
   try {
     let info = {};
     try { info = ((await doc.getMetadata()) || {}).info || {}; } catch { /* ignore */ }
@@ -110,7 +140,7 @@ async function parsePdf(file, opts = {}) {
         if (!size) size = { cx: Math.round(Math.abs(view[2] - view[0]) * 12700), cy: Math.round(Math.abs(view[3] - view[1]) * 12700) };
         const tc = await page.getTextContent();
         const lines = textLines(tc.items).filter((l) => !/^[\d\s/\-–—|·.页第of]+$/i.test(l.text) || l.text.length > 12);
-        try { s.bg = pageBackground(lib, await page.getOperatorList(), view); } catch { /* 底色判断失败按白底 */ }
+        if (checkBg) { try { s.bg = pageBackground(lib, await page.getOperatorList(), view); } catch { /* 底色判断失败按白底 */ } }
         s.theme = s.bg.lum < 0.3 ? 'dark' : 'light';
         const max = Math.max(0, ...lines.map((l) => l.size));
         const body = lines.map((l) => l.size).sort((a, b) => a - b)[Math.floor(lines.length / 2)] || 0;
@@ -131,11 +161,13 @@ async function parsePdf(file, opts = {}) {
       s.text = s.blocks.filter((b) => b.kind !== 'title').flatMap((b) => b.paras.map((p) => p.text)).join('\n');
       slides.push(s);
       if (opts.onSlide) opts.onSlide(i, doc.numPages, s.title, s);
+      if (i % 20 === 0) { try { await doc.cleanup(); } catch { /* ignore */ } } // 释放已解析页面的缓存
     }
     if (!props.title) props.title = (slides[0] && slides[0].title !== '第 1 页' ? slides[0].title : '') || path.basename(file, path.extname(file));
     return { props, size, slides, mediaKey: opts.mediaKey, kind: 'pdf' };
   } finally {
     try { await doc.destroy(); } catch { /* ignore */ }
+    src.close();
   }
 }
 
@@ -148,11 +180,13 @@ async function quickPdfProps(file) {
     if (!head.subarray(0, n).toString('latin1').includes('%PDF-')) throw new Error('缺少 PDF 文件头');
   } finally { fs.closeSync(fd); }
   const lib = await loadLib();
-  const doc = await lib.getDocument({ data: new Uint8Array(fs.readFileSync(file)), ...dataFiles(), isEvalSupported: false, disableFontFace: true, verbosity: 0 }).promise;
+  const src = openRange(lib, file, 64 * 1024);
+  let doc;
+  try { doc = await lib.getDocument({ ...src.params, ...dataFiles(), isEvalSupported: false, disableFontFace: true, verbosity: 0 }).promise; } catch (e) { src.close(); throw e; }
   try {
     const info = ((await doc.getMetadata().catch(() => null)) || {}).info || {};
     return { author: String(info.Author || '').trim(), title: String(info.Title || '').trim(), pages: doc.numPages };
-  } finally { try { await doc.destroy(); } catch { /* ignore */ } }
+  } finally { try { await doc.destroy(); } catch { /* ignore */ } src.close(); }
 }
 
 module.exports = { parsePdf, quickPdfProps, LocalDataFactory };

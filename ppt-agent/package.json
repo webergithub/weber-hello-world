@@ -13,7 +13,8 @@
     "test": "node scripts/run-tests.js",
     "make:testdata": "python3 scripts/make_test_ppts.py test-ppts",
     "dist:win": "vite build && electron-builder --win portable --x64",
-    "dist:linux": "vite build && electron-builder --linux dir"
+    "dist:linux": "vite build && electron-builder --linux dir",
+    "build:dsh": "node scripts/build-dsh-llm.mjs"
   },
   "dependencies": {
     "@xmldom/xmldom": "0.9.12",
@@ -28,6 +29,7 @@
     "@vitejs/plugin-react": "6.1.1",
     "electron": "44.5.1",
     "electron-builder": "26.15.3",
+    "eventsource-parser": "^3.1.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "vite": "8.3.2"
@@ -54,7 +56,10 @@
       "!node_modules/@napi-rs/**"
     ],
     "extraResources": [
-      { "from": "plugins", "to": "plugins" }
+      {
+        "from": "plugins",
+        "to": "plugins"
+      }
     ],
     "asarUnpack": [
       "node_modules/jieba-wasm/pkg/nodejs/**"

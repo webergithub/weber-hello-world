@@ -20,15 +20,17 @@ function meanLum(data, width, height, channels) {
   return n ? sum / n : null;
 }
 
+// v3.11：只用于判断黑底 / 白底，超大的图片（解码后几百 MB）直接跳过，避免占用大量内存
+const MAX_LUM_BYTES = 12 * 1024 * 1024;
 async function imageLuminance(buf, name = '') {
-  if (!buf || !buf.length) return null;
+  if (!buf || !buf.length || buf.length > MAX_LUM_BYTES) return null;
   const n = name.toLowerCase();
   if (buf[0] === 0x89 && buf[1] === 0x50 || n.endsWith('.png')) {
     const png = PNG.sync.read(buf);
     return meanLum(png.data, png.width, png.height, 4);
   }
   if (buf[0] === 0xff && buf[1] === 0xd8 || /\.jpe?g$/.test(n)) {
-    const img = jpeg.decode(buf, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: 80, maxMemoryUsageInMB: 512 });
+    const img = jpeg.decode(buf, { useTArray: true, formatAsRGBA: true, maxResolutionInMP: 24, maxMemoryUsageInMB: 160 });
     return meanLum(img.data, img.width, img.height, 4);
   }
   return null;

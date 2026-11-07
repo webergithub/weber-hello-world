@@ -86,7 +86,16 @@ const DEFAULT_CONFIG = {
   split: { enabled: true, size: 1000, parallel: 3 },
   // 插件（v3.7）：智能总结脚本。enabled 为“生效”开关（检查通过后才能设为生效）；auto：解析完成的文档自动加入总结队列
   plugins: { summary: { enabled: false, script: '', args: '"{input}" "{output}"', timeout: 300, auto: true } },
+  // 资源与优先级（v3.11）：yieldOnActivity 用户操作界面时解析任务让路（只保留 1 个子任务继续、每个文件之间稍作等待）；
+  // idleOnly 只在空闲期解析（用户停止操作 idleSec 秒后才继续）；memLimitMB 主进程内存超过上限时暂缓开始下一个文件；
+  // bigFileMB 超过这个大小的文件同一时间只解析一个
+  perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 3072, bigFileMB: 64 },
 };
+// 主动回收内存（内存超过上限时用）：运行时打开 gc 接口，10 秒内最多一次
+let gcFn = null, gcAt = 0;
+try { require('v8').setFlagsFromString('--expose_gc'); gcFn = require('vm').runInNewContext('gc'); } catch { gcFn = null; }
+function forceGc() { if (gcFn && Date.now() - gcAt > 10000) { gcAt = Date.now(); try { gcFn(); } catch { /* ignore */ } } }
+
 // 反馈接收地址只在主进程中使用，不传给界面
 const FEEDBACK_TO = 'weber.liuweibo@huawei.com';
 
@@ -120,8 +129,11 @@ class AgentService extends EventEmitter {
     this.incrementalRuns = new Map();
     this.pausing = new Set();
     this.leadSub = new Map(); // 总任务 → 解析动态跟随的子任务
+    this.inLoop = new Set(); // 正在逐个处理文件的任务（用户操作时只保留最早的一个继续）
+    require('./yieldy').setBusyProbe(() => this.perfCfg().yieldOnActivity !== false && this.userBusy());
     this.parentWatch = new Map(); // 总任务的增量扫描：子任务全部完成后汇总新增 / 更新 / 移除
     this.summary = new SummaryPlugin(this); // 插件：智能总结（工作线程调用大模型）
+    this.search.prewarm(5000); // 启动后在后台读取检索缓存，第一次检索不用等待（v3.11）
     for (const t of this.store.listTasks()) if (!t.parent_id && this.store.children(t.id).length) this.refreshParent(t.id, { quiet: true });
     this.log.info(`服务启动，数据目录 ${dataDir}`);
   }
@@ -141,7 +153,7 @@ class AgentService extends EventEmitter {
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) }, plugins: { ...(this.config.plugins || {}), ...(patch.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((this.config.plugins || {}).summary || {}), ...((patch.plugins || {}).summary || {}) } } };
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) }, perf: { ...DEFAULT_CONFIG.perf, ...(this.config.perf || {}), ...(patch.perf || {}) }, plugins: { ...(this.config.plugins || {}), ...(patch.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((this.config.plugins || {}).summary || {}), ...((patch.plugins || {}).summary || {}) } } };
     if (patch.mail) setImmediate(() => this.flushFeedback().catch(() => {}));
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
@@ -703,11 +715,16 @@ class AgentService extends EventEmitter {
       this.splitIntoChildren(id, task, files, roots || [task.dir], { size: split.size, incremental, removed: inc.removed, log, tag });
       return;
     }
+    this.inLoop.add(id);
+    try {
     for (let i = 0; i < files.length; i++) {
       if (this.cancelled.has(id)) { stoppedAt = i; log.warn(`${tag} 已${this.pausing.has(id) ? '中断' : '取消'}，处理到第 ${i}/${files.length} 个文件`); break; }
       const file = files[i];
       if (handled.has(file)) continue;
       if (!fs.existsSync(file)) { counts.failed++; this.store.linkTaskFile(id, null, file, 'failed', '文件已不存在'); continue; }
+      // 让路给用户操作 / 内存上限 / 大文件逐个解析（v3.11）；等待期间可暂停
+      const release = await this.resourceGate(id, file, log, tag);
+      if (this.cancelled.has(id)) { if (release) release(); stoppedAt = i; log.warn(`${tag} 已${this.pausing.has(id) ? '中断' : '取消'}，处理到第 ${i}/${files.length} 个文件`); break; }
       this.emitTask(id, { current: file, done: i });
       this.emitProgress(id, { stage: 'file', index: i + 1, total: files.length, file, counts: { ...counts } });
       try {
@@ -728,9 +745,11 @@ class AgentService extends EventEmitter {
         counts.failed++;
         log.error(`${tag} 处理失败 ${file}`, e);
       }
+      finally { if (release) release(); }
       this.store.updateTask(id, counts);
       await new Promise((r) => setImmediate(r));
     }
+    } finally { this.inLoop.delete(id); }
     // 暂停 / 取消：立即结束，不在此时做全库重算（上万个文件时要很久，界面会一直停在“解析中”）；
     // 资料库变化记下来，空闲时在后台分片重算
     const stopping = this.cancelled.has(id);
@@ -1918,6 +1937,68 @@ class AgentService extends EventEmitter {
   }
 
   stats() { return { ...this.store.stats(), dataDir: this.dataDir, running: this.running, queued: this.queue.length }; }
+
+  // ================= 资源与优先级（v3.11） =================
+  perfCfg() { return { ...DEFAULT_CONFIG.perf, ...(this.config.perf || {}) }; }
+  /** 界面上有鼠标 / 键盘操作时调用（渲染进程节流后每秒最多一次） */
+  userActivity() { this.lastUserAt = Date.now(); }
+  /** 用户最近 3 秒内是否在操作界面 */
+  userBusy(ms = 3000) { return Date.now() - (this.lastUserAt || 0) < ms; }
+
+  /**
+   * 开始解析下一个文件前的关口：
+   * 1) 只在空闲期解析（perf.idleOnly）：用户停止操作 idleSec 秒后才继续；
+   * 2) 用户正在操作（perf.yieldOnActivity）：多个子任务并行时只保留最早的一个继续，其余等待；每个文件之间多等 150ms；
+   * 3) 主进程内存超过 perf.memLimitMB：先回收内存，仍超过则暂缓（最多 30 秒）再继续；
+   * 4) 超过 perf.bigFileMB 的大文件同一时间只解析一个。返回释放大文件锁的函数（或 null）。
+   */
+  async resourceGate(id, file, log, tag) {
+    const p = this.perfCfg();
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    let shown = '';
+    const wait = (msg) => { if (msg !== shown) { shown = msg; this.emitTask(id, { current: msg }); } };
+    const memSince = Date.now();
+    let memLogged = false;
+    for (;;) {
+      if (this.cancelled.has(id)) return null;
+      if (p.idleOnly && Date.now() - (this.lastUserAt || 0) < Math.max(5, Number(p.idleSec) || 60) * 1000) { wait(`等待空闲：您正在操作界面，停止操作 ${p.idleSec} 秒后继续解析`); await sleep(1000); continue; }
+      if (p.yieldOnActivity !== false && this.userBusy()) {
+        const lead = Math.min(...this.inLoop);
+        if (this.inLoop.size > 1 && id !== lead) { wait('让路：您正在操作界面，本子任务稍后继续'); await sleep(600); continue; }
+        await sleep(150);
+      }
+      const limit = Number(p.memLimitMB) || 0;
+      if (limit && process.memoryUsage().rss / 1048576 > limit && Date.now() - memSince < 30000) {
+        forceGc();
+        const rss = Math.round(process.memoryUsage().rss / 1048576);
+        if (rss > limit) {
+          if (!memLogged) { memLogged = true; log.warn(`${tag} 内存占用 ${rss}MB 超过上限 ${limit}MB，暂缓开始下一个文件`); }
+          wait(`内存占用 ${rss}MB 超过上限 ${limit}MB，等待释放后继续`);
+          await sleep(1000);
+          continue;
+        }
+      }
+      break;
+    }
+    let size = 0;
+    try { size = (await fs.promises.stat(file)).size; } catch { /* 文件不存在：后面按失败处理 */ }
+    if (size > (Number(p.bigFileMB) || 64) * 1048576) {
+      if (this.bigBusy) wait(`等待其他大文件解析完成：${path.basename(file)}（${Math.round(size / 1048576)}MB）`);
+      const release = await this.acquireBig();
+      if (this.cancelled.has(id)) { release(); return null; }
+      return release;
+    }
+    return null;
+  }
+
+  /** 大文件锁：同一时间只解析一个大文件 */
+  acquireBig() {
+    let release;
+    const mine = new Promise((r) => { release = () => { this.bigBusy = false; r(); }; });
+    const prev = this.bigChain || Promise.resolve();
+    this.bigChain = prev.then(() => mine);
+    return prev.then(() => { this.bigBusy = true; return release; });
+  }
 
   async rebuildAll() {
     this.log.info('重新计算标签、分组与对应关系');

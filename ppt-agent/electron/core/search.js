@@ -13,7 +13,7 @@ const STAGES = [['load', '准备检索索引', 10], ['analyze', '解析查询', 
 function progressReporter(onProgress) {
   const t0 = Date.now();
   const stages = STAGES.map(([key, label, w]) => ({ key, label, w, status: 'wait', done: 0, total: 0, ms: 0, note: '' }));
-  const W = stages.reduce((a, x) => a + x.w, 0);
+  let W = stages.reduce((a, x) => a + x.w, 0);
   let cur = null, last = 0;
   const emit = (force) => {
     if (!onProgress) return;
@@ -26,7 +26,9 @@ function progressReporter(onProgress) {
   };
   return {
     start(key, total = 0, note = '') { if (cur && cur.status === 'run') this.end(); cur = stages.find((x) => x.key === key); cur.status = 'run'; cur.total = total; cur.done = 0; cur.note = note; cur.t = Date.now(); emit(true); },
-    tick(done) { if (cur) { cur.done = done; emit(false); } },
+    tick(done, total) { if (cur) { cur.done = done; if (total) cur.total = total; emit(false); } },
+    /** 调整阶段权重：没有检索缓存时“准备检索索引”占大部分时间 */
+    weight(key, w) { const st = stages.find((x) => x.key === key); if (st) { st.w = w; W = stages.reduce((a, x) => a + x.w, 0); } },
     end(note) { if (!cur) return; cur.status = 'done'; cur.ms = Date.now() - cur.t; if (cur.total) cur.done = cur.total; if (note !== undefined) cur.note = note; emit(true); },
     finish() { if (cur && cur.status === 'run') this.end(); for (const st of stages) if (st.status === 'wait') st.status = 'skip'; cur = null; if (onProgress) { const now = Date.now(); try { onProgress({ pct: 100, stage: 'done', label: '检索完成', done: 0, total: 0, elapsed: now - t0, stages: stages.map(({ w, ...x }) => x), finished: true }); } catch { /* ignore */ } } },
   };
@@ -54,15 +56,38 @@ class SearchEngine {
     this.cache = null;
   }
 
-  invalidate() { this.cache = null; }
+  invalidate() { this.cache = null; this.loading = null; this.gen = (this.gen || 0) + 1; this.prewarm(); }
 
   /** 异步加载检索索引（分页读取，不阻塞主进程） */
-  async loadAsync() {
+  /**
+   * 读取检索缓存（文档 + 每页向量）。onLoad(done, total) 报告读取进度（v3.11：大资料库时“准备检索索引”不再长时间停在 0%）；
+   * 同时只读一份：后台预热（prewarm）与用户检索共用同一次读取。
+   */
+  async loadAsync(onLoad = null) {
     if (this.cache) return this.cache;
-    const files = await this.store.listFilesAsync('parsed');
-    const vecs = await this.store.slideVectorsAsync();
-    if (!this.cache) this.cache = { files, fileMap: new Map(files.map((f) => [f.id, f])), vecs };
-    return this.cache;
+    if (!this.loading) {
+      const gen = this.gen;
+      const listeners = this.loadListeners = new Set();
+      const report = (d, t) => { for (const f of listeners) { try { f(d, t); } catch { /* ignore */ } } };
+      this.loading = (async () => {
+        const c = this.store.searchLoadCounts ? this.store.searchLoadCounts() : { files: 0, slides: 0 };
+        const total = c.files + c.slides;
+        const files = await this.store.listFilesAsync('parsed', (n) => report(n, total));
+        const vecs = await this.store.slideVectorsAsync((n) => report(c.files + n, total));
+        const cache = { files, fileMap: new Map(files.map((f) => [f.id, f])), vecs };
+        if (gen === this.gen) this.cache = cache;
+        return cache;
+      })().finally(() => { if (gen === this.gen) this.loading = null; });
+    }
+    if (onLoad && this.loadListeners) this.loadListeners.add(onLoad);
+    return this.loading;
+  }
+
+  /** 资料库变化后在后台预先读取检索缓存，下一次检索不用等待 */
+  prewarm(delayMs = 3000) {
+    clearTimeout(this.prewarmTimer);
+    this.prewarmTimer = setTimeout(() => { if (!this.cache) this.loadAsync().catch(() => {}); }, delayMs);
+    if (this.prewarmTimer.unref) this.prewarmTimer.unref();
   }
 
   load() {
@@ -144,8 +169,9 @@ class SearchEngine {
     const P = progressReporter(opts.onProgress);
     const tk = ticker(20); // 每约 20ms 让出一次主进程，检索上万页时界面不卡
     const y = async () => { const p = tk(); if (p) await p; };
+    if (!this.cache) P.weight('load', 50);
     P.start('load', 0, this.cache ? '已缓存' : '');
-    const { files, fileMap, vecs } = await this.loadAsync();
+    const { files, fileMap, vecs } = await this.loadAsync((done, total) => { P.tick(done, total); });
     P.end(`${files.length} 个文档 · ${vecs.length} 页`);
     P.start('analyze');
     const analysis = await this.analyze(q, opts);

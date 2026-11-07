@@ -187,6 +187,14 @@ export default function App() {
   const reloadLogs = useCallback(() => api.logTail(5000).then(setLogLines), []);
   const bump = () => { clearSlideCache(); clearFileCache(); clearRelatedCache(); setTaskTick((x) => x + 1); };
 
+  // 用户操作界面时通知主进程（每秒最多一次）：解析任务据此让路（设置 → 常规 → 资源与优先级，v3.11）
+  useEffect(() => {
+    let last = 0;
+    const f = () => { const n = Date.now(); if (n - last > 1000) { last = n; api.userActivity().catch(() => {}); } };
+    const evs = ['pointerdown', 'keydown', 'wheel'];
+    for (const e of evs) window.addEventListener(e, f, { passive: true, capture: true });
+    return () => { for (const e of evs) window.removeEventListener(e, f, { capture: true }); };
+  }, []);
   useEffect(() => {
     refreshTasks(); reloadLogs();
     // 启动时先询问数据目录（未勾选“记住选择”时），关闭后再显示启动简介

@@ -30,15 +30,51 @@ function normalize(v) {
   return v;
 }
 
+/**
+ * 稀疏向量（v3.11，降低内存）：哈希向量 768 维里通常只有几十个非零值，从数据库读出后改用“下标 + 数值”存放，
+ * 每页从约 3KB 降到约 0.3KB；2 万个文档、几十万页时检索缓存 / 相似分组 / 页面关联不再各占 1~2GB。
+ * 数据库中仍存稠密向量（兼容旧数据）；只通过 cosine / toDense 使用，不要按下标直接读写。
+ */
+class SparseVec {
+  constructor(idx, val, length) { this.idx = idx; this.val = val; this.length = length; }
+  toDense() { const v = new Float32Array(this.length); for (let k = 0; k < this.idx.length; k++) v[this.idx[k]] = this.val[k]; return v; }
+}
+
+/** 非零值不超过 1/4 时转为稀疏向量，否则原样返回（语义向量等稠密向量不变） */
+function sparsify(v) {
+  if (!v || !(v instanceof Float32Array) || v.length > 65535) return v;
+  let nz = 0;
+  for (let i = 0; i < v.length; i++) if (v[i] !== 0) nz++;
+  if (nz > v.length / 4) return v;
+  const idx = new Uint16Array(nz), val = new Float32Array(nz);
+  for (let i = 0, k = 0; i < v.length; i++) if (v[i] !== 0) { idx[k] = i; val[k++] = v[i]; }
+  return new SparseVec(idx, val, v.length);
+}
+
+const dense = (v) => (v instanceof SparseVec ? v.toDense() : v);
+
 function cosine(a, b) {
   if (!a || !b || a.length !== b.length) return 0;
+  const sa = a instanceof SparseVec, sb = b instanceof SparseVec;
   let s = 0;
+  if (sa && sb) {
+    const ai = a.idx, bi = b.idx;
+    for (let i = 0, j = 0; i < ai.length && j < bi.length;) {
+      if (ai[i] === bi[j]) { s += a.val[i++] * b.val[j++]; } else if (ai[i] < bi[j]) i++; else j++;
+    }
+    return s;
+  }
+  if (sa || sb) {
+    const sp = sa ? a : b, d = sa ? b : a;
+    for (let k = 0; k < sp.idx.length; k++) s += sp.val[k] * d[sp.idx[k]];
+    return s;
+  }
   for (let i = 0; i < a.length; i++) s += a[i] * b[i];
   return s;
 }
 
 function mean(vecs) {
-  const list = vecs.filter(Boolean);
+  const list = vecs.filter(Boolean).map(dense);
   if (!list.length) return null;
   const v = new Float32Array(list[0].length);
   for (const x of list) for (let i = 0; i < v.length; i++) v[i] += x[i];
@@ -77,4 +113,4 @@ function embedder(cfg) {
   };
 }
 
-module.exports = { hashVector, cosine, mean, normalize, embedder, postJson, DIM };
+module.exports = { SparseVec, sparsify, dense, hashVector, cosine, mean, normalize, embedder, postJson, DIM };

@@ -111,7 +111,7 @@ class ZipPackage {
         close: () => { try { fs.closeSync(fd); } catch { /* ignore */ } },
       };
     }
-    if (size > 300 * 1024 * 1024) return null;
+    if (size > 48 * 1024 * 1024) return null; // 压缩存放的大视频不整体解压进内存（v3.11）
     const all = await this.buffer(n);
     return { size, read: async (start, len) => all.subarray(start, Math.min(all.length, start + len)) };
   }

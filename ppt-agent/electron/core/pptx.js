@@ -399,7 +399,7 @@ async function parseSlide(pkg, part, index, ctxBase, opts) {
   if (bg.image) {
     const img = bg.image;
     bg.imageUrl = await extractImage(pkg, img, opts.mediaDir, key);
-    try { bg.lum = await imageLuminance(await pkg.zip.buffer(img, 40 * 1024 * 1024), img); } catch { bg.lum = null; }
+    try { bg.lum = await imageLuminance(await pkg.zip.buffer(img, 12 * 1024 * 1024), img); } catch { bg.lum = null; }
   } else bg.lum = luminance(bg.color);
   bg.source = bgSrc;
 
@@ -484,7 +484,7 @@ async function parseSlide(pkg, part, index, ctxBase, opts) {
     if (box && imgRel && imgRel.abs && index && box.w * box.h >= 0.85 * W * H && items.filter((i) => i.t !== 'text' || i.paras.some((p) => p.text.trim())).length <= 1) {
       // 铺满整页的图片视为背景
       try {
-        const lum = await imageLuminance(await pkg.zip.buffer(imgRel.abs, 40 * 1024 * 1024), imgRel.abs);
+        const lum = await imageLuminance(await pkg.zip.buffer(imgRel.abs, 12 * 1024 * 1024), imgRel.abs);
         if (lum !== null) { bg.lum = lum; bg.source = 'full-picture'; }
       } catch { /* 无法解码的图片格式 */ }
     }

@@ -2,14 +2,19 @@
 // 长时间计算的“分片”工具：每计算约 budgetMs 毫秒就让出一次事件循环（setImmediate），
 // 期间主进程可以处理界面请求（IPC），资料库很大（上万个文件）时界面也不会假死。
 // 用法：const tk = ticker(); for (...) { const p = tk(); if (p) await p; ... }
+// v3.11：用户正在操作界面时（setBusyProbe 返回 true），每片缩短到约 8ms 并多让出 15ms，后台计算让路给用户操作。
+let busyProbe = () => false;
+function setBusyProbe(fn) { busyProbe = typeof fn === 'function' ? fn : () => false; }
+
 function ticker(budgetMs = 25) {
   let last = Date.now();
   let n = 0;
   return () => {
     if ((++n & 63) !== 0) return null; // 每 64 次才检查一次时间，开销可以忽略
-    if (Date.now() - last < budgetMs) return null;
-    return new Promise((r) => setImmediate(() => { last = Date.now(); r(); }));
+    const busy = busyProbe();
+    if (Date.now() - last < (busy ? Math.min(8, budgetMs) : budgetMs)) return null;
+    return new Promise((r) => (busy ? setTimeout : setImmediate)(() => { last = Date.now(); r(); }, busy ? 15 : undefined));
   };
 }
 
-module.exports = { ticker };
+module.exports = { ticker, setBusyProbe };

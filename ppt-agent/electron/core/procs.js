@@ -30,6 +30,8 @@ function track(child, name) {
   if (!child || !child.pid) return;
   const pid = child.pid;
   children.set(pid, { name: name || 'process', at: Date.now() });
+  // 外部程序用较低优先级运行，用户操作界面时更流畅（v3.11）
+  try { require('os').setPriority(pid, require('os').constants.priority.PRIORITY_BELOW_NORMAL); } catch { /* ignore */ }
   child.once('exit', () => children.delete(pid));
   child.once('error', () => children.delete(pid));
 }
