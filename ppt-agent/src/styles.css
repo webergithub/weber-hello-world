@@ -1493,3 +1493,9 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .dd-space.low { color: var(--danger-fg); font-weight: 600; }
 .perf-settings .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .perf-settings .dt { max-height: 240px; }
+
+/* v3.11 PPT_Agent */
+.agent-sub { padding-left: 14px; color: var(--fg2); }
+.agent-child td { background: var(--bg2); }
+.agent-settings .row.top { align-items: flex-start; }
+.agent-settings textarea.input { min-height: 60px; font-family: inherit; }

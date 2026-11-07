@@ -236,7 +236,7 @@ export default function App() {
     const offLib = on('library', () => bump());
     // 插件（智能总结脚本）失败 / 自动暂停：只提示，不影响解析任务
     const offApp = on('appNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : n.kind === 'warn' ? 'warn' : 'info', { label: n.label, link: n.link, cat: n.cat || '系统' }));
-    const offPlug = on('pluginNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : 'info', { label: '查看插件', link: { type: 'view', view: { type: 'plugins' } }, cat: '插件' }));
+    const offPlug = on('pluginNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : 'info', { label: '查看 PPT_Agent', link: { type: 'view', view: { type: 'plugins' } }, cat: 'PPT_Agent' }));
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
     const off3 = on('progressBatch', (list) => setProgress((p) => list.reduce(reduceProgress, p)));
     return () => { off0(); off1(); off2(); off3(); offLib(); offPlug(); offApp(); if (mq) mq.removeEventListener('change', onMq); };
@@ -385,7 +385,7 @@ export default function App() {
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
     { key: 'merge', icon: '🧬', label: '智能合成', wip: true },
-    { key: 'plugins', icon: '🧠', label: '智能总结', plugin: true }, // 插件位（v3.5）
+    { key: 'plugins', icon: '🤖', label: 'PPT_Agent', plugin: true }, // 插件位（v3.5）；v3.11 PPT_Agent：大模型解析入库
   ];
   // 点击任务：选中并在任务下方展开“任务详情”菜单（任务概览 / 解析过程）；再次点击已选中的任务收起菜单
   const selectTask = (t) => {

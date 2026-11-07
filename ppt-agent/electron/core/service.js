@@ -90,7 +90,17 @@ const DEFAULT_CONFIG = {
   // idleOnly 只在空闲期解析（用户停止操作 idleSec 秒后才继续）；memLimitMB 主进程内存超过上限时暂缓开始下一个文件；
   // bigFileMB 超过这个大小的文件同一时间只解析一个
   perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 3072, bigFileMB: 64 },
+  // PPT_Agent（v3.11）：engine 调用方式 llm（大模型接口）/ script（AI 调用脚本），不设置时有生效的脚本用脚本；
+  // allowNetwork 允许连接大模型接口（默认关，单机版其他功能仍不联网）；auto 解析完成的文档自动总结（大模型接口时，默认关）；
+  // scopes 轮询范围（任务 / 子任务 id），pollSec 轮询间隔；llm.apiKeyEnc 为加密保存的 API Key（不发给界面）；prompt 自定义总结提示词
+  pptAgent: { allowNetwork: false, auto: false, pollSec: 30, scopes: [], prompt: '', llm: { baseURL: 'https://api.deepseek.com/anthropic', model: 'deepseek-flash', reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 } },
 };
+/** PPT_Agent 设置合并（llm 子项单独合并） */
+function mergeAgent(cur, patch) {
+  const d = DEFAULT_CONFIG.pptAgent, c = cur || {}, p = patch || {};
+  return { ...d, ...c, ...p, llm: { ...d.llm, ...(c.llm || {}), ...(p.llm || {}) }, scopes: (p.scopes || c.scopes || d.scopes).map(Number).filter(Boolean) };
+}
+
 const MIN_FREE_BYTES = 512 * 1024 * 1024; // 数据目录所在磁盘至少保留 512MB，低于时暂停解析任务
 const fmtBytes = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : n >= 1048576 ? `${Math.round(n / 1048576)} MB` : `${Math.round((n || 0) / 1024)} KB`);
 
@@ -149,14 +159,21 @@ class AgentService extends EventEmitter {
       return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) }, plugins: { ...(c.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((c.plugins || {}).summary || {}) } } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }
-  getConfig() { return { ...this.config, offlineOnly: OFFLINE_ONLY, ai: this.ai ? this.ai.state() : null }; }
+  getConfig() {
+    const pa = mergeAgent(this.config.pptAgent);
+    const llm = { ...pa.llm, hasApiKey: !!pa.llm.apiKeyEnc };
+    delete llm.apiKeyEnc; // API Key 不发给界面
+    return { ...this.config, pptAgent: { ...pa, llm }, offlineOnly: OFFLINE_ONLY, ai: this.ai ? this.ai.state() : null };
+  }
   setConfig(patch) {
     if (patch && 'offlineOnly' in patch) { patch = { ...patch }; delete patch.offlineOnly; }
+    if (patch && patch.pptAgent && patch.pptAgent.llm && !patch.__internal) { patch = { ...patch, pptAgent: { ...patch.pptAgent, llm: { ...patch.pptAgent.llm } } }; delete patch.pptAgent.llm.apiKeyEnc; delete patch.pptAgent.llm.apiKey; delete patch.pptAgent.llm.hasApiKey; }
+    if (patch && patch.__internal) { patch = { ...patch }; delete patch.__internal; }
     const w0 = this.config.watch || DEFAULT_CONFIG.watch;
     const watch = { ...w0, ...(patch.watch || {}) };
     // 开启监测或修改时间点时，从“现在”开始计算下一次，避免立即补扫当天早已过去的时间点
     if (patch.watch && (watch.enabled !== w0.enabled || watch.time !== w0.time) && patch.watch.since === undefined) watch.since = Date.now();
-    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) }, perf: { ...DEFAULT_CONFIG.perf, ...(this.config.perf || {}), ...(patch.perf || {}) }, plugins: { ...(this.config.plugins || {}), ...(patch.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((this.config.plugins || {}).summary || {}), ...((patch.plugins || {}).summary || {}) } } };
+    this.config = { ...this.config, ...patch, llm: { ...this.config.llm, ...(patch.llm || {}) }, embedding: { ...this.config.embedding, ...(patch.embedding || {}) }, watch, wheel: { ...(this.config.wheel || DEFAULT_CONFIG.wheel), ...(patch.wheel || {}) }, mail: { ...(this.config.mail || DEFAULT_CONFIG.mail), ...(patch.mail || {}) }, split: { ...(this.config.split || DEFAULT_CONFIG.split), ...(patch.split || {}) }, perf: { ...DEFAULT_CONFIG.perf, ...(this.config.perf || {}), ...(patch.perf || {}) }, pptAgent: mergeAgent(this.config.pptAgent, patch.pptAgent), plugins: { ...(this.config.plugins || {}), ...(patch.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((this.config.plugins || {}).summary || {}), ...((patch.plugins || {}).summary || {}) } } };
     if (patch.mail) setImmediate(() => this.flushFeedback().catch(() => {}));
     fs.writeFileSync(this.configFile, JSON.stringify(this.config, null, 2));
     // 文档类型变化会影响是否关联 Word 内容：后台重算页面关联
@@ -2197,6 +2214,83 @@ class AgentService extends EventEmitter {
     return { ok: true, enabled: false };
   }
   pluginExample() { return SummaryPlugin.examplePath(); }
+
+  // ================= PPT_Agent（v3.11） =================
+  /** 保存 PPT_Agent 设置；apiKey 为明文时加密保存（空字符串 = 清除） */
+  pptAgentSetConfig(patch = {}) {
+    const p = { ...patch, llm: { ...(patch.llm || {}) } };
+    const key = p.llm.apiKey;
+    delete p.llm.apiKey; delete p.llm.apiKeyEnc; delete p.llm.hasApiKey;
+    if (key !== undefined) p.llm.apiKeyEnc = key ? this.ai.llm.seal(key) : '';
+    const r = this.setConfig({ pptAgent: p, __internal: true });
+    if (p.allowNetwork !== undefined) this.log.info(`[PPT_Agent] ${p.allowNetwork ? '已允许' : '已关闭'}连接大模型接口${p.allowNetwork ? `（${this.ai.llm.status().host}）` : ''}`);
+    if (key !== undefined) this.log.info(`[PPT_Agent] API Key 已${key ? '更新（加密保存）' : '清除'}`);
+    this.summary.lastPoll = 0;
+    this.summary.changed();
+    return r;
+  }
+  pptAgentTest(patch = {}) { return this.ai.llm.test(patch); }
+
+  /** 设置轮询范围（任务 / 子任务 id） */
+  pptAgentSetScopes(ids = []) {
+    this.setConfig({ pptAgent: { scopes: [...new Set(ids.map(Number).filter(Boolean))] } });
+    this.summary.lastPoll = 0;
+    this.summary.changed();
+    return this.summary.state();
+  }
+
+  /** 对所选任务 / 子任务立即开始总结入库；poll：同时加入轮询范围（之后新解析的文档也会自动总结） */
+  pptAgentRun({ taskIds = [], force = false, poll = true } = {}) {
+    const ids = [...new Set(taskIds.map(Number).filter(Boolean))];
+    if (poll) this.pptAgentSetScopes([...(this.config.pptAgent || {}).scopes || [], ...ids]);
+    const files = new Set();
+    for (const t of ids) for (const id of this.store.taskFileIdList(t)) files.add(id);
+    const r = this.summary.start([...files], { force });
+    this.summary.lastPoll = Date.now();
+    return { ...r, files: files.size };
+  }
+
+  /**
+   * 管理界面的任务列表：每个总任务与子任务的已解析文档数、已有总结数、排队 / 进行中 / 失败数、是否在轮询范围内。
+   * 统计用 SQL 汇总（上万个文档也只返回数量）。
+   */
+  pptAgentTasks() {
+    const live = "SELECT id FROM tasks WHERE (deleted IS NULL OR deleted = 0)";
+    const per = new Map(this.store.db.prepare(`SELECT tf.task_id tid, COUNT(DISTINCT f.id) docs, COUNT(DISTINCT s.file_id) done FROM task_files tf JOIN files f ON f.id = tf.file_id AND f.status = 'parsed' LEFT JOIN doc_summaries s ON s.file_id = f.id WHERE tf.task_id IN (${live}) GROUP BY tf.task_id`).all().map((r) => [r.tid, r]));
+    const fam = new Map(this.store.db.prepare(`SELECT t.parent_id pid, COUNT(DISTINCT f.id) docs, COUNT(DISTINCT s.file_id) done FROM task_files tf JOIN tasks t ON t.id = tf.task_id AND t.parent_id IS NOT NULL AND (t.deleted IS NULL OR t.deleted = 0) JOIN files f ON f.id = tf.file_id AND f.status = 'parsed' LEFT JOIN doc_summaries s ON s.file_id = f.id GROUP BY t.parent_id`).all().map((r) => [r.pid, r]));
+    // 队列中的文档属于哪些任务
+    const active = this.summary.jobs.filter((j) => ['queued', 'running', 'failed'].includes(j.status));
+    const jobBy = new Map(active.map((j) => [j.fileId, j.status]));
+    const jobCount = new Map();
+    if (active.length) {
+      const rows = this.store.db.prepare('SELECT DISTINCT tf.task_id tid, tf.file_id fid FROM task_files tf WHERE tf.file_id IN (SELECT value FROM json_each(?))').all(JSON.stringify([...jobBy.keys()]));
+      const parentOf = new Map(this.store.listTasks().map((t) => [t.id, t.parent_id]));
+      const add = (tid, st) => { const c = jobCount.get(tid) || { queued: 0, running: 0, failed: 0 }; c[st]++; jobCount.set(tid, c); };
+      const seen = new Set();
+      for (const r of rows) {
+        const st = jobBy.get(r.fid);
+        if (!seen.has(`${r.tid}:${r.fid}`)) { seen.add(`${r.tid}:${r.fid}`); add(r.tid, st); }
+        const pid = parentOf.get(r.tid);
+        if (pid && !seen.has(`${pid}:${r.fid}`)) { seen.add(`${pid}:${r.fid}`); add(pid, st); }
+      }
+    }
+    const scopes = new Set(this.summary.scopes());
+    return this.store.listTasks().filter((t) => !t.deleted).map((t) => {
+      const kids = !t.parent_id && this.store.children(t.id).length > 0;
+      const c = (kids ? fam.get(t.id) : per.get(t.id)) || { docs: 0, done: 0 };
+      const j = jobCount.get(t.id) || { queued: 0, running: 0, failed: 0 };
+      return { id: t.id, name: t.name, dir: t.dir, parent_id: t.parent_id || null, part_no: t.part_no || null, part_label: t.part_label || '', status: t.status, hasChildren: kids,
+        docs: c.docs, summarized: c.done, pending: Math.max(0, c.docs - c.done), queued: j.queued + j.running, failed: j.failed, inScope: scopes.has(t.id) || (t.parent_id && scopes.has(t.parent_id)) };
+    });
+  }
+
+  /** 管理界面下钻：任务中的文档（kind：docs 全部已解析 / done 已有总结 / pending 待总结） */
+  pptAgentTaskFiles(taskId, kind = 'docs') {
+    const cols = this.store.liteCols().split(', ').map((c) => `f.${c}`).join(', ');
+    const where = kind === 'done' ? 'AND s.file_id IS NOT NULL' : kind === 'pending' ? 'AND s.file_id IS NULL' : '';
+    return this.store.db.prepare(`SELECT DISTINCT ${cols}, s.md_path AS summary_md FROM task_files tf JOIN files f ON f.id = tf.file_id AND f.status = 'parsed' LEFT JOIN doc_summaries s ON s.file_id = f.id
+      WHERE tf.task_id IN (SELECT id FROM tasks WHERE (id = ? OR parent_id = ?) AND (deleted IS NULL OR deleted = 0)) ${where} LIMIT 20000`).all(taskId, taskId).map(this.store.liteRow);
+  }
 
   close() { clearInterval(this.schedTimer); clearInterval(this.statTimer); if (this.summary) this.summary.close(); this.store.close(); }
 }

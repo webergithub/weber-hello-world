@@ -2,7 +2,7 @@
 // Electron 主进程：窗口、IPC、本地资源协议（ppta://）、日志推送。
 const path = require('path');
 const fs = require('fs');
-const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme, Tray, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, Menu, nativeTheme, Tray, nativeImage, safeStorage } = require('electron');
 const { pathToFileURL } = require('url');
 
 process.env.NODE_NO_WARNINGS = '1';
@@ -250,6 +250,10 @@ app.whenReady().then(async () => {
   logger = require('./core/logger');
   const { AgentService } = require('./core/service');
   service = new AgentService(dataDir);
+  // PPT_Agent 大模型接入层（v3.11）：API Key 用系统加密保存（Windows DPAPI）；请求走 Electron 网络栈（使用系统代理）
+  service.appVersion = app.getVersion();
+  service.ai.llm.box = safeStorage;
+  service.ai.llm.fetchImpl = (url, opts) => net.fetch(url, opts);
   // 外部进程登记（v3.10.1）：退出时结束全部外部进程；上次异常退出留下的 Word / PowerPoint 后台进程启动时清理
   const procs = require('./core/procs');
   procs.configure({ file: path.join(app.getPath('userData'), 'office-procs.json'), logger: logger.child('procs') });
@@ -475,6 +479,12 @@ app.whenReady().then(async () => {
     categories: (opts) => service.categories(opts),
     groups: (opts) => service.groups(opts),
     rescanGroups: () => service.rescanGroups(),
+    pptAgentTasks: () => service.pptAgentTasks(),
+    pptAgentRun: (opts) => service.pptAgentRun(opts),
+    pptAgentSetScopes: (ids) => service.pptAgentSetScopes(ids),
+    pptAgentSetConfig: (patch) => service.pptAgentSetConfig(patch),
+    pptAgentTest: (patch) => service.pptAgentTest(patch),
+    pptAgentTaskFiles: (id, kind) => service.pptAgentTaskFiles(id, kind),
     search: (q, opts) => service.searchQuery(q, opts),
     searchHistory: (opts) => service.searchHistory(opts),
     searchHistoryResult: (id) => service.searchHistoryResult(id),

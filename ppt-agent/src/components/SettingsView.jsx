@@ -7,6 +7,7 @@ import WatchSettings from './WatchSettings';
 import PluginSettings from './PluginSettings';
 import OfficeProcs from './OfficeProcs';
 import PerfSettings from './PerfSettings';
+import PptAgentSettings from './PptAgentSettings';
 import { LANG_NAMES } from './Panels';
 
 const LLM_PRESETS = [
@@ -22,8 +23,8 @@ const LLM_PRESETS = [
   { key: 'ollama', label: '本地 Ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
 ];
 
-const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', '大模型与语义向量'], ['data', '目录与数据']];
-const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'general', procs: 'general', perf: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
+const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', 'PPT_Agent'], ['data', '目录与数据']];
+const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'ai', procs: 'general', perf: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
 
 const fmtGB = (n) => (n >= 1073741824 ? `${(n / 1073741824).toFixed(1)} GB` : `${Math.round((n || 0) / 1048576)} MB`);
@@ -69,7 +70,7 @@ export default function SettingsView({ focus }) {
     <div className="view">
       <div className="view-head"><div className="vh-title">⚙️ 设置</div><div className="spacer" /><button className="btn primary" onClick={save}>保存设置</button></div>
       <div className="tabs attached settings-tabs">
-        {SET_TABS.map(([k, label]) => <button key={k} className={`${tab === k ? 'on' : ''} ${k === 'ai' && offline ? 'off' : ''}`} title={k === 'ai' && offline ? '单机版不联网，此页设置暂不可用' : undefined} onClick={() => pickTab(k)}>{label}{k === 'ai' && offline ? <span className="tag small">单机版不可用</span> : null}</button>)}
+        {SET_TABS.map(([k, label]) => <button key={k} className={tab === k ? 'on' : ''} onClick={() => pickTab(k)}>{label}</button>)}
       </div>
       <div className="tab-body scroll pad settings">
         {tab === 'general' && <>
@@ -104,10 +105,6 @@ export default function SettingsView({ focus }) {
             onChange={(e) => set({ split: { ...(cfg.split || {}), size: Math.max(100, Math.min(20000, Number(e.target.value) || 1000)) } })} /> <span className="muted">个文件</span></div>
           <div className="row"><label>同时执行的子任务</label><input className="input split-par" type="number" min="1" max="8" step="1" value={(cfg.split || {}).parallel || 3} disabled={(cfg.split || {}).enabled === false}
             onChange={(e) => set({ split: { ...(cfg.split || {}), parallel: Math.max(1, Math.min(8, Number(e.target.value) || 3)) } })} /> <span className="muted">个</span></div>
-        </section>
-        <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
-          <h3>AI 调用脚本（智能总结 / 智能搜索 / 智能生成）</h3>
-          <PluginSettings />
         </section>
         <section data-sec="perf" className={focus === 'perf' ? 'flash-sec' : ''}>
           <h3>资源与优先级</h3>
@@ -192,10 +189,18 @@ export default function SettingsView({ focus }) {
         </section>
         </>}
         {tab === 'ai' && <>
-          {offline && <Notice id="offline-ai-tab" className="offline-notice">🔒 当前为<b>单机版</b>：应用不联网，大模型与语义向量接口暂不可用，本页设置已锁定。解析、检索（本地 RAG）、黑白底互转、智能生成等全部在本机完成。</Notice>}
+        <section data-sec="agent" ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
+          <h3>🤖 PPT_Agent · 大模型接入（DeepSeek Harness）</h3>
+          <PptAgentSettings />
+        </section>
+        <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
+          <h3>AI 调用脚本（不联网时可用自己的脚本代替大模型接口）</h3>
+          <PluginSettings />
+        </section>
+          {offline && <Notice id="offline-ai-tab2" className="offline-notice">🔒 单机版：下面的其他大模型功能（讲解词生成 / 翻译 / 打标签 / RAG 回答）与语义向量接口暂不可用，已锁定；PPT_Agent 只在打开“允许连接大模型接口”后联网。</Notice>}
           <fieldset className="settings-lock" disabled={offline}>
-        <section ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
-          <h3>🤖 Agent 接口（大模型，OpenAI 兼容）</h3>
+        <section>
+          <h3>其他大模型功能（OpenAI 兼容接口）</h3>
           <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未配置时，讲解词生成（建设中）与翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
           <div className="row"><label>服务商</label>
             <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>

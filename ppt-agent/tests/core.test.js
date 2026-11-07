@@ -1042,3 +1042,88 @@ test('AI 调用脚本（v3.10.1）：超时结束脚本及其启动的子进程'
   const grand = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.strictEqual(procAlive(grand), false);
 });
+
+test('PPT_Agent（v3.11）：DeepSeek Harness 大模型接入层 + harness 轮询总结入库；默认不联网，API Key 不发给界面', async () => {
+  const http = require('http');
+  const { AgentService } = require('../electron/core/service');
+  delete process.env.PPTA_FAKE_LLM;
+  let calls = 0, lastBody = null, lastHeaders = null;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
+      calls++; lastBody = JSON.parse(b); lastHeaders = req.headers;
+      if (req.headers['x-api-key'] !== 'sk-test') { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":{"type":"authentication_error","message":"invalid key"}}'); return; }
+      const ev = (e) => `event: ${e.type}\ndata: ${JSON.stringify(e)}\n\n`;
+      const title = (lastBody.messages[0].content[0].text.match(/文件：(.*)/) || [])[1] || '';
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      res.end([{ type: 'message_start', message: { usage: { input_tokens: 5 } } }, { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } },
+        { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: `# ${title} 总结\n\n## 一句话概要\n航班保障。` } }, { type: 'content_block_stop', index: 0 },
+        { type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 9 } }, { type: 'message_stop' }].map(ev).join(''));
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const base = `http://127.0.0.1:${srv.address().port}/anthropic`;
+  const svc = new AgentService(path.join(tmp, 'dataagent'));
+  try {
+    svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'], split: { enabled: false } });
+    const id = svc.addTask(P('机场运营'));
+    const done = new Promise((res) => { const h = (t) => { if (t.id === id && t.status === 'done') { svc.off('task', h); res(); } }; svc.on('task', h); });
+    svc.startTask(id);
+    await done;
+    // 默认：调用方式为大模型接口，未填 API Key → 不可用；不会发出任何请求
+    assert.strictEqual(svc.ai.mode(), 'llm');
+    assert.strictEqual(svc.summary.available().ok, false);
+    svc.pptAgentSetConfig({ llm: { baseURL: base, model: 'deepseek-flash', apiKey: 'sk-test' } });
+    const cfg = svc.getConfig();
+    assert.strictEqual(cfg.pptAgent.llm.hasApiKey, true);
+    assert.ok(!('apiKeyEnc' in cfg.pptAgent.llm) && !JSON.stringify(cfg).includes('sk-test'), 'API Key 不发给界面');
+    assert.ok(!fs.readFileSync(path.join(tmp, 'dataagent', 'config.json'), 'utf8').includes('sk-test'), '配置文件中不保存明文 API Key');
+    assert.strictEqual(svc.summary.available().ok, false, '没有允许联网时不可用');
+    assert.match(svc.summary.available().reason, /允许连接大模型接口/);
+    assert.strictEqual(calls, 0);
+    // 测试连接（允许联网前拒绝）
+    assert.strictEqual((await svc.pptAgentTest()).ok, false);
+    svc.pptAgentSetConfig({ allowNetwork: true });
+    const t = await svc.pptAgentTest();
+    assert.ok(t.ok, t.error);
+    assert.strictEqual(lastHeaders['anthropic-version'], '2023-06-01');
+    assert.strictEqual(lastBody.model, 'deepseek-flash');
+    assert.strictEqual((await svc.pptAgentTest({ apiKey: 'wrong' })).ok, false, '错误的 Key 给出失败');
+    // 管理界面：任务列表带数量；对任务启动解析入库并加入轮询范围
+    const before = svc.pptAgentTasks().find((x) => x.id === id);
+    assert.ok(before.docs > 0 && before.summarized === 0 && before.pending === before.docs);
+    const finished = new Promise((res) => { const h = (st) => { if (!st.counts.queued && !st.counts.running && st.counts.done) { svc.summary.off('update', h); res(st); } }; svc.summary.on('update', h); });
+    const r = svc.pptAgentRun({ taskIds: [id] });
+    assert.strictEqual(r.added, before.docs);
+    const st = await finished;
+    assert.strictEqual(st.counts.failed, 0);
+    assert.deepStrictEqual(st.harness.scopes, [id]);
+    assert.deepStrictEqual(st.harness.pipeline.sinks, ['sink.markdown', 'sink.database']);
+    const list = svc.summary.list();
+    assert.strictEqual(list.length, before.docs);
+    assert.ok(list.every((x) => /DeepSeek · deepseek-flash/.test(x.model)));
+    const md = fs.readFileSync(list[0].md_path, 'utf8');
+    assert.match(md, /^---\n原文件: /);
+    assert.match(md, /一句话概要/);
+    const after = svc.pptAgentTasks().find((x) => x.id === id);
+    assert.strictEqual(after.summarized, before.docs);
+    assert.strictEqual(after.inScope, true);
+    assert.strictEqual(svc.pptAgentTaskFiles(id, 'pending').length, 0);
+    assert.strictEqual(svc.pptAgentTaskFiles(id, 'done').length, before.docs);
+    // 轮询：删除一份总结后，下一次轮询自动补上
+    svc.store.db.prepare('DELETE FROM doc_summaries WHERE file_id = ?').run(list[0].file_id);
+    const again = new Promise((res) => { const h = (st2) => { if (!st2.counts.queued && !st2.counts.running && st2.counts.done > st.counts.done) { svc.summary.off('update', h); res(st2); } }; svc.summary.on('update', h); });
+    assert.strictEqual(svc.summary.poll(), 1, '轮询发现 1 个待总结文档');
+    await again;
+    assert.strictEqual(svc.summary.list().length, before.docs);
+    // 插件可替换：自定义 sink 收到结果
+    const seen = [];
+    svc.summary.use('sinks', [...svc.summary.pipeline.sinks, { name: 'sink.test', write: (ctx) => { seen.push(ctx.fileId); } }]);
+    const third = new Promise((res) => { const h = (st3) => { if (!st3.counts.queued && !st3.counts.running && seen.length) { svc.summary.off('update', h); res(); } }; svc.summary.on('update', h); });
+    svc.summaryStart({ fileIds: [list[1].file_id], force: true });
+    await third;
+    assert.deepStrictEqual(seen, [list[1].file_id]);
+    // 关闭联网：立即不可用
+    svc.pptAgentSetConfig({ allowNetwork: false });
+    assert.strictEqual(svc.summary.available().ok, false);
+  } finally { svc.close(); srv.close(); }
+});

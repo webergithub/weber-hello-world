@@ -2,7 +2,7 @@
 const bridge = window.ppta;
 
 // 正在进行的接口调用（v3.8）：超过 0.3 秒的显示“正在加载…”提示（对话框、轮询类接口除外）
-const NO_BUSY = new Set(['selectDir', 'selectFiles', 'saveFile', 'confirm', 'selectScript', 'queueState', 'tasks', 'pluginState', 'logTail', 'clientLog', 'search', 'pluginCheck', 'pluginEnable', 'userActivity', 'memInfo', 'officeProcs']);
+const NO_BUSY = new Set(['selectDir', 'selectFiles', 'saveFile', 'confirm', 'selectScript', 'queueState', 'tasks', 'pluginState', 'logTail', 'clientLog', 'search', 'pluginCheck', 'pluginEnable', 'userActivity', 'memInfo', 'officeProcs', 'pptAgentTest', 'pptAgentTasks']);
 const inflight = new Map();
 let callSeq = 0;
 const busySubs = new Set();

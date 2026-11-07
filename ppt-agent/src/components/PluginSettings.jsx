@@ -7,7 +7,7 @@ const FIELDS = ['script', 'args', 'timeout'];
 const USES = [['auto', '解析完成的文档自动生成智能总结'], ['useForSearch', '用于智能搜索（扩展查询关键词）'], ['useForGenerate', '用于智能生成（理解需求、提取关键词）']];
 
 /**
- * 设置 → 常规 → AI 调用脚本（v3.7 智能总结脚本，v3.9 抽象为 AI 调用模块，智能总结 / 智能搜索 / 智能生成共用）。
+ * 设置 → PPT_Agent → AI 调用脚本（v3.7 智能总结脚本，v3.9 抽象为 AI 调用模块，智能总结 / 智能搜索 / 智能生成共用）。
  * 脚本、参数、超时；“生效”先检查（用示例文档试运行一次），通过后才生效；改了脚本 / 参数 / 超时要重新点“生效”；
  * 用途开关（自动总结、用于智能搜索、用于智能生成）改了立即保存。
  */
@@ -57,7 +57,7 @@ export default function PluginSettings() {
         </div>
         <button className="btn" disabled={!!busy || !pl.script} onClick={check}>{busy === 'check' ? '检查中…' : '🔍 检查脚本'}</button>
         {enabled && dirty && <span className="tag warn">修改尚未生效</span>}
-        <button className="btn ghost" onClick={() => app.go({ type: 'plugins' })}>🧠 打开智能总结</button>
+        <button className="btn ghost" onClick={() => app.go({ type: 'plugins' })}>🤖 打开 PPT_Agent</button>
       </div>
       {result && <div className={`plugin-check ${result.ok ? 'ok' : 'bad'}`}>{result.ok ? `✔ 检查通过（${result.ms}ms）` : `✖ ${result.error}`}{result.ok && result.preview ? <pre>{result.preview}</pre> : null}</div>}
     </div>
