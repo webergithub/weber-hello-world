@@ -254,6 +254,9 @@ app.whenReady().then(async () => {
   service.appVersion = app.getVersion();
   service.ai.llm.box = safeStorage;
   service.ai.llm.fetchImpl = (url, opts) => net.fetch(url, opts);
+  // 内存上限按全部进程合计（v3.12）；超过时同时清理界面进程的缓存
+  service.totalMemMB = () => app.getAppMetrics().reduce((a, m) => a + ((m.memory && m.memory.workingSetSize) || 0), 0) / 1024;
+  service.onReleaseMemory = () => { if (win && !win.isDestroyed()) { win.webContents.session.clearCache().catch(() => {}); win.webContents.send('releaseMemory'); } };
   // 外部进程登记（v3.10.1）：退出时结束全部外部进程；上次异常退出留下的 Word / PowerPoint 后台进程启动时清理
   const procs = require('./core/procs');
   procs.configure({ file: path.join(app.getPath('userData'), 'office-procs.json'), logger: logger.child('procs') });
@@ -275,7 +278,8 @@ app.whenReady().then(async () => {
   setInterval(() => {
     try {
       const m = memInfo();
-      if (m.totalMB > 1536) logger.child('app').warn(`内存占用较高：合计 ${m.totalMB}MB（${m.rows.filter((r) => r.mb).map((r) => `${r.label} ${r.mb}MB`).join('，')}）`);
+      const u = process.memoryUsage();
+      if (m.totalMB > 1536) logger.child('app').warn(`内存占用较高：合计 ${m.totalMB}MB（${m.rows.filter((r) => r.mb).map((r) => `${r.label} ${r.mb}MB`).join('，')}）；主进程 JS 堆 ${Math.round(u.heapUsed / 1048576)}MB / 外部 ${Math.round(u.external / 1048576)}MB / ArrayBuffer ${Math.round(u.arrayBuffers / 1048576)}MB；运行中任务 ${service.runningSet.size} 个，检索缓存 ${service.search.cache ? '已加载' : '无'}`);
     } catch { /* ignore */ }
   }, 60000).unref();
 

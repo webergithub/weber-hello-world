@@ -69,6 +69,9 @@ CREATE TABLE IF NOT EXISTS recycle (
   prev_status TEXT, size INTEGER, kind TEXT, slide_count INTEGER, reason TEXT, at INTEGER
 );
 -- 智能总结插件（v3.5）：大模型为每个文档生成的 Markdown 总结（另存为单独的 .md 文件），供检索 / RAG 使用
+-- 文件夹特征值（v3.12）：每个任务扫描到的每个文件夹（只算直接包含的文档）的文档数、大小、最近修改时间与 MD5 特征值；
+-- sig 为最近一次扫描的特征值，sig_done 为上次处理完成时的特征值，两者相同 = 文件夹没有变化，增量扫描时整体跳过
+CREATE TABLE IF NOT EXISTS dir_stats (task_id INTEGER, dir TEXT, files INTEGER, bytes INTEGER, mtime INTEGER, sig TEXT, sig_done TEXT, done_at INTEGER, scanned_at INTEGER, PRIMARY KEY (task_id, dir));
 CREATE TABLE IF NOT EXISTS doc_summaries (
   file_id INTEGER PRIMARY KEY, md_path TEXT, summary TEXT, model TEXT, at INTEGER, ms INTEGER
 );
@@ -128,7 +131,11 @@ class Store {
 
   q(sql) {
     let s = this.stmts.get(sql);
-    if (!s) { s = this.db.prepare(sql); this.stmts.set(sql, s); }
+    if (!s) {
+      // 语句缓存设上限（v3.12）：动态拼接的 UPDATE / INSERT 字段组合不会无限累积
+      if (this.stmts.size >= 400) this.stmts.delete(this.stmts.keys().next().value);
+      s = this.db.prepare(sql); this.stmts.set(sql, s);
+    }
     return s;
   }
 
@@ -171,6 +178,42 @@ class Store {
       return v === undefined ? null : v;
     });
     this.q(`UPDATE ${table} SET ${keys.map((k) => `${k} = ?`).join(', ')} WHERE id = ?`).run(...vals, id);
+  }
+
+  /** 文件夹统计（v3.12） */
+  dirStats(taskId) { return this.q('SELECT dir, files, bytes, mtime, sig, sig_done, done_at, scanned_at FROM dir_stats WHERE task_id = ?').all(taskId); }
+  /** 写入本次扫描的文件夹统计；replaceUnder：只替换这些文件夹（及其子文件夹）下的记录（按文件夹分析时） */
+  saveDirScan(taskId, rows, replaceUnder = null) {
+    const now = Date.now();
+    this.tx(() => {
+      if (replaceUnder) {
+        // replaceUnder：[{ dir, prefix }]，prefix = dir + 路径分隔符；只删除这些文件夹下本次没有扫描到的记录
+        const del = this.q('DELETE FROM dir_stats WHERE task_id = ? AND (dir = ? OR substr(dir, 1, length(?)) = ?) AND dir NOT IN (SELECT value FROM json_each(?))');
+        const keep = JSON.stringify(rows.map((r) => r.dir));
+        for (const d of replaceUnder) del.run(taskId, d.dir, d.prefix, d.prefix, keep);
+      } else this.q('DELETE FROM dir_stats WHERE task_id = ? AND dir NOT IN (SELECT value FROM json_each(?))').run(taskId, JSON.stringify(rows.map((r) => r.dir)));
+      const up = this.q('INSERT INTO dir_stats(task_id, dir, files, bytes, mtime, sig, scanned_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(task_id, dir) DO UPDATE SET files = excluded.files, bytes = excluded.bytes, mtime = excluded.mtime, sig = excluded.sig, scanned_at = excluded.scanned_at');
+      for (const r of rows) up.run(taskId, r.dir, r.files, r.bytes, r.mtime, r.sig, now);
+    });
+  }
+  /** 文件夹处理完成：记下处理时的特征值 */
+  markDirsDone(taskId, sigs) {
+    const now = Date.now();
+    const up = this.q('UPDATE dir_stats SET sig_done = ?, done_at = ? WHERE task_id = ? AND dir = ?');
+    this.tx(() => { for (const [dir, sig] of sigs) up.run(sig, now, taskId, dir); });
+  }
+  /** 批量记录“文件夹未变化，跳过”的文件（一个事务） */
+  linkSkippedBulk(taskId, rows, message) {
+    const ins = this.q('INSERT INTO task_files(task_id, file_id, path, action, message, at) VALUES (?, ?, ?, ?, ?, ?)');
+    const now = Date.now();
+    this.tx(() => { for (const r of rows) ins.run(taskId, r.id, r.path, 'skipped', message, now); });
+  }
+  /** 一批路径对应的已入库文件 */
+  filesByPaths(paths) {
+    const out = new Map();
+    const st = this.db.prepare('SELECT id, path, status FROM files WHERE path IN (SELECT value FROM json_each(?))');
+    for (let i = 0; i < paths.length; i += 2000) for (const r of st.all(JSON.stringify(paths.slice(i, i + 2000)))) out.set(r.path, r);
+    return out;
   }
 
   linkTaskFile(taskId, fileId, filePath, action, message = '') {

@@ -67,7 +67,11 @@ function reduceProgress(prev, e) {
     case 'subdone': feed(`${t} ✔ ${e.subLabel} 结束：${e.message}`); break;
     default: break;
   }
-  return { ...prev, [e.taskId]: cur };
+  const next = { ...prev, [e.taskId]: cur };
+  // 解析动态只保留最近 20 个任务（v3.12：子任务很多时不无限累积）
+  const keys = Object.keys(next);
+  if (keys.length > 20) for (const k of keys.slice(0, keys.length - 20)) if (k !== String(e.taskId)) delete next[k];
+  return next;
 }
 
 export default function App() {
@@ -238,8 +242,10 @@ export default function App() {
     const offApp = on('appNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : n.kind === 'warn' ? 'warn' : 'info', { label: n.label, link: n.link, cat: n.cat || '系统' }));
     const offPlug = on('pluginNotice', (n) => toast(n.msg, n.kind === 'error' ? 'error' : 'info', { label: '查看 PPT_Agent', link: { type: 'view', view: { type: 'plugins' } }, cat: 'PPT_Agent' }));
     const off2 = on('log', (lines) => setLogLines((l) => (l.length > 20000 ? l.slice(-15000) : l).concat(lines)));
+    // 内存超过上限时（主进程通知）：只保留正在执行的任务的解析动态，日志只留最近 2000 行
+    const offMem = on('releaseMemory', () => { setLogLines((l) => l.slice(-2000)); setProgress((p) => { const keep = {}; for (const [k, v] of Object.entries(p)) if (v && v.stage !== 'done') keep[k] = v; return keep; }); });
     const off3 = on('progressBatch', (list) => setProgress((p) => list.reduce(reduceProgress, p)));
-    return () => { off0(); off1(); off2(); off3(); offLib(); offPlug(); offApp(); if (mq) mq.removeEventListener('change', onMq); };
+    return () => { off0(); off1(); off2(); off3(); offLib(); offPlug(); offApp(); offMem(); if (mq) mq.removeEventListener('change', onMq); };
   }, []);
   useEffect(() => { try { localStorage.setItem(BASKET_KEY, JSON.stringify(basket)); } catch { /* ignore */ } }, [basket]);
 

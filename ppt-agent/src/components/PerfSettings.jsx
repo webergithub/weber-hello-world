@@ -9,7 +9,7 @@ import DataTable from './DataTable';
  */
 export default function PerfSettings() {
   const app = useApp();
-  const saved = { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 3072, bigFileMB: 64, ...((app.config && app.config.perf) || {}) };
+  const saved = { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 16384, bigFileMB: 64, ...((app.config && app.config.perf) || {}) };
   const [p, setP] = useState(saved);
   const [mem, setMem] = useState(null);
   const save = async (patch) => { const n = { ...p, ...patch }; setP(n); app.setConfig(await api.setConfig({ perf: patch })); };
@@ -31,7 +31,7 @@ export default function PerfSettings() {
       <div className="row"><label className="chk"><input type="checkbox" checked={p.yieldOnActivity !== false} onChange={(e) => save({ yieldOnActivity: e.target.checked })} /> 操作界面时解析任务让路（只保留一个子任务继续，后台计算放慢）</label></div>
       <div className="row"><label className="chk"><input type="checkbox" checked={!!p.idleOnly} onChange={(e) => save({ idleOnly: e.target.checked })} /> 只在空闲期解析：停止操作</label>
         <input className="input split-par" type="number" min="5" max="3600" value={p.idleSec} disabled={!p.idleOnly} onChange={(e) => save({ idleSec: Math.max(5, Math.min(3600, Number(e.target.value) || 60)) })} /> <span className="muted">秒后继续解析</span></div>
-      <div className="row"><label>内存上限</label><input className="input split-size" type="number" min="512" max="65536" step="256" value={p.memLimitMB} onChange={(e) => save({ memLimitMB: Math.max(512, Math.min(65536, Number(e.target.value) || 3072)) })} /> <span className="muted">MB（主进程超过时暂缓开始下一个文件）</span></div>
+      <div className="row"><label>内存上限</label><input className="input split-size" type="number" min="1024" max="262144" step="1024" value={p.memLimitMB} onChange={(e) => save({ memLimitMB: Math.max(1024, Math.min(262144, Number(e.target.value) || 16384)) })} /> <span className="muted">MB（全部进程合计；超过时释放缓存并暂缓开始下一个文件）</span></div>
       <div className="row"><label>大文件</label><input className="input split-par" type="number" min="8" max="4096" value={p.bigFileMB} onChange={(e) => save({ bigFileMB: Math.max(8, Math.min(4096, Number(e.target.value) || 64)) })} /> <span className="muted">MB 以上同一时间只解析一个</span></div>
       {mem && <>
         <div className="row"><label>当前进程</label><span className="muted">合计 {mem.totalMB} MB</span></div>

@@ -87,9 +87,9 @@ const DEFAULT_CONFIG = {
   // 插件（v3.7）：智能总结脚本。enabled 为“生效”开关（检查通过后才能设为生效）；auto：解析完成的文档自动加入总结队列
   plugins: { summary: { enabled: false, script: '', args: '"{input}" "{output}"', timeout: 300, auto: true } },
   // 资源与优先级（v3.11）：yieldOnActivity 用户操作界面时解析任务让路（只保留 1 个子任务继续、每个文件之间稍作等待）；
-  // idleOnly 只在空闲期解析（用户停止操作 idleSec 秒后才继续）；memLimitMB 主进程内存超过上限时暂缓开始下一个文件；
+  // idleOnly 只在空闲期解析（用户停止操作 idleSec 秒后才继续）；memLimitMB 内存上限（全部进程合计，默认 16GB，v3.12），超过时释放缓存并暂缓开始下一个文件；
   // bigFileMB 超过这个大小的文件同一时间只解析一个
-  perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 3072, bigFileMB: 64 },
+  perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 16384, bigFileMB: 64 },
   // PPT_Agent（v3.11）：engine 调用方式 llm（大模型接口）/ script（AI 调用脚本），不设置时有生效的脚本用脚本；
   // allowNetwork 允许连接大模型接口（默认关，单机版其他功能仍不联网）；auto 解析完成的文档自动总结（大模型接口时，默认关）；
   // scopes 轮询范围（任务 / 子任务 id），pollSec 轮询间隔；llm.apiKeyEnc 为加密保存的 API Key（不发给界面）；prompt 自定义总结提示词
@@ -145,6 +145,8 @@ class AgentService extends EventEmitter {
     this.inLoop = new Set(); // 正在逐个处理文件的任务（用户操作时只保留最早的一个继续）
     require('./yieldy').setBusyProbe(() => this.perfCfg().yieldOnActivity !== false && this.userBusy());
     this.parentWatch = new Map(); // 总任务的增量扫描：子任务全部完成后汇总新增 / 更新 / 移除
+    // v3.12：旧默认内存上限 3GB（只算主进程）改为 16GB（全部进程合计）
+    if (this.config.perf && this.config.perf.memLimitMB === 3072 && !this.config.perf.memRev) this.setConfig({ perf: { memLimitMB: 16384, memRev: 1 } });
     this.summary = new SummaryPlugin(this); // 插件：智能总结（工作线程调用大模型）
     this.search.prewarm(5000); // 启动后在后台读取检索缓存，第一次检索不用等待（v3.11）
     for (const t of this.store.listTasks()) if (!t.parent_id && this.store.children(t.id).length) this.refreshParent(t.id, { quiet: true });
@@ -574,6 +576,7 @@ class AgentService extends EventEmitter {
         src = meta.legacy && meta.convertedFrom ? meta.convertedFrom : row.path;
       }
     } catch { /* ignore */ }
+    if (this.mediaSrc.size >= 5000) this.mediaSrc.delete(this.mediaSrc.keys().next().value);
     this.mediaSrc.set(key, src); // 找不到也记下，避免每次请求都查库
     return src;
   }
@@ -906,6 +909,7 @@ class AgentService extends EventEmitter {
       // 截图 / 图片缓存按“路径 + 大小 + 修改时间”区分版本：文件修改或重新生成后不会显示旧截图
       const mediaKey = crypto.createHash('sha1').update(`${file}|${st.size}|${Math.round(st.mtimeMs)}`).digest('hex').slice(0, 16);
       if (!this.mediaSrc) this.mediaSrc = new Map();
+      if (this.mediaSrc.size >= 5000) this.mediaSrc.delete(this.mediaSrc.keys().next().value); // 上限（v3.12）：只是查询缓存，可从数据库重新查到
       this.mediaSrc.set(mediaKey, src); // 解析动态中即可显示页面图片（从原文件读取）
       // 页面截图（PowerPoint / LibreOffice，可选）：先于逐页解析生成，解析动态即可展示真实页面
       // PDF 不生成截图：界面直接用 pdf.js 只读渲染原文件的页面（ppta://src/<文件 id>）
@@ -2032,9 +2036,9 @@ class AgentService extends EventEmitter {
         await sleep(150);
       }
       const limit = Number(p.memLimitMB) || 0;
-      if (limit && process.memoryUsage().rss / 1048576 > limit && Date.now() - memSince < 30000) {
-        forceGc();
-        const rss = Math.round(process.memoryUsage().rss / 1048576);
+      if (limit && this.memUsedMB() > limit && Date.now() - memSince < 30000) {
+        this.releaseMemory();
+        const rss = Math.round(this.memUsedMB());
         if (rss > limit) {
           if (!memLogged) { memLogged = true; log.warn(`${tag} 内存占用 ${rss}MB 超过上限 ${limit}MB，暂缓开始下一个文件`); }
           wait(`内存占用 ${rss}MB 超过上限 ${limit}MB，等待释放后继续`);
@@ -2059,15 +2063,37 @@ class AgentService extends EventEmitter {
   }
 
   /** 并发读取文件大小（每批 64 个，批与批之间让出主进程）：返回 Map(路径 → 字节数) */
-  async statSizes(files, isCancelled = () => false, onProgress = null) {
+  async statSizes(files, isCancelled = () => false, onProgress = null, mtimes = null) {
     const out = new Map();
     let last = Date.now();
     for (let i = 0; i < files.length; i += 64) {
       if (isCancelled()) break;
       const batch = files.slice(i, i + 64);
-      const st = await Promise.all(batch.map((f) => fs.promises.stat(f).then((x) => x.size, () => 0)));
-      batch.forEach((f, k) => out.set(f, st[k]));
+      const st = await Promise.all(batch.map((f) => fs.promises.stat(f).then((x) => [x.size, x.mtimeMs], () => [0, 0])));
+      batch.forEach((f, k) => { out.set(f, st[k][0]); if (mtimes) mtimes.set(f, st[k][1]); });
       if (onProgress && Date.now() - last > 500) { last = Date.now(); onProgress(Math.min(files.length, i + 64)); }
+    }
+    return out;
+  }
+
+  /**
+   * 文件夹特征值（v3.12）：每个文件夹直接包含的文档（文件名 + 大小 + 修改时间，按名称排序）算 MD5。
+   * 文件夹里的文档没有新增 / 删除 / 改名 / 修改时特征值不变，增量扫描时整个文件夹跳过，不再逐个文件检查。
+   */
+  dirSignatures(files, sizes, mtimes) {
+    const by = new Map();
+    for (const f of files) { const d = path.dirname(f); if (!by.has(d)) by.set(d, []); by.get(d).push(f); }
+    const out = new Map();
+    for (const [dir, list] of by) {
+      list.sort();
+      const h = crypto.createHash('md5');
+      let bytes = 0, mtime = 0;
+      for (const f of list) {
+        const sz = (sizes && sizes.get(f)) || 0, mt = Math.floor(((mtimes && mtimes.get(f)) || 0) / 1000);
+        bytes += sz; if (mt * 1000 > mtime) mtime = mt * 1000;
+        h.update(`${path.basename(f)}|${sz}|${mt}\n`);
+      }
+      out.set(dir, { dir, files: list.length, bytes, mtime, sig: h.digest('hex'), list });
     }
     return out;
   }
@@ -2135,6 +2161,23 @@ class AgentService extends EventEmitter {
     log.warn(`${tag} ${why}，已暂停任务；清理空间（或在“设置 → 目录与数据”换到更大的磁盘）后点击“继续”从断点继续`);
     try { this.pauseTask(t.parent_id || id); } catch { /* ignore */ }
     this.emit('notice', { kind: 'error', msg: `磁盘空间不足（${why}），任务「${t.name || id}」已暂停；清理空间后点击“继续”从断点继续`, link: { type: 'task', id: t.parent_id || id }, label: '查看任务', cat: '任务' });
+  }
+
+  /** 程序占用的内存（MB）：main.js 注入 totalMemMB（全部进程合计，app.getAppMetrics），否则只算主进程 */
+  memUsedMB() {
+    try { if (this.totalMemMB) return this.totalMemMB(); } catch { /* ignore */ }
+    return process.memoryUsage().rss / 1048576;
+  }
+  /** 超过内存上限时释放可重建的缓存（检索缓存、相似分组缓存、图片来源表）并回收内存 */
+  releaseMemory() {
+    if (Date.now() - (this.releasedAt || 0) < 30000) { forceGc(); return; }
+    this.releasedAt = Date.now();
+    try { this.search.cache = null; } catch { /* ignore */ }
+    this.groupsCache = null;
+    if (this.mediaSrc) this.mediaSrc.clear();
+    if (this.onReleaseMemory) { try { this.onReleaseMemory(); } catch { /* ignore */ } }
+    forceGc();
+    this.log.warn(`内存占用超过上限，已释放检索 / 分组缓存`);
   }
 
   /** 大文件锁：同一时间只解析一个大文件 */
