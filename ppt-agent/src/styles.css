@@ -1499,3 +1499,19 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .agent-child td { background: var(--bg2); }
 .agent-settings .row.top { align-items: flex-start; }
 .agent-settings textarea.input { min-height: 60px; font-family: inherit; }
+
+/* v3.12 目录树 */
+.dir-tree { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.dir-tree-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 6px 0; }
+.dir-tree-bar .input { width: 200px; }
+.dir-tree-wrap { flex: 1; min-height: 0; overflow: auto; }
+.dir-tree th.sortable { cursor: pointer; user-select: none; }
+.dir-tree th.num, .dir-tree td.num { text-align: right; }
+.dir-tree .chk-col { width: 30px; }
+.dir-tree .dir-name { white-space: nowrap; }
+.dir-tree .caret { display: inline-block; width: 16px; cursor: pointer; color: var(--fg3); }
+.dir-tree .caret.none { cursor: default; }
+.dir-tree tr.row-sel td { background: var(--accent-bg, rgba(99, 102, 241, .08)); }
+.tag.dir-same { color: var(--fg3); }
+.tag.dir-changed { color: var(--warn-fg, #b45309); border-color: currentColor; }
+.tag.dir-new { color: var(--accent); border-color: currentColor; }

@@ -254,12 +254,15 @@ export default function App() {
     const dirs = await api.selectDir();
     let last = null;
     for (const d of dirs) {
-      try { last = await api.addTask(d); toast(`已添加任务：${d}（点击“开始解析”后执行）`, 'info', { label: '查看任务', link: { type: 'task', id: last }, cat: '解析任务' }); } catch (e) { toast(e.message, 'error'); }
+      try { last = await api.addTask(d); toast(`已添加任务：${d}（正在扫描目录结构；在“📂 目录”中选择文件夹开始解析）`, 'info', { label: '查看任务', link: { type: 'task', id: last }, cat: '解析任务' }); } catch (e) { toast(e.message, 'error'); }
     }
-    if (last) { await refreshTasks(); setCurTask(last); setViewState({ type: 'task' }); }
+    if (last) { await api.startTask(last, { scanOnly: true }).catch(() => {}); await refreshTasks(); setCurTask(last); setViewState({ type: 'task' }); }
   };
   const addAllLocal = async () => {
     setAddMenu(false);
+    // 已有整机任务时直接打开（不重复添加），在“📂 目录”中重新扫描 / 选择文件夹
+    const all = tasks.find((t) => !t.parent_id && t.name === '本机全部文档');
+    if (all) { setCurTask(all.id); setViewState({ type: 'task' }); toast('已打开“本机全部文档”任务：在“📂 目录”中选择文件夹开始解析，或“重新扫描目录”', 'info', { cat: '解析任务' }); return; }
     setAskWatch({ roots: await api.localRoots() });
   };
   // 全盘扫描：询问是否监测更新和新增的文档（每天定时增量扫描）
@@ -269,9 +272,10 @@ export default function App() {
     try {
       if (r.watch) setConfig(await api.setConfig({ watch: { time: r.time, catchUp: r.catchUp } }));
       const nid = await api.addAllLocalTask({ watch: r.watch, time: r.time });
+      await api.startTask(nid, { scanOnly: true }).catch(() => {}); // 先只扫描目录结构（不解析），在“📂 目录”中选择文件夹开始
       setConfig(await api.getConfig());
       await refreshTasks(); setCurTask(nid); setViewState({ type: 'task' });
-      toast(`已添加“本机全部文档”任务，点击“开始解析”后执行${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`, 'info', { label: '查看任务', link: { type: 'task', id: nid }, cat: '解析任务' });
+      toast(`已添加“本机全部文档”任务，正在扫描目录结构；在“📂 目录”中选择文件夹开始解析${r.watch ? `；首次解析完成后，每天 ${r.time} 自动增量扫描新增和修改的文档` : ''}`, 'info', { label: '查看任务', link: { type: 'task', id: nid }, cat: '解析任务' });
     } catch (e) { toast(e.message, 'error'); }
   };
 
@@ -435,12 +439,12 @@ export default function App() {
             <button className="icon-btn" title={collapsed ? '展开菜单' : '折叠菜单'} onClick={() => setCollapsed(!collapsed)}>{collapsed ? '»' : '«'}</button>
           </div>
           <div className="add-wrap" data-tour="add">
-            <button className="btn primary add-btn" onClick={addDir} title="添加目录（添加后手动开始解析）">＋{collapsed ? '' : ' 添加目录'}</button>
+            <button className="btn primary add-btn" onClick={addAllLocal} title="添加整机目录：扫描本机全部磁盘的目录结构，在右侧“📂 目录”中选择文件夹开始解析">＋{collapsed ? '' : ' 添加整机目录'}</button>
             {!collapsed && <button className="btn primary add-more" onClick={() => setAddMenu(!addMenu)} title="更多添加方式">▾</button>}
             {addMenu && (
               <div className="add-menu" onMouseLeave={() => setAddMenu(false)}>
+                <div onClick={addAllLocal}>🖥 添加整机目录（本机全部磁盘）</div>
                 <div onClick={addDir}>📁 添加目录…</div>
-                <div onClick={addAllLocal}>🖥 添加所有本地文档（按盘符顺序扫描本机全部 PPT / Word / PDF）</div>
               </div>
             )}
           </div>

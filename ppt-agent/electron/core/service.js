@@ -2191,6 +2191,21 @@ class AgentService extends EventEmitter {
     return { roots, nodes: list, scannedAt: stats.reduce((a, d) => Math.max(a, d.scanned_at || 0), 0) };
   }
 
+  /** 目录树下钻：某个文件夹（含子文件夹）中扫描到的文档及解析状态（v3.12） */
+  dirFiles(taskId, dir) {
+    const t = this.store.getTask(taskId);
+    if (!t) return [];
+    let list = [];
+    try { list = JSON.parse(t.scan_list || '[]'); } catch { list = []; }
+    const d = path.resolve(dir), pre = d.endsWith(path.sep) ? d : d + path.sep;
+    list = list.filter((p) => p === d || p.startsWith(pre)).slice(0, 20000);
+    const cols = this.store.liteCols();
+    const rows = new Map();
+    const st = this.store.db.prepare(`SELECT ${cols} FROM files WHERE path IN (SELECT value FROM json_each(?))`);
+    for (let i = 0; i < list.length; i += 2000) for (const r of st.all(JSON.stringify(list.slice(i, i + 2000)))) rows.set(r.path, this.store.liteRow(r));
+    return list.map((p) => rows.get(p) || { path: p, name: path.basename(p), dir: path.dirname(p), ext: path.extname(p).toLowerCase(), kind: KIND_OF.get(path.extname(p).toLowerCase()), status: 'pending', action: 'pending' });
+  }
+
   /** 数据目录所在磁盘的剩余空间（字节）；不支持时返回 null */
   freeSpace(dir = this.dataDir) {
     try { const s = fs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize); } catch { return null; }

@@ -98,14 +98,6 @@ export default function SettingsView({ focus }) {
           <p className="muted">对开启监测的任务（如“本机全部文档”），每天在设定的时间自动重新扫描：新增的文档自动解析入库，修改过的文档重新解析并替换旧结果，原文件已删除的移入回收站（仅移出资料库，可还原），未变化的直接跳过。需要程序在运行（可最小化到右下角图标栏）。修改立即生效。</p>
           <WatchSettings />
         </section>
-        <section data-sec="split">
-          <h3>大任务拆分为子任务</h3>
-          <div className="row"><label className="chk"><input type="checkbox" checked={(cfg.split || {}).enabled !== false} onChange={(e) => set({ split: { ...(cfg.split || {}), enabled: e.target.checked } })} /> 扫描到的文件超过上限时，按盘符 / 文件夹拆分为多个子任务依次执行</label></div>
-          <div className="row"><label>每个子任务最多</label><input className="input split-size" type="number" min="100" max="20000" step="100" value={(cfg.split || {}).size || 1000} disabled={(cfg.split || {}).enabled === false}
-            onChange={(e) => set({ split: { ...(cfg.split || {}), size: Math.max(100, Math.min(20000, Number(e.target.value) || 1000)) } })} /> <span className="muted">个文件</span></div>
-          <div className="row"><label>同时执行的子任务</label><input className="input split-par" type="number" min="1" max="8" step="1" value={(cfg.split || {}).parallel || 3} disabled={(cfg.split || {}).enabled === false}
-            onChange={(e) => set({ split: { ...(cfg.split || {}), parallel: Math.max(1, Math.min(8, Number(e.target.value) || 3)) } })} /> <span className="muted">个</span></div>
-        </section>
         <section data-sec="perf" className={focus === 'perf' ? 'flash-sec' : ''}>
           <h3>资源与优先级</h3>
           <PerfSettings />

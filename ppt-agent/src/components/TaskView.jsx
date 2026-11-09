@@ -11,6 +11,7 @@ import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
 import { StatCards } from './DrillDialog';
 import TagList from './TagList';
+import DirTree from './DirTree';
 import SubtaskPanel from './SubtaskPanel';
 
 // 每个任务上次所在的页签：从文件详情等页面返回时恢复
@@ -21,7 +22,7 @@ const BACK_LABEL = { monitor: '全部任务与历史', alllib: '所有资料库'
 
 export default function TaskView({ taskId, back, onBack }) {
   const app = useApp();
-  const [tab, setTabState] = useState(() => TAB_MEMO.get(taskId) || 'slides');
+  const [tab, setTabState] = useState(() => TAB_MEMO.get(taskId) || 'tree');
   const setTab = (t) => { TAB_MEMO.set(taskId, t); setTabState(t); };
   const [data, setData] = useState(null);
   const [focusFile, setFocusFile] = useState(null);
@@ -30,7 +31,7 @@ export default function TaskView({ taskId, back, onBack }) {
   curId.current = taskId;
   // 只接收当前任务的数据（快速切换任务时，旧任务较慢返回的数据不会覆盖新任务）
   const load = () => { const id = taskId; return api.taskDetail(id).then((d) => { if (curId.current === id) setData(d); }); };
-  useEffect(() => { setTabState(TAB_MEMO.get(taskId) || 'slides'); setFocusFile(null); load(); }, [taskId]);
+  useEffect(() => { setTabState(TAB_MEMO.get(taskId) || 'tree'); setFocusFile(null); load(); }, [taskId]);
   useEffect(() => { load(); }, [app.taskTick]);
   // 切换任务时，新任务的数据到达前不显示上一个任务的内容
   if (!data || !data.task || data.task.id !== taskId) return <div className="empty-tip">加载中…</div>;
@@ -42,7 +43,7 @@ export default function TaskView({ taskId, back, onBack }) {
   // 子任务（v3.5）：总任务显示“子任务”页签；子任务显示所属总任务
   const kids = app.allTasks.filter((x) => x.parent_id === taskId);
   const parent = task.parent_id ? app.allTasks.find((x) => x.id === task.parent_id) : null;
-  const curTab = tab === 'subs' && !kids.length ? 'slides' : TAB_MEMO.has(taskId) || !kids.length ? tab : 'subs';
+  const curTab = (tab === 'subs' && !kids.length) || (tab === 'tree' && task.parent_id) ? 'slides' : tab;
   return (
     <div className="view">
       <div className="view-head">
@@ -70,19 +71,21 @@ export default function TaskView({ taskId, back, onBack }) {
           onClick={async () => { await api.setTaskWatch(taskId, !task.watch); app.setConfig(await api.getConfig()); app.refreshTasks(); load(); app.toast(task.watch ? '已关闭该任务的定时监测' : '已开启定时监测：每天定时增量扫描该任务'); }}>📡 监测更新：{task.watch ? '开' : '关'}</button>}
         <button className="btn ghost" onClick={() => app.go({ type: 'monitor', tab: 'live', taskId })}>⚙️ 解析动态</button>
       </div>
-      {task.status === 'draft' && <Notice id={`draft-${task.id}`}>任务尚未开始：点击右上角“开始解析”加入解析队列。</Notice>}
+      {task.status === 'draft' && <Notice id={`draft-${task.id}`}>任务尚未开始：在“📂 目录”中勾选文件夹后“▶ 分析所选”，或点击右上角“开始解析”解析全部。</Notice>}
       {(stats.skipped || 0) + (stats.duplicate || 0) > 0 && task.status !== 'running' && (
         <Notice id={`dupes-${task.id}-${(stats.skipped || 0) + (stats.duplicate || 0)}`}>有 <b>{(stats.skipped || 0) + (stats.duplicate || 0)}</b> 个文件与解析历史记录信息完全一致（名称、修改时间、大小、作者），未重复解析。
           <button className="btn small" onClick={() => setDupes(files.filter((f) => f.action === 'skipped' || f.action === 'duplicate'))}>选择是否重新解析…</button></Notice>
       )}
       {dupes && <ReparseDialog files={dupes} onClose={() => setDupes(null)} />}
       <div className="tabs">
+        {!task.parent_id && <button className={curTab === 'tree' ? 'on' : ''} onClick={() => setTab('tree')}>📂 目录</button>}
         {kids.length > 0 && <button className={curTab === 'subs' ? 'on' : ''} onClick={() => setTab('subs')}>🧩 子任务（{kids.length}）</button>}
         <button className={curTab === 'slides' ? 'on' : ''} onClick={() => setTab('slides')}>页面视图（原始页 · 备注 · Markdown）</button>
         <button className={curTab === 'files' ? 'on' : ''} onClick={() => setTab('files')}>文件清单与统计（{files.length}）</button>
         <button className={curTab === 'log' ? 'on' : ''} onClick={() => setTab('log')}>运行日志</button>
       </div>
       <div className="tab-body">
+        {curTab === 'tree' && <DirTree task={cur} />}
         {curTab === 'subs' && <SubtaskPanel task={task} />}
         {curTab === 'slides' && <SlideWorkspace key={`ws-${taskId}`} files={files.filter((f) => f.id && f.status !== 'recycled')} initialFileId={focusFile} emptyText="该任务尚未解析出 PPT" />}
         {curTab === 'files' && <FilesStats files={files} stats={stats} task={task} title={`#${task.id} ${task.name}`} onOpen={(id) => { setFocusFile(id); setTab('slides'); }} />}
