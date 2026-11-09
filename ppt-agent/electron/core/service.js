@@ -83,7 +83,7 @@ const DEFAULT_CONFIG = {
   mail: { host: '', port: 465, secure: true, user: '', pass: '', from: '' },
   // 大任务拆分（v3.5）：扫描到的文件超过 size 个时，按盘符 / 文件夹拆为多个子任务，每个子任务不超过 size 个文件
   // parallel：同时执行的子任务数（解析页面并行；PowerPoint / LibreOffice 截图与旧格式转换仍逐个进行）
-  split: { enabled: true, size: 1000, parallel: 3 },
+  split: { enabled: false, size: 1000, parallel: 3 }, // v3.12 起默认不拆分：目录树中按文件夹选择分析
   // 插件（v3.7）：智能总结脚本。enabled 为“生效”开关（检查通过后才能设为生效）；auto：解析完成的文档自动加入总结队列
   plugins: { summary: { enabled: false, script: '', args: '"{input}" "{output}"', timeout: 300, auto: true } },
   // 资源与优先级（v3.11）：yieldOnActivity 用户操作界面时解析任务让路（只保留 1 个子任务继续、每个文件之间稍作等待）；
@@ -142,10 +142,12 @@ class AgentService extends EventEmitter {
     this.incrementalRuns = new Map();
     this.pausing = new Set();
     this.leadSub = new Map(); // 总任务 → 解析动态跟随的子任务
-    this.inLoop = new Set(); // 正在逐个处理文件的任务（用户操作时只保留最早的一个继续）
+    this.inLoop = new Set();
+    this.runOpts = new Map(); // 任务 → 本次运行选项（按文件夹 / 强制重新分析 / 只扫描） // 正在逐个处理文件的任务（用户操作时只保留最早的一个继续）
     require('./yieldy').setBusyProbe(() => this.perfCfg().yieldOnActivity !== false && this.userBusy());
     this.parentWatch = new Map(); // 总任务的增量扫描：子任务全部完成后汇总新增 / 更新 / 移除
     // v3.12：旧默认内存上限 3GB（只算主进程）改为 16GB（全部进程合计）
+    if (this.config.split && this.config.split.enabled && !this.config.split.rev12) this.setConfig({ split: { enabled: false, rev12: 1 } });
     if (this.config.perf && this.config.perf.memLimitMB === 3072 && !this.config.perf.memRev) this.setConfig({ perf: { memLimitMB: 16384, memRev: 1 } });
     this.summary = new SummaryPlugin(this); // 插件：智能总结（工作线程调用大模型）
     this.search.prewarm(5000); // 启动后在后台读取检索缓存，第一次检索不用等待（v3.11）
@@ -316,7 +318,7 @@ class AgentService extends EventEmitter {
 
   /** 手动开始（或重新扫描）：加入队列，按顺序依次解析 */
   /** resume = true：从断点继续（复用上次扫描清单，跳过本轮已处理的文件）；否则重新扫描 */
-  startTask(id, { resume = false, incremental = false, reason = '' } = {}) {
+  startTask(id, { resume = false, incremental = false, reason = '', dirs = null, force = false, scanOnly = false } = {}) {
     const t = this.store.getTask(id);
     if (!t) throw new Error('任务不存在');
     if (this.runningSet.has(id) || this.queue.includes(id)) return id;
@@ -329,6 +331,7 @@ class AgentService extends EventEmitter {
     this.cancelled.delete(id);
     this.pausing.delete(id);
     this.resumeFlags.set(id, !!(resume && t.run_started && t.scan_list));
+    if (dirs || force || scanOnly) this.runOpts.set(id, { dirs: dirs && dirs.length ? dirs.map((d) => path.resolve(d)) : null, force: !!force, scanOnly: !!scanOnly }); else this.runOpts.delete(id);
     if (incremental) this.incrementalRuns.set(id, reason || '增量扫描'); else this.incrementalRuns.delete(id);
     this.store.updateTask(id, { status: 'pending', message: '' });
     this.queue.push(id);
@@ -681,9 +684,17 @@ class AgentService extends EventEmitter {
     // 增量扫描：只解析新增与修改过的文档，原文件已删除的移入回收站（仅从资料库移除）
     const incremental = !resume ? this.incrementalRuns.get(id) : null;
     this.incrementalRuns.delete(id);
-    const prevList = incremental && task.scan_list ? JSON.parse(task.scan_list) : null;
-    if (resume) this.store.updateTask(id, { status: 'running', started_at: t0 });
-    else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: null, parsed: 0, skipped: 0, duplicate: 0, failed: 0, bytes_done: 0 });
+    // v3.12：按所选文件夹分析（dirs）/ 强制重新分析（force）/ 只扫描目录不解析（scanOnly）
+    const ro = (!resume && this.runOpts.get(id)) || {};
+    this.runOpts.delete(id);
+    const dirs = Array.isArray(ro.dirs) && ro.dirs.length ? ro.dirs : null;
+    const under = (p) => dirs.some((d) => p === d || p.startsWith(d.endsWith(path.sep) ? d : d + path.sep));
+    const oldList = task.scan_list ? (() => { try { return JSON.parse(task.scan_list); } catch { return null; } })() : null;
+    const prevList = (incremental || dirs) && oldList ? (dirs ? oldList.filter(under) : oldList) : null;
+    const prevStatus = task.status;
+    if (ro.scanOnly) this.store.updateTask(id, { status: 'running', message: '' });
+    else if (resume) this.store.updateTask(id, { status: 'running', started_at: t0 });
+    else this.store.updateTask(id, { status: 'running', started_at: t0, run_started: t0, scan_list: dirs ? task.scan_list : null, parsed: 0, skipped: 0, duplicate: 0, failed: 0, bytes_done: 0 });
     let roots = null;
     try { roots = task.roots ? JSON.parse(task.roots) : null; } catch { roots = null; }
     const explicit = roots && !Array.isArray(roots) ? roots : null;
@@ -696,19 +707,35 @@ class AgentService extends EventEmitter {
       log.info(`${tag} 从断点继续：沿用上次扫描清单 ${files.length} 个文档`);
     } else {
       if (task.parent_id) log.info(`${tag} 子任务 ${task.part_no}：${task.part_label}（${explicit.files.length} 个文档）`);
-      else log.info(`${tag} ${incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
-      files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(roots || [task.dir], log, { tag,
-        fullDisk, isCancelled: () => this.cancelled.has(id),
+      else if (dirs) log.info(`${tag} 按所选的 ${dirs.length} 个文件夹${ro.force ? '重新分析' : '分析'}：${dirs.slice(0, 5).join('；')}${dirs.length > 5 ? ' …' : ''}`);
+      else log.info(`${tag} ${ro.scanOnly ? '扫描目录（只扫描，不解析）：' : incremental ? `${incremental}：` : ''}开始扫描${fullDisk ? '本机全部磁盘 ' + roots.join(' ') : '目录 ' + task.dir}（类型：${[...this.enabledExts()].join(' ')}）`);
+      files = explicit ? explicit.files.filter((f) => fs.existsSync(f)) : await this.scan(dirs || roots || [task.dir], log, { tag,
+        fullDisk: fullDisk && !dirs, isCancelled: () => this.cancelled.has(id),
         onProgress: (p) => { this.emitTask(id, { current: `扫描中：已检查 ${p.dirs} 个目录，发现 ${p.found} 个文档 · ${p.current}`, done: 0 }); this.emitProgress(id, { stage: 'scanning', ...p }); },
       });
-      if (!this.cancelled.has(id)) this.store.updateTask(id, { scan_list: JSON.stringify(files) });
+      // 按文件夹分析：只替换这些文件夹在扫描清单中的部分
+      if (!this.cancelled.has(id)) this.store.updateTask(id, { scan_list: JSON.stringify(dirs && oldList ? oldList.filter((p) => !under(p)).concat(files) : files) });
     }
     this.store.updateTask(id, { total: files.length });
     // 文件大小（v3.11）：统计本轮要处理的文件总大小；第一次执行的任务估算需要的存储空间并提示
     let sizes = explicit && explicit.sizes ? new Map(Object.entries(explicit.sizes)) : null;
-    if (!sizes && !this.cancelled.has(id)) sizes = await this.statSizes(files, () => this.cancelled.has(id), (n) => this.emitTask(id, { current: `统计文件大小：${n}/${files.length}` }));
+    const mtimes = new Map();
+    if (!sizes && !this.cancelled.has(id)) sizes = await this.statSizes(files, () => this.cancelled.has(id), (n) => this.emitTask(id, { current: `统计文件大小：${n}/${files.length}` }), mtimes);
     const bytesTotal = sizes ? [...sizes.values()].reduce((a, b) => a + b, 0) : 0;
     this.store.updateTask(id, { bytes_total: bytesTotal });
+    // 文件夹特征值（v3.12）：记下本次扫描到的每个文件夹的文档数 / 大小 / 最近修改时间 / MD5 特征值（目录树与增量判断用）
+    const sigs = !explicit && !resume && !this.cancelled.has(id) ? this.dirSignatures(files, sizes, mtimes) : null;
+    if (sigs) this.store.saveDirScan(id, [...sigs.values()], dirs ? dirs.map((d) => ({ dir: d, prefix: d.endsWith(path.sep) ? d : d + path.sep })) : null);
+    if (ro.scanOnly) {
+      const cancelledScan = this.cancelled.delete(id);
+      this.pausing.delete(id);
+      const msg = cancelledScan ? '扫描目录已取消' : `已扫描目录：${sigs ? sigs.size : 0} 个文件夹，${files.length} 个文档（${fmtBytes(bytesTotal)}）；在“任务概览 → 📂 目录”中选择文件夹开始解析`;
+      this.store.updateTask(id, { status: ['running', 'pending', 'pausing'].includes(prevStatus) ? 'draft' : prevStatus || 'draft', message: msg, total: task.total || 0, bytes_total: task.bytes_total || bytesTotal });
+      log.info(`${tag} ${msg}（${((Date.now() - t0) / 1000).toFixed(1)}s）`);
+      this.emitProgress(id, { stage: 'done', message: msg, counts: {}, total: files.length });
+      this.emitTask(id);
+      return;
+    }
     if (!task.parent_id && !resume && !this.cancelled.has(id)) this.checkSpace(id, task, bytesTotal, files.length, log, tag);
     const byKind = {};
     for (const f of files) { const k = KIND_OF.get(path.extname(f).toLowerCase()); byKind[k] = (byKind[k] || 0) + 1; }
@@ -723,25 +750,42 @@ class AgentService extends EventEmitter {
     let changed = false;
     let stoppedAt = -1;
     const inc = { added: 0, updated: 0, removed: 0 };
-    if (incremental && !this.cancelled.has(id)) {
+    // 文件夹没有变化（特征值与上次处理完成时相同）：整个文件夹的文档一次记为“已解析过·跳过”，不再逐个检查（v3.12）
+    if (sigs && !ro.force && !this.cancelled.has(id)) {
+      const stored = new Map(this.store.dirStats(id).map((r) => [r.dir, r.sig_done]));
+      const same = [...sigs.values()].filter((d) => stored.get(d.dir) === d.sig);
+      if (same.length) {
+        const list = same.flatMap((d) => d.list);
+        const rows = [...this.store.filesByPaths(list).values()].filter((r) => r.status === 'parsed' || r.status === 'duplicate');
+        if (rows.length) {
+          this.store.linkSkippedBulk(id, rows, '文件夹未变化（特征值相同），跳过');
+          for (const r of rows) { handled.add(r.path); bytesDone += (sizes && sizes.get(r.path)) || 0; }
+          counts.skipped += rows.length;
+          this.store.updateTask(id, { ...counts, bytes_done: bytesDone });
+          log.info(`${tag} ${same.length} 个文件夹没有变化（特征值相同），${rows.length} 个文档直接跳过；需要检查 / 解析的文件夹 ${sigs.size - same.length} 个`);
+          this.emitTask(id);
+        }
+      }
+    }
+    if ((incremental || dirs) && !this.cancelled.has(id)) {
       // 上次扫描到、这次没有且原文件已不存在的文档：移入回收站（仅从资料库移除，可还原）
       const now = new Set(files);
       const gone = [];
-      for (const p of prevList || this.store.taskFiles(id).map((f) => f.link_path)) {
+      for (const p of prevList || (dirs ? [] : this.store.taskFiles(id).map((f) => f.link_path))) {
         if (now.has(p) || fs.existsSync(p)) continue;
         const f = this.store.fileByPath(p);
         if (f && ['parsed', 'duplicate'].includes(f.status) && !gone.includes(f.id)) gone.push(f.id);
       }
       if (gone.length) {
-        const r = await this.recycleFiles(gone, { moveFile: false, reason: `${incremental}：原文件已删除或移走` });
+        const r = await this.recycleFiles(gone, { moveFile: false, reason: `${incremental || '按文件夹分析'}：原文件已删除或移走` });
         inc.removed = r.ok;
         for (const fid of gone) { const f = this.store.getFile(fid); if (f) this.store.linkTaskFile(id, fid, f.path, 'removed', '原文件已删除或移走，已移入回收站（仅从资料库移除）'); }
-        log.info(`${tag} ${incremental}：${r.ok} 个文档的原文件已不存在，已移入回收站（仅从资料库移除，可还原）`);
+        log.info(`${tag} ${incremental || '按文件夹分析'}：${r.ok} 个文档的原文件已不存在，已移入回收站（仅从资料库移除，可还原）`);
       }
     }
     // 文件太多：按盘符 / 文件夹拆分为子任务，依次执行（每个子任务可单独暂停、继续）
     const split = this.config.split || DEFAULT_CONFIG.split;
-    if (!task.parent_id && !explicit && split.enabled && files.length > split.size && !this.cancelled.has(id)) {
+    if (!task.parent_id && !explicit && !dirs && split.enabled && files.length > split.size && !this.cancelled.has(id)) {
       this.splitIntoChildren(id, task, files, roots || [task.dir], { size: split.size, incremental, removed: inc.removed, log, tag, sizes });
       return;
     }
@@ -760,7 +804,7 @@ class AgentService extends EventEmitter {
       try {
         const before = incremental ? this.store.fileByPath(file) : null;
         let r;
-        try { r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force), isCancelled: () => this.cancelled.has(id) }); } catch (e) {
+        try { r = await this.processFile(id, file, engines, log, tag, { force: !!(explicit && explicit.force) || !!ro.force, isCancelled: () => this.cancelled.has(id) }); } catch (e) {
           // 解析过程中暂停：放弃当前文件（不记入本轮已处理），继续时重新解析
           if (e && e.paused) { stoppedAt = i; log.warn(`${tag} 已暂停：当前文件 ${path.basename(file)} 未完成，继续时会重新解析`); break; }
           throw e;
@@ -787,6 +831,11 @@ class AgentService extends EventEmitter {
       await new Promise((r) => setImmediate(r));
     }
     } finally { this.inLoop.delete(id); }
+    // 处理完成：记下各文件夹处理时的特征值（有失败文件的文件夹不记，下次再检查）
+    if (sigs && !this.cancelled.has(id)) {
+      const failedDirs = new Set(this.store.db.prepare("SELECT path FROM task_files WHERE task_id = ? AND at >= ? AND action = 'failed'").all(id, t0).map((r) => path.dirname(r.path)));
+      this.store.markDirsDone(id, [...sigs.values()].filter((d) => !failedDirs.has(d.dir)).map((d) => [d.dir, d.sig]));
+    }
     // 暂停 / 取消：立即结束，不在此时做全库重算（上万个文件时要很久，界面会一直停在“解析中”）；
     // 资料库变化记下来，空闲时在后台分片重算
     const stopping = this.cancelled.has(id);
@@ -2096,6 +2145,50 @@ class AgentService extends EventEmitter {
       out.set(dir, { dir, files: list.length, bytes, mtime, sig: h.digest('hex'), list });
     }
     return out;
+  }
+
+  /**
+   * 任务的目录树（v3.12）：原始文件夹结构（只列含文档的文件夹及其上级），每个节点带子树合计的文档数、大小、最近修改时间、
+   * 已解析数，以及变化状态：same（特征值与上次处理完成时相同）/ changed（有变化）/ new（还没有处理过）。
+   * 返回扁平数组 [{ path, name, parent, depth, direct, files, bytes, mtime, parsed, dirs: { same, changed, new } }]，界面负责展开与排序。
+   */
+  taskTree(id) {
+    const t = this.store.getTaskLite(id);
+    if (!t) return { nodes: [], roots: [] };
+    let roots = [];
+    try { const r = JSON.parse(this.store.getTask(id).roots || 'null'); if (Array.isArray(r)) roots = r; } catch { /* ignore */ }
+    if (!roots.length) roots = [t.dir];
+    roots = roots.map((r) => path.resolve(r));
+    const stats = this.store.dirStats(id);
+    const parsedBy = new Map(this.store.db.prepare("SELECT dir, COUNT(*) n FROM files WHERE status = 'parsed' AND dir IN (SELECT dir FROM dir_stats WHERE task_id = ?) GROUP BY dir").all(id).map((r) => [r.dir, r.n]));
+    const nodes = new Map();
+    const node = (p) => {
+      let n = nodes.get(p);
+      if (!n) { n = { path: p, name: roots.includes(p) ? p : path.basename(p) || p, parent: null, direct: 0, files: 0, bytes: 0, mtime: 0, parsed: 0, dirs: { same: 0, changed: 0, new: 0 }, state: null }; nodes.set(p, n); }
+      return n;
+    };
+    for (const r of roots) node(r);
+    for (const d of stats) {
+      const n = node(d.dir);
+      n.direct = d.files; n.state = !d.sig_done ? 'new' : d.sig_done === d.sig ? 'same' : 'changed';
+      const parsed = parsedBy.get(d.dir) || 0;
+      // 向上累加到根
+      let cur = d.dir, child = null;
+      for (let guard = 0; guard < 64; guard++) {
+        const x = node(cur);
+        if (child && !child.parent) child.parent = cur;
+        x.files += d.files; x.bytes += d.bytes || 0; x.parsed += parsed; if ((d.mtime || 0) > x.mtime) x.mtime = d.mtime || 0;
+        x.dirs[n.state]++;
+        if (roots.includes(cur)) break;
+        const up = path.dirname(cur);
+        if (up === cur) break;
+        child = x; cur = up;
+      }
+    }
+    const list = [...nodes.values()].filter((n) => n.files > 0 || roots.includes(n.path));
+    const depthOf = (n) => { let d = 0, p = n.parent; while (p && d < 64) { d++; p = (nodes.get(p) || {}).parent; } return d; };
+    for (const n of list) n.depth = depthOf(n);
+    return { roots, nodes: list, scannedAt: stats.reduce((a, d) => Math.max(a, d.scanned_at || 0), 0) };
   }
 
   /** 数据目录所在磁盘的剩余空间（字节）；不支持时返回 null */

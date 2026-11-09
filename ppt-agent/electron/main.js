@@ -484,6 +484,7 @@ app.whenReady().then(async () => {
     groups: (opts) => service.groups(opts),
     rescanGroups: () => service.rescanGroups(),
     pptAgentTasks: () => service.pptAgentTasks(),
+    taskTree: (id) => service.taskTree(id),
     pptAgentRun: (opts) => service.pptAgentRun(opts),
     pptAgentSetScopes: (ids) => service.pptAgentSetScopes(ids),
     pptAgentSetConfig: (patch) => service.pptAgentSetConfig(patch),

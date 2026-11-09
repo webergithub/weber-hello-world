@@ -1127,3 +1127,52 @@ test('PPT_Agent（v3.11）：DeepSeek Harness 大模型接入层 + harness 轮�
     assert.strictEqual(svc.summary.available().ok, false);
   } finally { svc.close(); srv.close(); }
 });
+
+test('文件夹特征值增量（v3.12）：未变化的文件夹整体跳过；按所选文件夹分析；只扫描目录；强制重新分析；目录树', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const root = path.join(tmp, 'sigroot');
+  const A = path.join(root, '部门A'), B = path.join(root, '部门B', '项目');
+  fs.mkdirSync(A, { recursive: true }); fs.mkdirSync(B, { recursive: true });
+  const src = fs.readdirSync(P('机场运营')).filter((f) => f.endsWith('.pptx')).slice(0, 2).map((f) => P('机场运营', f));
+  src.forEach((f, i) => { fs.copyFileSync(f, path.join(A, `a${i}.pptx`)); fs.copyFileSync(f, path.join(B, `b${i}.pptx`)); });
+  const svc = new AgentService(path.join(tmp, 'datasig'));
+  svc.setConfig({ thumbnails: 'off', docTypes: ['ppt'] });
+  assert.strictEqual(svc.getConfig().split.enabled, false, '默认不再拆分子任务');
+  const run = async (id, opts) => { svc.startTask(id, opts); for (let i = 0; i < 1200; i++) { await new Promise((r) => setTimeout(r, 50)); if (!svc.runningSet.has(id) && !svc.queue.includes(id)) break; } return svc.store.getTask(id); };
+  try {
+    const id = svc.addTask(root);
+    // 只扫描目录：生成目录树，不解析
+    let t = await run(id, { scanOnly: true });
+    assert.strictEqual(t.parsed, 0);
+    let tree = svc.taskTree(id);
+    const nA = tree.nodes.find((n) => n.path === A), nB = tree.nodes.find((n) => n.path === B), nB0 = tree.nodes.find((n) => n.path === path.dirname(B));
+    assert.ok(nA && nB && nB0, '目录树包含原始文件夹层级（部门B → 项目）');
+    assert.strictEqual(nB.parent, nB0.path);
+    assert.strictEqual(tree.nodes.find((n) => n.path === root).files, 4);
+    assert.strictEqual(nA.state, 'new');
+    // 第一次全量解析
+    t = await run(id);
+    assert.strictEqual(t.parsed + t.duplicate, 4);
+    tree = svc.taskTree(id);
+    assert.ok(tree.nodes.filter((n) => n.direct).every((n) => n.state === 'same'), '处理完成后特征值记为已处理');
+    // 第二次：文件夹都没变 → 整体跳过（不逐个检查）
+    t = await run(id);
+    assert.strictEqual(t.skipped, 4);
+    const msgs = svc.store.db.prepare('SELECT message FROM task_files WHERE task_id = ? AND at >= ?').all(id, t.run_started).map((r) => r.message);
+    assert.ok(msgs.length === 4 && msgs.every((m) => /文件夹未变化/.test(m)), '未变化的文件夹按特征值跳过');
+    // 部门A 新增一个文档 → 只检查部门A
+    fs.copyFileSync(src[0], path.join(A, 'a-new.pptx'));
+    t = await run(id, { incremental: true });
+    const rows = svc.store.db.prepare('SELECT path, action, message FROM task_files WHERE task_id = ? AND at >= ?').all(id, t.run_started);
+    assert.ok(rows.filter((r) => r.path.startsWith(B)).every((r) => /文件夹未变化/.test(r.message)), '未变化的部门B 整体跳过');
+    assert.ok(rows.some((r) => r.path.endsWith('a-new.pptx') && ['parsed', 'duplicate'].includes(r.action)), '变化的部门A 中新增文档被处理');
+    // 按所选文件夹分析：只扫描 / 处理部门B
+    t = await run(id, { dirs: [path.dirname(B)], force: true });
+    const rowsB = svc.store.db.prepare('SELECT path, action FROM task_files WHERE task_id = ? AND at >= ?').all(id, t.run_started);
+    assert.strictEqual(rowsB.length, 2);
+    assert.ok(rowsB.every((r) => r.path.startsWith(B) && r.action !== 'skipped'), '强制重新分析所选文件夹');
+    assert.strictEqual(JSON.parse(svc.store.getTask(id).scan_list).length, 5, '扫描清单保留其他文件夹');
+    tree = svc.taskTree(id);
+    assert.strictEqual(tree.nodes.find((n) => n.path === root).files, 5);
+  } finally { svc.close(); }
+});
