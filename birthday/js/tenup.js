@@ -437,6 +437,7 @@
   T.store = {
     persistent: true,
     get: function (key) {
+      if (T.cloud && T.cloud.on) return Promise.resolve(cAlbum[key] == null ? null : clone(cAlbum[key]));
       return db().then(function (d) {
         return new Promise(function (res, rej) {
           var rq = d.transaction('kv').objectStore('kv').get(key);
@@ -446,6 +447,7 @@
       }).catch(function () { T.store.persistent = false; return mem[key] == null ? null : mem[key]; });
     },
     set: function (key, val) {
+      if (T.cloud && T.cloud.on) { cAlbum[key] = clone(val); schedule(); return Promise.resolve(true); }
       mem[key] = val;
       return db().then(function (d) {
         return new Promise(function (res, rej) {
@@ -459,6 +461,98 @@
     load: function () { return T.store.get('photos'); },
     save: function (list) { return T.store.set('photos', list); }
   };
+
+  /* ---------- cloud: the family's own album server ----------
+     When the pages are served by the album server, T.store reads and writes the album there instead of in this
+     browser, pictures are uploaded once and referred to by id, and every open device follows the others.
+     T.cloud.init() → Promise<true|false>; call it before the first T.store.get. Without a server nothing changes. */
+  var C = T.cloud = { on: false, version: 0, status: 'local' };
+  var cAlbum = {}, cSynced = '{}', cDirty = false, cTimer = null, cBusy = null, cSeen = [], cUploaded = {};
+  function clone(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+  function toLogin() {
+    var here = location.pathname.split('/').pop() || 'index.html';
+    location.replace('login.html?next=' + encodeURIComponent(here + location.search));
+    return new Promise(function () {});
+  }
+  function call(method, url, body, type) {
+    var h = { 'X-TenUp': '1' };
+    if (body != null && !type) { h['Content-Type'] = 'application/json'; body = JSON.stringify(body); } else if (type) h['Content-Type'] = type;
+    return fetch('api/' + url, { method: method, headers: h, body: body, credentials: 'same-origin' }).then(function (r) {
+      if (r.status === 401 || r.status === 423) return toLogin();
+      return r.json().then(function (j) { return { status: r.status, json: j }; });
+    });
+  }
+  C.call = call;
+  /* every string in the album: 'f:<id>' on the server ↔ 'api/file/<id>' in the page */
+  function walk(o, fn) {
+    if (Array.isArray(o)) return Promise.all(o.map(function (v, i) { return Promise.resolve(typeof v === 'string' ? fn(v) : walk(v, fn)).then(function (r) { if (typeof v === 'string') o[i] = r; }); })).then(function () { return o; });
+    if (o && typeof o === 'object') return Promise.all(Object.keys(o).map(function (k) { var v = o[k]; return Promise.resolve(typeof v === 'string' ? fn(v) : walk(v, fn)).then(function (r) { if (typeof v === 'string') o[k] = r; }); })).then(function () { return o; });
+    return Promise.resolve(o);
+  }
+  function hydrate(a) { return walk(clone(a) || {}, function (v) { return /^f:[0-9a-f]{32}$/.test(v) ? 'api/file/' + v.slice(2) : v; }); }
+  function upload(dataUrl) {
+    if (cUploaded[dataUrl]) return Promise.resolve(cUploaded[dataUrl]);
+    return fetch(dataUrl).then(function (r) { return r.blob(); }).then(function (b) { return call('POST', 'file', b, b.type); }).then(function (r) {
+      if (r.status !== 200) throw new Error((r.json && r.json.message) || 'upload failed');
+      return (cUploaded[dataUrl] = 'f:' + r.json.id);
+    });
+  }
+  function dehydrate(a) {
+    return walk(clone(a), function (v) {
+      if (/^api\/file\/[0-9a-f]{32}$/.test(v)) return 'f:' + v.slice(9);
+      if (/^data:(image|audio)\//.test(v)) return upload(v);
+      return v;
+    });
+  }
+  function tell(remote) { cSeen.forEach(function (fn) { try { fn(remote); } catch (e) {} }); }
+  function setStatus(st) { if (C.status !== st) { C.status = st; tell(false); } }
+  function push(tries) {
+    cDirty = false; setStatus('saving');
+    var mine = clone(cAlbum);
+    return dehydrate(mine).then(function (out) {
+      /* uploads turned data: URLs into file references; keep those in the page's copy so they are not sent twice */
+      return hydrate(out).then(function (h) { if (!cDirty) cAlbum = h; return call('PUT', 'album', { base: C.version, album: out }); }).then(function (r) {
+        if (r.status === 200) { C.version = r.json.version; cSynced = JSON.stringify(cAlbum); setStatus(cDirty ? 'saving' : 'synced'); return cDirty ? push(0) : null; }
+        if (r.status !== 409 || tries >= 3) throw new Error('save failed');
+        /* someone else saved first: take theirs, then put back the ages and settings this device changed */
+        return hydrate(r.json.album).then(function (theirs) {
+          var was = JSON.parse(cSynced), now = cAlbum;
+          Object.keys(now).forEach(function (k) {
+            if (k === 'photos' && Array.isArray(now.photos) && Array.isArray(theirs.photos)) {
+              now.photos.forEach(function (p, i) { if (JSON.stringify(p) !== JSON.stringify((was.photos || [])[i])) theirs.photos[i] = p; });
+            } else if (JSON.stringify(now[k]) !== JSON.stringify(was[k])) theirs[k] = now[k];
+          });
+          cAlbum = theirs; C.version = r.json.version; cSynced = JSON.stringify(r.json.album ? theirs : {});
+          tell(true);
+          return push(tries + 1);
+        });
+      });
+    }).catch(function (e) { cDirty = true; setStatus('offline'); if (window.console) console.warn('[tenup] save failed', e); });
+  }
+  function schedule() { cDirty = true; setStatus('saving'); clearTimeout(cTimer); cTimer = setTimeout(function () { cBusy = (cBusy || Promise.resolve()).then(function () { return cDirty ? push(0) : null; }); }, 350); }
+  function pull() {
+    return call('GET', 'album?v=' + C.version).then(function (r) {
+      if (r.status !== 200) throw new Error('load failed');
+      if (r.json.same) { if (C.status === 'offline' && !cDirty) setStatus('synced'); return false; }
+      if (cDirty) return false;                      /* this device has unsaved changes: its own save will sort the two out */
+      return hydrate(r.json.album).then(function (a) { cAlbum = a; C.version = r.json.version; cSynced = JSON.stringify(a); C.status = 'synced'; return true; });
+    });
+  }
+  C.onChange = function (fn) { cSeen.push(fn); };
+  C.init = function () {
+    if (!/^https?:$/.test(location.protocol) || !window.fetch) return Promise.resolve(false);
+    return fetch('api/state', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
+      if (!j || j.server !== 'tenup') return false;
+      if (j.state !== 'ok') return toLogin();
+      C.on = true; C.version = -1;
+      return pull().then(function () {
+        setInterval(function () { if (document.hidden) return; pull().then(function (changed) { if (changed) tell(true); }).catch(function () { if (!cDirty) setStatus('offline'); }); }, 4000);
+        return true;
+      });
+    }).catch(function () { return false; });
+  };
+  C.logout = function () { return call('POST', 'logout', {}).then(function () { location.replace('login.html'); }); };
+
   /* Saved photos over the defaults, one per age. */
   T.loadPhotos = function () {
     return T.store.load().then(function (saved) {
@@ -522,8 +616,11 @@
     function drawStatus() {
       var n = photos.filter(function (p) { return p.src; }).length, m = 0, ok = T.store.persistent;
       photos.forEach(function (p) { m += p.more.length; });
-      status.innerHTML = '<span>' + (note ? note[0] : '封面 ' + n + ' / ' + photos.length + ' · 更多照片 ' + m + ' 张' + (ok ? ' · 已保存在此浏览器' : ' · 仅本次打开有效')) + '</span>' +
-        '<span lang="en">' + (note ? note[1] : n + ' of ' + photos.length + ' covers · ' + m + ' more' + (ok ? ' · saved in this browser' : ' · kept for this visit only')) + '</span>';
+      var where = T.cloud.on ? { synced: [' · 已同步到家里的服务器', ' · synced with the family server'], saving: [' · 正在保存…', ' · saving…'], offline: [' · 连不上服务器，稍后自动重试', ' · cannot reach the server — will retry'] }[T.cloud.status] || ['', '']
+        : ok ? [' · 已保存在此浏览器', ' · saved in this browser'] : [' · 仅本次打开有效', ' · kept for this visit only'];
+      status.classList.toggle('is-warn', T.cloud.on && T.cloud.status === 'offline');
+      status.innerHTML = '<span>' + (note ? note[0] : '封面 ' + n + ' / ' + photos.length + ' · 更多照片 ' + m + ' 张' + where[0]) + '</span>' +
+        '<span lang="en">' + (note ? note[1] : n + ' of ' + photos.length + ' covers · ' + m + ' more' + where[1]) + '</span>';
     }
     function draw() {
       nzh.value = meta.zh || ''; nen.value = meta.en || '';
@@ -581,7 +678,8 @@
       });
     }
     function fromData(data) {
-      function img(v) { return /^data:image\//.test(v || '') ? v : ''; }
+      /* a picture is either held in the page (data:) or kept on the family server (api/file/<id>); anything else is dropped */
+      function img(v) { return /^(data:image\/|api\/file\/[0-9a-f]{32}$)/.test(v || '') ? v : ''; }
       var av = data.avatars || meta.avatars || {};
       meta = { zh: (data.name && data.name.zh) || meta.zh, en: (data.name && data.name.en) || meta.en, avatars: { girl: img(av.girl), dad: img(av.dad), mom: img(av.mom) } };
       photos = T.photos.map(function (p) {
@@ -653,12 +751,62 @@
       if (at.more) addMore(e.dataTransfer.files, at.i); else addCovers(e.dataTransfer.files, at.i);
     });
 
+    function reload() {
+      return Promise.all([T.store.get('photos'), T.store.get('meta')]).then(function (r) {
+        if (r[1]) meta = { zh: r[1].zh || '', en: r[1].en || '', avatars: r[1].avatars || {} };
+        if (r[0]) fromData({ name: meta, avatars: meta.avatars, photos: r[0] });
+        draw();
+      });
+    }
     draw();
-    Promise.all([T.store.get('photos'), T.store.get('meta')]).then(function (r) {
-      if (r[1]) meta = { zh: r[1].zh || '', en: r[1].en || '', avatars: r[1].avatars || {} };
-      if (r[0]) fromData({ name: meta, avatars: meta.avatars, photos: r[0] });
-      draw();
+    T.cloud.init().then(function (on) {
+      if (on) {
+        if (o.account !== false) T.account(root.querySelector('.tu-mgr'));
+        root.querySelector('.tu-mgr__help').innerHTML = T.bi('照片加密保存在家里的服务器上。所有登录过的设备都能上传和整理，改动几秒钟内自动同步。', 'Photos are kept sealed on the family server. Every logged-in device can add and arrange them, and changes reach the others within seconds.', 'tu-body');
+        /* another device changed the album: show it, unless someone is typing here right now */
+        T.cloud.onChange(function (remote) { if (!remote) return drawStatus(); if (/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return; reload(); });
+      }
+      return reload();
     });
+  };
+
+  /* ---------- account panel (cloud only): trusted devices, the two phone numbers, log out ---------- */
+  T.account = function (host) {
+    var box = document.createElement('div'), step = null, msg = null;
+    box.className = 'tu-acct';
+    host.appendChild(box);
+    function mini(zh, en, act, cls, extra) { return '<button type="button" class="tu-mini ' + (cls || '') + '" data-act="' + act + '"' + (extra || '') + '>' + zh + '<small>' + en + '</small></button>'; }
+    function draw(d) {
+      var h = '<div class="tu-acct__head">' + T.bi('账户与设备', 'Account and devices', 'tu-title') + mini('退出这台设备', 'Log out this device', 'out', 'tu-mini--danger') + '</div>';
+      h += '<div class="tu-acct__grid"><div><div class="tu-acct__h">' + T.bi('可信设备', 'Trusted devices') + '</div>' + d.devices.map(function (v) {
+        return '<div class="tu-acct__row"><span>' + esc(v.name) + ' · ' + esc(v.country) + (v.current ? ' · <b>这台 this one</b>' : '') + '<small>' + new Date(v.seen).toLocaleDateString() + '</small></span>' +
+          (v.current ? '' : mini('移除', 'Remove', 'rmdev', 'tu-mini--danger', ' data-id="' + esc(v.id) + '"')) + '</div>';
+      }).join('') + '</div><div><div class="tu-acct__h">' + T.bi('接收验证码的手机号', 'Phones that receive codes') + '</div>' + d.phones.map(function (ph, i) {
+        return '<div class="tu-acct__row"><span>' + esc(ph) + '</span>' + mini('更换', 'Change', 'chg', '', ' data-i="' + i + '"') + '</div>';
+      }).join('');
+      if (step) h += '<div class="tu-acct__form"><span class="tu-acct__say">' + step.say + '</span>' +
+        (step.n === 1 ? '<input class="tu-field" data-a="code" inputmode="numeric" maxlength="6" placeholder="验证码 Code"><input class="tu-field" data-a="phone" inputmode="tel" placeholder="新手机号 New number">' : '<input class="tu-field" data-a="code" inputmode="numeric" maxlength="6" placeholder="验证码 Code">') +
+        '<div class="tu-slot__row">' + mini('确认', 'Confirm', 'chgok') + mini('取消', 'Cancel', 'chgno') + '</div></div>';
+      h += '<div class="tu-acct__note">' + T.bi('要换掉一个手机号，验证码会发到另一个手机号上。', 'To change one number, the code is sent to the other one.', 'tu-body') + '</div>';
+      if (msg) h += '<div class="tu-acct__msg" role="alert">' + esc(msg) + '</div>';
+      box.innerHTML = h + '</div></div>';
+    }
+    function load() { return T.cloud.call('GET', 'devices').then(function (r) { draw(r.json); }); }
+    function post(url, body) { return T.cloud.call('POST', url, body).then(function (r) { msg = r.status === 200 ? null : r.json.message; return r; }); }
+    box.addEventListener('click', function (e) {
+      var a = e.target.closest('[data-act]'); if (!a) return;
+      var act = a.getAttribute('data-act');
+      if (act === 'out') { if (window.confirm('退出后，这台设备下次需要重新短信验证。\nAfter logging out, this device will need a text message again.')) T.cloud.logout(); }
+      else if (act === 'rmdev') post('devices/remove', { id: a.getAttribute('data-id') }).then(load);
+      else if (act === 'chg') { var i = +a.getAttribute('data-i'); post('phone/change/start', { which: i }).then(function (r) { step = r.status === 200 ? { n: 1, say: '验证码已发到 ' + esc(r.json.sentTo) + ' · Code sent to the other phone' } : null; load(); }); }
+      else if (act === 'chgno') { step = null; msg = null; load(); }
+      else if (act === 'chgok') {
+        var code = (box.querySelector('[data-a="code"]') || {}).value, ph = (box.querySelector('[data-a="phone"]') || {}).value;
+        if (step.n === 1) post('phone/change/confirm', { code: code, newPhone: ph }).then(function (r) { if (r.status === 200) step = { n: 2, say: '再输入发到新号码 ' + esc(r.json.sentTo) + ' 的验证码 · Now the code sent to the new number' }; load(); });
+        else post('phone/change/finish', { code: code }).then(function (r) { if (r.status === 200) step = null; load(); });
+      }
+    });
+    load();
   };
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', T.defs); else T.defs();

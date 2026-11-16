@@ -362,7 +362,7 @@ function serveSite(req, res, pathname, authed) {
   if (pathname === '/') pathname = '/index.html';
   if (!SERVED.test(pathname) || pathname.includes('..') || /^\/docs\/build\//.test(pathname)) { res.writeHead(404); return res.end('Not found'); }
   if (!authed && !PUBLIC.some(r => r.test(pathname))) {
-    if (/\.html$/.test(pathname)) { res.writeHead(302, { Location: '/login.html', 'Cache-Control': 'no-store' }); return res.end(); }
+    if (/\.html$/.test(pathname)) { res.writeHead(302, { Location: '/login.html' + (pathname === '/manage.html' ? '?next=manage.html' : ''), 'Cache-Control': 'no-store' }); return res.end(); }
     res.writeHead(401); return res.end('Login required');
   }
   const file = path.join(CFG.site, pathname);

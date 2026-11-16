@@ -1,0 +1,23 @@
+/* 十岁啦 · 登录页 Login page */
+html,body{margin:0;min-height:100%;background:var(--ground);color:var(--ink);font-family:var(--font-body)}
+.lg{box-sizing:border-box;max-width:520px;margin:0 auto;padding:28px 20px 60px;display:flex;flex-direction:column;align-items:center}
+.lg .tu-mascot{width:150px;height:150px}
+.lg__card{box-sizing:border-box;width:100%;margin-top:6px;padding:24px;border-radius:var(--radius-lg);background:var(--surface);box-shadow:var(--shadow-card)}
+.lg__card>*+*{margin-top:16px}
+.lg .tu-title{font-size:30px}.lg .tu-title>.en{font-size:17px}
+.lg .tu-body{font-size:16px}.lg .tu-body>.en{font-size:14px}
+.lg label{display:flex;flex-direction:column;font:800 15px/1.3 var(--font-body)}
+.lg label span{margin-bottom:6px}
+.lg label small{font-size:13px;font-weight:700;color:var(--ink-muted)}
+.lg .tu-field{font-size:18px;padding:11px 12px}
+.lg__row{display:flex}
+.lg__row>*{flex:1}
+.lg__row>*+*{margin-left:10px}
+.lg__go{display:flex;flex-direction:column;align-items:center;width:100%;padding:12px 20px;border:0;border-radius:var(--radius-pill);background:var(--primary);color:var(--on-primary);box-shadow:var(--shadow-button);font:var(--tu-dw) 20px/1.2 var(--tu-display);cursor:pointer}
+.lg__go small{font:800 14px/1.3 var(--font-body)}
+.lg__go:disabled{opacity:.55;cursor:default}
+.lg__go:focus-visible,.lg__alt:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.lg__alt{display:flex;flex-direction:column;align-items:center;width:100%;padding:10px 16px;border-radius:var(--radius-pill);border:2px solid var(--outline);background:var(--surface);color:var(--ink);font:800 16px/1.2 var(--font-body);cursor:pointer}
+.lg__alt small{font-size:13px;font-weight:700;color:var(--ink-muted)}
+.lg__msg{padding:10px 14px;border-radius:var(--radius-sm);background:var(--ground);color:var(--danger);font:800 15px/1.4 var(--font-body);border:2px solid var(--danger)}
+.lg__ok{padding:10px 14px;border-radius:var(--radius-sm);background:var(--ground);color:var(--success);font:800 15px/1.4 var(--font-body);border:2px solid var(--success)}

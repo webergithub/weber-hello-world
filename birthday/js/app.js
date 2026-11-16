@@ -288,7 +288,7 @@
   }
   /* album/3.jpg is the cover for age 3; album/3-1.jpg, album/3-2.jpg … are more photos from that year */
   function probe(list) {
-    if (CFG.albumFolder === false) return Promise.resolve(list);
+    if (CFG.albumFolder === false || T.cloud.on) return Promise.resolve(list);      /* with the family server the album lives there, not in the folder */
     return Promise.all(list.map(function (p) {
       var cover = p.src ? Promise.resolve() : exists('album/' + p.age + '.jpg').then(function (yes) { if (yes) p.src = 'album/' + p.age + '.jpg'; });
       function more(j) {
@@ -316,6 +316,8 @@
   }
 
   render();
-  loadAlbum().then(function (list) { photos = list; render(); }).catch(function () {});
+  function refresh() { return loadAlbum().then(function (list) { photos = list; if (cur >= photos.length) cur = 0; if (screen === 'opening' || screen === 'album' || screen === 'ages') render(); }).catch(function () {}); }
+  /* with the family server: follow what the other devices change; without it this resolves at once and nothing differs */
+  T.cloud.init().then(function (on) { if (on) T.cloud.onChange(function (remote) { if (remote && !year) refresh(); }); return refresh(); });
   if (Q.mode === 'watch' || Q.mode === 'interactive') { focus = Q.mode === 'watch' ? 1 : 0; ok(); }
 })();
