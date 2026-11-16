@@ -71,6 +71,7 @@
         '<div class="x x-mascot x-mood">' + mascot() + '</div>' +
         '<div class="x x-ask">' + T.bi('准备好了吗？选一种玩法吧', 'Ready? Pick a way to play', 'tu-title') + '</div>' +
         '<div class="x x-modes">' + T.modeCard('interactive', focus === 0 ? 'is-focus' : '') + T.modeCard('watch', focus === 1 ? 'is-focus' : '') + '</div>' +
+        '<a class="x x-manage" href="manage.html">' + T.bi('整理照片', 'Manage photos') + '</a>' +
         hint([['← →', '选择', 'Choose'], ['OK', '确认', 'Confirm']]);
     },
     gift: function () {

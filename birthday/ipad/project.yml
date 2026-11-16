@@ -1,0 +1,53 @@
+# XcodeGen 工程描述 —— 十岁啦 iPad 应用（一个内嵌相册网页的原生外壳）
+# 生成工程：
+#   sh prepare-web.sh && brew install xcodegen && xcodegen generate && open TenUp.xcodeproj
+# 连接你的相册服务器：把下面 TenUpServerURL 改成 https 网址（例如 https://album.example.com/）。
+# 留空则使用随应用打包的网页，照片保存在这台 iPad 上。
+
+name: TenUp
+options:
+  bundleIdPrefix: family.tenup
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+
+targets:
+  TenUp:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: Sources
+      - path: Assets.xcassets
+      - path: web
+        type: folder
+        buildPhase: resources
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: 十岁啦
+        CFBundleShortVersionString: "1.0.0"
+        CFBundleVersion: "1"
+        TenUpServerURL: ""
+        NSCameraUsageDescription: 互动模式用摄像头识别笑脸和手势，画面只在这台设备上处理，不会上传。
+        NSPhotoLibraryUsageDescription: 从相册里选择要放进成长相册的照片。
+        UILaunchScreen: {}
+        UIRequiresFullScreen: true
+        UIStatusBarHidden: true
+        UIViewControllerBasedStatusBarAppearance: true
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+        UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: family.tenup.album
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MARKETING_VERSION: "1.0.0"
+        CURRENT_PROJECT_VERSION: "1"
+        DEVELOPMENT_TEAM: ""
+        CODE_SIGN_STYLE: Automatic

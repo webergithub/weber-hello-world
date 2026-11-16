@@ -1,0 +1,5 @@
+web/
+*.xcodeproj
+build/
+Payload/
+Sources/Info.plist

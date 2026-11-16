@@ -1,0 +1,101 @@
+# 十岁啦 · 相册服务端
+
+一个纯 Node.js 的小服务（18 以上，不依赖任何 npm 包）。它负责登录与短信验证、可信设备与国家判断、相册读写与多终端同步，并把照片和音频加密后存盘。它同时把 `birthday/` 这套网页提供给浏览器，未登录时只能看到登录页。
+
+设计说明见 `../docs/tenup-requirements-design.html` 的第 7、8、10 节。
+
+## 启动
+
+```bash
+cd birthday
+```
+
+```bash
+node server/server.js
+```
+
+第一次启动会：
+
+- 在 `server/master.key` 生成服务器主密钥。**请另外保存一份，并且不要和数据文件夹放在一起。**
+- 在日志里打印一行"设置口令 Setup token"。打开网站做首次设置时要填它。
+
+服务只监听本机 `127.0.0.1:8787`。对外要放在带 HTTPS 证书的反向代理后面（摄像头和登录都要求 HTTPS）。Nginx 的最小配置：
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header X-Forwarded-For $remote_addr;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    client_max_body_size 30m;
+}
+```
+
+用了反向代理就要设 `TENUP_TRUST_PROXY=1`，否则服务看到的来源地址永远是 127.0.0.1。
+
+## 配置（环境变量）
+
+| 变量 | 含义 | 默认 |
+| --- | --- | --- |
+| `TENUP_PORT` / `TENUP_HOST` | 监听端口和地址 | `8787` / `127.0.0.1` |
+| `TENUP_DATA` | 数据文件夹（里面全是密文） | `server/data` |
+| `TENUP_MASTER_KEY` | 服务器主密钥，64 位十六进制 | 不设则用下面的文件 |
+| `TENUP_MASTER_KEY_FILE` | 主密钥文件 | `server/master.key` |
+| `TENUP_TRUST_PROXY` | 设为 `1`：信任反向代理传来的来源地址和协议 | 关 |
+| `TENUP_SESSION_DAYS` | 登录状态保持天数；`0` 表示关掉浏览器就要重新输密码 | `30` |
+| `TENUP_SMS` | 短信通道：`console`、`aliyun`、`tencent`、`webhook` | `console` |
+| `TENUP_GEOIP` | IP 归属地库文件（`.mmdb`），用来判断国家 | 不设则不做国家判断 |
+| `TENUP_COUNTRY_HEADER` | 反向代理已经算好国家时，读取的请求头名，例如 `cf-ipcountry` | 无 |
+| `TENUP_SETUP_TOKEN` | 自己指定首次设置口令 | 随机生成并打印 |
+
+### 短信
+
+- `console`：验证码打印在服务日志里。只用于调试，上线前必须换掉。
+- `aliyun`：`TENUP_ALIYUN_KEY_ID`、`TENUP_ALIYUN_KEY_SECRET`、`TENUP_ALIYUN_SIGN`（签名）、`TENUP_ALIYUN_TEMPLATE`（模板，变量名为 `code`）。
+- `tencent`：`TENUP_TENCENT_SECRET_ID`、`TENUP_TENCENT_SECRET_KEY`、`TENUP_TENCENT_APP_ID`、`TENUP_TENCENT_SIGN`、`TENUP_TENCENT_TEMPLATE`。
+- `webhook`：把 `{ phone, code, purpose }` POST 到 `TENUP_SMS_WEBHOOK`，可带 `TENUP_SMS_WEBHOOK_TOKEN`。
+
+阿里云和腾讯云两种接法是按官方签名方法写的，**没有用真实账号发过短信**，上线前请各发一条确认。
+
+### 国家判断
+
+需要一份 MaxMind 格式的国家库。DB-IP Lite（署名许可，免费）可以这样取：
+
+```bash
+npm pack @ip-location-db/dbip-country-mmdb
+```
+
+解开后把 `dbip-country.mmdb` 放到服务器上，设 `TENUP_GEOIP` 指向它。库需要定期更新。没有库、查不到、或者是家里内网地址时，不会触发短信验证。
+
+## 规则
+
+- **首次设置**：设置口令 + 密码（至少 10 位）+ 两个手机号，两个号码各验证一次。只能成功一次。
+- **登录**：先输密码。新设备，或可信设备换了国家，再输短信验证码。可信设备在同一个国家只需要密码。
+- **改手机号**：要改号码 A，验证码发到号码 B；通过后再向新号码发一次确认。没有别的途径能改。
+- **防护**：密码连续输错 5 次锁 15 分钟；验证码 6 位、5 分钟有效、最多试 5 次；同一号码 60 秒内只发一次、每天最多 10 次。
+- **加密**：每个照片、音频和相册数据都用 AES-256-GCM 单独加密。数据密钥被"密码派生的密钥"和"服务器主密钥"共同保护，两样缺一不可。
+- **重启后**：数据处于上锁状态，任意设备用密码登录一次即解锁。
+
+## 两个手机号都丢了怎么办
+
+没有任何接口能绕过短信验证，这是规则本身决定的。能登录服务器的人可以停掉服务，删除 `data/account.enc` 后重新做首次设置——但这样会同时丢掉数据密钥，**已有的照片将无法解密**。所以请确保两个手机号至少有一个长期可用，并及时用其中一个更换另一个。
+
+## 备份
+
+备份 `TENUP_DATA` 文件夹即可，里面全是密文。主密钥另外保存。丢了主密钥或忘了密码，数据无法恢复。
+
+## 自检
+
+```bash
+node server/test/api.test.js
+```
+
+带上国家库可以把"换国家要重新验证"也测到：
+
+```bash
+node server/test/api.test.js /path/to/dbip-country.mmdb
+```
+
+## 没有做的事
+
+- 没有清理不再被相册引用的旧文件，长期使用后数据文件夹会比实际需要的大一些。
+- 没有经过专业安全审计，定位是家用。

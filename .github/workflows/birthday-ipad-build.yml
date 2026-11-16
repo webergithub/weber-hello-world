@@ -1,0 +1,66 @@
+name: 十岁啦 iPad 应用构建 (TenUp)
+
+# 编译 birthday/ipad（内嵌相册网页的原生外壳），产出 **未签名 IPA**。
+# 安装到 iPad：用 Sideloadly / AltStore 以你自己的 Apple ID 重签，或在 Xcode 里用开发者账号签名。
+on:
+  push:
+    branches: [master, 'claude/**']
+    paths:
+      - 'birthday/ipad/**'
+      - '.github/workflows/birthday-ipad-build.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: iPad 编译 + 未签名 IPA
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 环境诊断
+        run: |
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
+      - name: 复制相册网页
+        run: sh birthday/ipad/prepare-web.sh
+
+      - name: 安装 XcodeGen
+        run: brew install xcodegen
+
+      - name: 生成 Xcode 工程
+        run: cd birthday/ipad && xcodegen generate
+
+      - name: 编译（真机架构，不签名）
+        run: |
+          cd birthday/ipad
+          xcodebuild \
+            -project TenUp.xcodeproj \
+            -scheme TenUp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: 打包未签名 IPA
+        run: |
+          cd birthday/ipad
+          APP=$(find build/Build/Products -name '*.app' -type d | head -1)
+          echo "App bundle: $APP"
+          ls "$APP" | head -30
+          test -f "$APP/web/index.html"
+          rm -rf Payload && mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qr "$GITHUB_WORKSPACE/tenup-ipad-unsigned.ipa" Payload
+          ls -la "$GITHUB_WORKSPACE/tenup-ipad-unsigned.ipa"
+
+      - name: 上传 IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenup-ipad-unsigned-ipa
+          path: tenup-ipad-unsigned.ipa
+          if-no-files-found: error

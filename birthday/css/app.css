@@ -14,6 +14,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--ground);color:va
 .x-mascot{right:120px;top:170px}
 .x-mascot .tu-mascot{width:440px;height:440px}
 .x-foot{right:96px;bottom:54px}
+.x-manage{right:96px;top:54px;padding:12px 30px;border-radius:var(--radius-pill);background:var(--surface);box-shadow:var(--shadow-button);color:var(--ink);text-decoration:none}
+.x-manage .zh{font-family:var(--tu-display);font-weight:var(--tu-dw);font-size:28px}
+.x-manage .en{font-size:22px;font-weight:800;color:var(--ink-muted)}
+.x-manage:focus-visible{outline:none;box-shadow:var(--shadow-focus)}
 .x-corner{right:96px;top:40px}
 .x-corner .tu-mascot{width:190px;height:190px}
 .has-cam .x-corner{right:300px}
