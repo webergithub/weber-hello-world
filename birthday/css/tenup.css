@@ -179,6 +179,20 @@
 .tu-together__note.tu-body{font-size:28px}
 @keyframes tu-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 
+/* ---------- a note that goes with a photo ---------- */
+.tu-ink{display:block;width:100%;overflow:visible}
+.tu-ink path{fill:none;stroke:var(--ink);stroke-width:11;stroke-linecap:round;stroke-linejoin:round}
+.tu-ink--write path{stroke-dasharray:1;stroke-dashoffset:1;animation:tu-write .6s linear both}
+@keyframes tu-write{to{stroke-dashoffset:0}}
+.tu-note{position:relative;box-sizing:border-box;width:470px;padding:28px 30px 24px;border-radius:var(--radius-md);background:var(--sun);color:var(--on-pop);border:var(--tu-bw) solid var(--outline);box-shadow:var(--shadow-card);transform:rotate(3deg);display:flex;flex-direction:column}
+.tu-note>*+*{margin-top:14px}
+.tu-note__text{font-family:var(--tu-display);font-weight:var(--tu-dw);font-size:40px;line-height:1.3}
+.tu-note .tu-ink path{stroke:var(--on-pop)}
+.tu-note__pic{position:absolute;right:-70px;top:-150px;width:210px;padding:10px 10px 14px;background:var(--photo-mat);border:var(--tu-bw) solid var(--outline);border-radius:var(--radius-sm);box-shadow:var(--shadow-button);transform:rotate(7deg)}
+.tu-note__pic img{display:block;width:100%;height:150px;object-fit:cover;border-radius:6px}
+.tu-note__pic:only-child{position:relative;right:auto;top:auto;width:300px}
+.tu-note__pic:only-child img{height:220px}
+
 /* ---------- names of the ages ---------- */
 .tu-namecard{display:flex;align-items:center;box-sizing:border-box;width:1500px;min-height:470px;padding:var(--space-4) 64px;border-radius:var(--tu-card-r);border:var(--tu-bw) solid var(--outline);background:var(--surface);box-shadow:var(--shadow-card);color:var(--ink)}
 .tu-namecard__pic{position:relative;flex:none;width:310px;height:310px;margin-right:64px;border-radius:50%;display:grid;place-items:center;background:var(--sky);color:var(--on-pop);border:var(--tu-bw) solid var(--outline);box-sizing:border-box;box-shadow:var(--shadow-button)}
@@ -309,6 +323,37 @@
 .tu-avatar__name small{font-size:12px;font-weight:700;color:var(--ink-muted)}
 .tu-avatar__del{position:absolute;right:-8px;top:-6px;width:24px;height:24px;padding:0;border-radius:50%;border:2px solid var(--danger);background:var(--surface);color:var(--danger);font:800 15px/20px var(--font-body);cursor:pointer}
 .tu-avatar__del:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.tu-musicbox{margin-bottom:18px;padding:16px;border-radius:var(--radius-md);border:calc(var(--tu-bw) * .6) solid var(--outline);background:var(--surface);box-shadow:var(--shadow-button)}
+.tu-musicbox__h .zh{font:var(--tu-dw) 20px/1.2 var(--tu-display);color:var(--ink)}.tu-musicbox__h .en{font:800 13px/1.3 var(--font-body);color:var(--ink-muted)}
+.tu-musicbox__grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));grid-gap:14px;margin:10px 0}
+.tu-musicbox label{display:flex;flex-direction:column;font:800 13px/1.3 var(--font-body);color:var(--ink-muted)}
+.tu-musicbox label span{margin-bottom:6px}
+.tu-musicbox select.tu-field{-webkit-appearance:menulist;appearance:menulist;height:40px}
+.tu-musicbox input[type=range]{width:100%;height:40px;accent-color:var(--focus)}
+.tu-musicbox__tracks{display:flex;flex-wrap:wrap;align-items:center;margin:-4px}
+.tu-musicbox__tracks>*{margin:4px}
+.tu-musicbox__tracks .tu-mini{flex:none;padding:6px 16px}
+.tu-track{display:inline-flex;align-items:center;padding:4px 4px 4px 14px;border-radius:999px;background:var(--ground);font:800 14px/1.3 var(--font-body);color:var(--ink)}
+.tu-track .tu-mini{margin-left:8px;padding:4px 12px}
+.tu-musicbox__note{margin-top:10px}
+/* note dialog */
+.tu-dlg{position:fixed;left:0;top:0;right:0;bottom:0;z-index:100;display:flex;align-items:flex-start;justify-content:center;padding:24px 14px;overflow:auto;background:var(--scrim)}
+.tu-dlg__box{box-sizing:border-box;width:100%;max-width:640px;padding:20px;border-radius:var(--radius-md);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-card);font-family:var(--font-body)}
+.tu-dlg__box>*+*{margin-top:14px}
+.tu-dlg__head{display:flex;align-items:center}
+.tu-dlg__head img{flex:none;width:72px;height:54px;margin-right:14px;border-radius:10px;object-fit:cover}
+.tu-dlg .tu-title{font-size:22px}.tu-dlg .tu-title>.en{font-size:14px}
+.tu-dlg label{display:flex;flex-direction:column;font:800 14px/1.3 var(--font-body)}
+.tu-dlg label span{margin-bottom:6px}
+.tu-dlg__lab{font:800 14px/1.3 var(--font-body)}
+.tu-dlg__lab span{display:block;font-size:12px;font-weight:700;color:var(--ink-muted)}
+.tu-dlg__lab+*{margin-top:6px}
+.tu-pad{position:relative;height:0;padding-top:50%;border-radius:var(--radius-sm);border:2px dashed var(--outline);background:var(--photo-mat);touch-action:none;cursor:crosshair;overflow:hidden}
+.tu-pad .tu-ink{position:absolute;left:0;top:0;width:100%;height:100%}
+.tu-dlg__img{display:flex;align-items:center}
+.tu-dlg__img img{flex:none;width:96px;height:72px;margin-right:12px;border-radius:10px;object-fit:cover}
+.tu-dlg__img .tu-mini,.tu-dlg__foot .tu-mini{flex:none;padding:8px 18px;margin-right:8px}
+.tu-dlg__foot{display:flex;padding-top:6px}
 .tu-mgr__tools{display:flex;flex-wrap:wrap;margin:22px -6px 0}
 .tu-mgr__tools>*{margin:6px}
 .tu-mgr__tools .tu-mini{flex:none;padding:10px 22px;font-size:16px}
@@ -322,7 +367,10 @@
 .tu-more__list{display:flex;flex-wrap:wrap;margin:-3px}
 .tu-more__it,.tu-more__add{position:relative;flex:none;width:48px;height:48px;margin:3px;border-radius:10px;overflow:hidden;box-sizing:border-box}
 .tu-more__it img{display:block;width:100%;height:100%;object-fit:cover}
-.tu-more__it button{position:absolute;right:0;top:0;width:24px;height:24px;padding:0;border:0;border-radius:0 0 0 10px;background:var(--surface);color:var(--danger);font:800 16px/24px var(--font-body);cursor:pointer}
+.tu-more__pic{display:block;width:100%;height:100%;padding:0;border:0;background:none;cursor:pointer}
+.tu-more__x{position:absolute;right:0;top:0;width:24px;height:24px;padding:0;border:0;border-radius:0 0 0 10px;background:var(--surface);color:var(--danger);font:800 16px/24px var(--font-body);cursor:pointer}
+.tu-more__it.is-set::after{content:"";position:absolute;left:4px;bottom:4px;width:12px;height:12px;border-radius:50%;background:var(--sun);border:2px solid var(--ink);pointer-events:none}
+.tu-mini.is-set{background:var(--sun);color:var(--on-pop)}
 .tu-more__add{border:2px dashed var(--outline);background:var(--ground);color:var(--ink);font:800 24px/1 var(--font-body);cursor:pointer}
 .tu-more__add:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .tu-more__it button:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}

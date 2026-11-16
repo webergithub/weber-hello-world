@@ -37,9 +37,15 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--ground);color:va
 .tu-agecard>*+*{margin-top:12px}
 .x-cakepal{left:660px;top:560px}
 .x-cakepal .tu-mascot{width:280px;height:280px}
+/* the note that goes with the photo in front: a sticky card over its top-right corner */
+.x-note{left:1230px;top:262px;z-index:30;pointer-events:none}
+.x-note:empty{display:none}
+.x-note .tu-note{animation:x-show .5s ease both}
+@keyframes x-show{from{opacity:0}to{opacity:1}}
+.is-year .x-note{top:300px}
 /* inside one year's album: a soft room behind the photos so it reads as a different place */
-.x-yearroom{left:60px;right:60px;top:236px;bottom:158px;border-radius:var(--radius-xl);background:var(--ground-alt);box-shadow:inset 0 10px 30px rgba(120,84,60,.16)}
-.is-year .tu-gal__card{top:53%}
+.x-yearroom{left:60px;right:60px;top:262px;bottom:150px;border-radius:var(--radius-xl);background:var(--ground-alt);box-shadow:inset 0 10px 30px rgba(120,84,60,.16)}
+.is-year .tu-gal__card{top:55%}
 
 /* camera bubble: the child sees herself, mirrored */
 #cam{position:absolute;right:96px;top:54px;width:170px;height:170px;z-index:40;display:none}

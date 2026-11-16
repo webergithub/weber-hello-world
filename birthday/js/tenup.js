@@ -205,7 +205,7 @@
   ];
   /* One year's photos: the cover first, then the extras. */
   T.yearPhotos = function (p) {
-    return [p].concat((p.more || []).map(function (src) { return { age: p.age, zh: p.zh, en: p.en, src: src }; }));
+    return [p].concat((p.more || []).map(function (src, j) { return { age: p.age, zh: p.zh, en: p.en, src: src, note: (p.moreNotes || [])[j] || null }; }));
   };
   T.cue = function (c, o) {
     o = o || {};
@@ -582,6 +582,77 @@
   };
 
 
+
+  /* ---------- a note that goes with a photo: one line, handwriting, a small picture — any mix ----------
+     note = { text, strokes: [[x, y, x, y, …], …] on a 1000 × 500 pad, image } */
+  T.hasNote = function (n) { return !!(n && (n.text || (n.strokes && n.strokes.length) || n.image)); };
+  T.strokesSvg = function (strokes, animate) {
+    var t = 0;
+    return '<svg class="tu-ink' + (animate ? ' tu-ink--write' : '') + '" viewBox="0 0 1000 500" role="img" aria-label="手写寄语 Handwritten note">' + (strokes || []).map(function (st) {
+      var d = '', i, len = 0;
+      for (i = 0; i + 1 < st.length; i += 2) { d += (i ? 'L' : 'M') + st[i] + ' ' + st[i + 1]; if (i) len += Math.abs(st[i] - st[i - 2]) + Math.abs(st[i + 1] - st[i - 1]); }
+      if (st.length === 2) d += 'l0.1 0';
+      var dur = Math.max(0.15, Math.min(1.2, len / 1400)), delay = t; t += dur + 0.08;
+      return '<path d="' + d + '" pathLength="1"' + (animate ? ' style="animation-duration:' + dur.toFixed(2) + 's;animation-delay:' + delay.toFixed(2) + 's"' : '') + '/>';
+    }).join('') + '</svg>';
+  };
+  T.noteCard = function (n) {
+    if (!T.hasNote(n)) return '';
+    return '<div class="tu-note">' + (n.image ? '<span class="tu-note__pic"><img alt="" src="' + esc(n.image) + '"></span>' : '') +
+      (n.text ? '<span class="tu-note__text" lang="zh-Hans">' + esc(n.text) + '</span>' : '') +
+      (n.strokes && n.strokes.length ? T.strokesSvg(n.strokes, true) : '') + '</div>';
+  };
+
+  /* ---------- background music ----------
+     src: '' (none) · 'builtin:birthday' · 'builtin:lullaby' (two public-domain tunes played by a small music-box synth) · or the URL of an uploaded audio file.
+     Browsers only let sound start after a key press or tap, so call T.music.play from one. */
+  var TUNES = {
+    birthday: { bpm: 104, notes: 'D4 .75,D4 .25,E4 1,D4 1,G4 1,F#4 2,D4 .75,D4 .25,E4 1,D4 1,A4 1,G4 2,D4 .75,D4 .25,D5 1,B4 1,G4 1,F#4 1,E4 1,C5 .75,C5 .25,B4 1,G4 1,A4 1,G4 2,- 1.5' },
+    lullaby: { bpm: 84, notes: 'E4 .5,E4 .5,G4 2,E4 .5,E4 .5,G4 2,E4 .5,G4 .5,C5 1,B4 1,A4 1,A4 1,G4 1,D4 .5,E4 .5,F4 1,D4 1,D4 .5,E4 .5,F4 2,D4 .5,F4 .5,B4 .5,A4 .5,G4 1,B4 1,C5 2,C4 .5,C4 .5,C5 2,A4 .5,F4 .5,G4 2,E4 .5,C4 .5,F4 1,G4 1,A4 1,G4 2,C4 .5,C4 .5,C5 2,A4 .5,F4 .5,G4 2,E4 .5,C4 .5,F4 1,E4 1,D4 1,C4 2,- 1.5' }
+  };
+  T.tunes = [['', '不放音乐', 'No music'], ['builtin:birthday', '生日快乐歌（八音盒）', 'Happy Birthday (music box)'], ['builtin:lullaby', '摇篮曲（八音盒）', 'Lullaby (music box)']];
+  function freq(name) { var m = /^([A-G])(#?)(\d)$/.exec(name); if (!m) return 0; var n = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[m[1]] + (m[2] ? 1 : 0) + (+m[3] + 1) * 12; return 440 * Math.pow(2, (n - 69) / 12); }
+  var M = T.music = { src: '', vol: 0.6, muted: false };
+  var actx = null, gainAll = null, synthTimer = null, audioEl = null;
+  function synth(tune) {
+    var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
+    actx = actx || new AC();
+    if (actx.state === 'suspended') actx.resume();
+    gainAll = actx.createGain(); gainAll.gain.value = M.muted ? 0 : M.vol; gainAll.connect(actx.destination);
+    var seq = tune.notes.split(',').map(function (x) { var p = x.split(' '); return [freq(p[0]), +p[1]]; }), beat = 60 / tune.bpm, i = 0, when = actx.currentTime + 0.15, out = gainAll;
+    function ahead() {
+      while (when < actx.currentTime + 0.6) {
+        var f = seq[i][0], len = seq[i][1] * beat;
+        if (f) [1, 2, 4].forEach(function (mult, k) {          /* a struck-bar sound: the note, an octave, two octaves, each fading fast */
+          var o = actx.createOscillator(), g = actx.createGain(), peak = [0.5, 0.16, 0.05][k];
+          o.type = 'sine'; o.frequency.value = f * mult;
+          g.gain.setValueAtTime(0.0001, when); g.gain.exponentialRampToValueAtTime(peak, when + 0.008); g.gain.exponentialRampToValueAtTime(0.0001, when + Math.max(0.9, len * 1.6) / (k + 1));
+          o.connect(g); g.connect(out); o.start(when); o.stop(when + 2.6);
+        });
+        when += len; i = (i + 1) % seq.length;
+      }
+    }
+    ahead(); synthTimer = setInterval(ahead, 200);
+  }
+  M.stop = function () {
+    clearInterval(synthTimer); synthTimer = null;
+    if (gainAll) { try { gainAll.gain.setTargetAtTime(0, actx.currentTime, 0.08); } catch (e) {} gainAll = null; }
+    if (audioEl) { audioEl.pause(); audioEl.removeAttribute('src'); audioEl = null; }
+    M.src = '';
+  };
+  M.play = function (src) {
+    src = src || '';
+    if (src === M.src) return;
+    M.stop(); M.src = src;
+    if (!src) return;
+    if (/^builtin:/.test(src)) { if (TUNES[src.slice(8)]) synth(TUNES[src.slice(8)]); return; }
+    audioEl = new Audio(src); audioEl.loop = true; audioEl.volume = M.muted ? 0 : M.vol;
+    var p = audioEl.play(); if (p && p.catch) p.catch(function () {});
+  };
+  M.volume = function (v) { M.vol = Math.max(0, Math.min(1, v)); if (gainAll) gainAll.gain.value = M.muted ? 0 : M.vol; if (audioEl) audioEl.volume = M.muted ? 0 : M.vol; };
+  M.mute = function (on) { M.muted = on == null ? !M.muted : !!on; M.volume(M.vol); return M.muted; };
+  M.defaults = function (m) { m = m || {}; return { album: m.album || '', cake: m.cake == null ? 'builtin:birthday' : m.cake, volume: m.volume == null ? 0.6 : m.volume, tracks: m.tracks || [] }; };
+
   /* ---------- photo manager (phone / computer) ----------
      T.manager(root, { playHref, defaultName }) — one cover photo per age plus up to T.MAX_MORE more per year,
      captions in both languages, her name, album export / import. Everything stays in this browser. */
@@ -589,10 +660,10 @@
   T.manager = function (root, o) {
     o = o || {};
     T.defs();
-    function blank() { return T.photos.map(function (p) { return { age: p.age, zh: p.zh, en: p.en, src: '', more: [] }; }); }
+    function blank() { return T.photos.map(function (p) { return { age: p.age, zh: p.zh, en: p.en, src: '', more: [], note: null, moreNotes: [] }; }); }
     var photos = blank(), meta = { zh: (o.defaultName && o.defaultName.zh) || '', en: (o.defaultName && o.defaultName.en) || '', avatars: {} };
     var WHO = [['girl', '她', 'Her'], ['dad', '爸爸', 'Dad'], ['mom', '妈妈', 'Mom']], avatarTarget = null;
-    var target = null, moreTarget = null, note = null;
+    var target = null, moreTarget = null, note = null, music = T.music.defaults(), dlg = null;
     function mini(zh, en, act, cls) { return '<button type="button" class="tu-mini ' + (cls || '') + '" data-act="' + act + '">' + zh + '<small>' + en + '</small></button>'; }
 
     root.innerHTML = '<div class="tu-mgr"><div class="tu-mgr__head"><div class="tu-mgr__title">' +
@@ -601,17 +672,18 @@
       '<div class="tu-mgr__names"><label><span>孩子的名字或小名 · Her name (Chinese)</span><input class="tu-field" data-n="zh" maxlength="6" lang="zh-Hans"></label>' +
       '<label><span>英文名 · Her name (English)</span><input class="tu-field" data-n="en" maxlength="14" lang="en"></label>' +
       '<div class="tu-avatars"><span>头像（年龄那一页用）· Portraits for the ages page</span><div class="tu-avatars__row"></div></div></div>' +
+      '<div class="tu-musicbox"></div>' +
       '<label class="tu-drop">' + T.icon('upload') + T.bi('把封面照片拖到这里，或点一下选择（可多选）', 'Drop cover photos here, or tap to choose — several at once is fine') +
       '<input type="file" data-f="cover" accept="image/*" multiple></label><div class="tu-slots"></div>' +
       '<div class="tu-mgr__tools">' + (o.playHref ? '<a class="tu-mini tu-mini--go" href="' + esc(o.playHref) + '">去播放<small>Play the album</small></a>' : '') +
       mini('导出相册包', 'Export album file', 'export') + mini('导入相册包', 'Import album file', 'import') + mini('全部清空', 'Clear everything', 'clear', 'tu-mini--danger') +
-      '<input type="file" data-f="more" accept="image/*" multiple><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
+      '<input type="file" data-f="more" accept="image/*" multiple><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="noteimg" accept="image/*"><input type="file" data-f="audio" accept="audio/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
       '<div class="tu-mgr__help">' + T.bi('照片只保存在这台设备的这个浏览器里，不会上传。要在另一台设备上播放：导出相册包，把下载到的 album.js 放进网站的 album 文件夹。',
         'Photos stay in this browser on this device and are never uploaded. To play on another device, export the album file and put album.js into the site’s album folder.', 'tu-body') + '</div></div>';
 
     function q(sel) { return root.querySelector(sel); }
     var slots = q('.tu-slots'), drop = q('.tu-drop'), status = q('.tu-mgr__status');
-    var avRow = q('.tu-avatars__row'), avFile = q('[data-f="avatar"]'), file = q('[data-f="cover"]'), moreFile = q('[data-f="more"]'), pack = q('[data-f="pack"]'), nzh = q('[data-n="zh"]'), nen = q('[data-n="en"]');
+    var musicBox = q('.tu-musicbox'), avRow = q('.tu-avatars__row'), avFile = q('[data-f="avatar"]'), file = q('[data-f="cover"]'), moreFile = q('[data-f="more"]'), pack = q('[data-f="pack"]'), nzh = q('[data-n="zh"]'), nen = q('[data-n="en"]');
 
     function drawStatus() {
       var n = photos.filter(function (p) { return p.src; }).length, m = 0, ok = T.store.persistent;
@@ -636,17 +708,76 @@
           '<input class="tu-field" data-k="zh" lang="zh-Hans" aria-label="中文说明 Chinese caption，' + p.age + ' 岁" value="' + esc(p.zh) + '" maxlength="12">' +
           '<input class="tu-field tu-field--en" data-k="en" lang="en" aria-label="English caption 英文说明, age ' + p.age + '" value="' + esc(p.en) + '" maxlength="28">' +
           '<div class="tu-slot__row">' + mini(p.src ? '换封面' : '选封面', p.src ? 'Replace' : 'Choose', 'pick') +
+          '<button type="button" class="tu-mini' + (T.hasNote(p.note) ? ' is-set' : '') + '" data-act="note" data-j="-1"' + (p.src ? '' : ' disabled') + '>寄语<small>Note</small></button>' +
           '<button type="button" class="tu-mini tu-mini--danger" data-act="del"' + (p.src ? '' : ' disabled') + '>移除<small>Remove</small></button></div>' +
           '<div class="tu-more"><span class="tu-more__h"><span lang="zh-Hans">这一年的更多照片 ' + p.more.length + ' / ' + T.MAX_MORE + '</span><span lang="en">More from this year</span></span><div class="tu-more__list">' +
           p.more.map(function (src, j) {
-            return '<span class="tu-more__it"><img alt="" src="' + esc(src) + '"><button type="button" data-act="delmore" data-j="' + j + '" aria-label="移除这张 Remove this photo">×</button></span>';
+            return '<span class="tu-more__it' + (T.hasNote(p.moreNotes[j]) ? ' is-set' : '') + '"><button type="button" class="tu-more__pic" data-act="note" data-j="' + j + '" aria-label="给这张写寄语 Add a note to this photo"><img alt="" src="' + esc(src) + '"></button><button type="button" class="tu-more__x" data-act="delmore" data-j="' + j + '" aria-label="移除这张 Remove this photo">×</button></span>';
           }).join('') +
           (p.more.length < T.MAX_MORE ? '<button type="button" class="tu-more__add" data-act="more" aria-label="添加更多照片 Add more photos, age ' + p.age + '">+</button>' : '') +
           '</div></div></div>';
       }).join('');
+      drawMusic();
       drawStatus();
     }
-    function save() { return Promise.all([T.store.set('photos', photos), T.store.set('meta', meta)]).then(drawStatus); }
+    function save() { return Promise.all([T.store.set('photos', photos), T.store.set('meta', meta), T.store.set('music', music)]).then(drawStatus); }
+
+    /* ----- background music ----- */
+    function drawMusic() {
+      function pick(key, zh, en) {
+        var opts = T.tunes.map(function (t) { return [t[0], t[1] + ' · ' + t[2]]; }).concat(music.tracks.map(function (t) { return [t.src, t.name]; }));
+        return '<label><span>' + zh + ' · ' + en + '</span><select class="tu-field" data-m="' + key + '">' + opts.map(function (v) { return '<option value="' + esc(v[0]) + '"' + (music[key] === v[0] ? ' selected' : '') + '>' + esc(v[1]) + '</option>'; }).join('') + '</select></label>';
+      }
+      musicBox.innerHTML = '<div class="tu-musicbox__h">' + T.bi('背景音乐', 'Background music') + '</div><div class="tu-musicbox__grid">' +
+        pick('album', '整部相册', 'Whole album') + pick('cake', '吹完蜡烛之后', 'After the candles') +
+        '<label><span>音量 · Volume</span><input type="range" min="0" max="100" value="' + Math.round(music.volume * 100) + '" data-m="volume"></label></div>' +
+        '<div class="tu-musicbox__tracks">' + music.tracks.map(function (t, i) {
+          return '<span class="tu-track">' + esc(t.name) + mini('试听', 'Listen', 'listen', '', ' data-i="' + i + '"') + mini('移除', 'Remove', 'deltrack', 'tu-mini--danger', ' data-i="' + i + '"') + '</span>';
+        }).join('') + mini('上传音乐', 'Upload a song', 'audio') + mini('停止试听', 'Stop', 'hush') + '</div>' +
+        '<div class="tu-musicbox__note">' + T.bi('请只上传你有权使用的音乐。两段八音盒旋律是公有领域的曲子。', 'Please upload only music you have the right to use. The two music-box tunes are in the public domain.', 'tu-body') + '</div>';
+    }
+    function addAudio(f) {
+      if (!f || !/^audio\//.test(f.type)) { note = ['这不是音频文件', 'That is not an audio file']; return drawStatus(); }
+      if (f.size > 20 * 1024 * 1024) { note = ['音乐文件不能超过 20 MB', 'A song can be at most 20 MB']; return drawStatus(); }
+      var rd = new FileReader();
+      rd.onload = function () { music.tracks.push({ name: f.name.replace(/\.[^.]+$/, '').slice(0, 40), src: String(rd.result) }); note = null; draw(); save(); };
+      rd.readAsDataURL(f);
+    }
+
+    /* ----- the note dialog: one line, handwriting, a small picture ----- */
+    function noteOf(i, j) { return j < 0 ? photos[i].note : photos[i].moreNotes[j]; }
+    function openNote(i, j) {
+      var cur = noteOf(i, j) || {};
+      dlg = { i: i, j: j, text: cur.text || '', strokes: (cur.strokes || []).map(function (s) { return s.slice(); }), image: cur.image || '' };
+      drawDlg();
+    }
+    function drawDlg() {
+      var old = root.querySelector('.tu-dlg'); if (old) old.parentNode.removeChild(old);
+      if (!dlg) return;
+      var p = photos[dlg.i], src = dlg.j < 0 ? p.src : p.more[dlg.j], el = document.createElement('div');
+      el.className = 'tu-dlg';
+      el.innerHTML = '<div class="tu-dlg__box" role="dialog" aria-modal="true" aria-label="照片寄语 Photo note"><div class="tu-dlg__head"><img alt="" src="' + esc(src) + '">' + T.bi(p.age + ' 岁 · 给这张照片的寄语', 'Age ' + p.age + ' · A note for this photo', 'tu-title') + '</div>' +
+        '<label><span>写一句话 · One line</span><input class="tu-field" data-d="text" maxlength="40" lang="zh-Hans" value="' + esc(dlg.text) + '"></label>' +
+        '<div class="tu-dlg__lab">手写寄语 · Handwriting<span>用手指、触控笔或鼠标写 · Write with a finger, pen or mouse</span></div>' +
+        '<div class="tu-pad">' + T.strokesSvg(dlg.strokes) + '</div>' +
+        '<div class="tu-slot__row">' + mini('撤销一笔', 'Undo a stroke', 'undo') + mini('清空手写', 'Clear', 'wipe') + '</div>' +
+        '<div class="tu-dlg__lab">配一张图 · A small picture<span>比如当年的画、奖状、小纸条 · A drawing, a certificate, a little note</span></div>' +
+        '<div class="tu-dlg__img">' + (dlg.image ? '<img alt="" src="' + esc(dlg.image) + '">' : '') + mini(dlg.image ? '换一张' : '选图片', dlg.image ? 'Replace' : 'Choose', 'noteimg') + (dlg.image ? mini('移除', 'Remove', 'noteimgdel', 'tu-mini--danger') : '') + '</div>' +
+        '<div class="tu-dlg__foot">' + mini('保存寄语', 'Save the note', 'notesave', 'tu-mini--go') + mini('取消', 'Cancel', 'noteno') + '</div></div>';
+      root.appendChild(el);
+      var pad = el.querySelector('.tu-pad'), live = null;
+      function at(e) { var r = pad.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / r.width * 1000), Math.round((e.clientY - r.top) / r.height * 500)]; }
+      function redraw() { pad.innerHTML = T.strokesSvg(dlg.strokes); }
+      pad.addEventListener('pointerdown', function (e) { e.preventDefault(); if (pad.setPointerCapture) { try { pad.setPointerCapture(e.pointerId); } catch (x) {} } live = at(e); dlg.strokes.push(live); redraw(); });
+      pad.addEventListener('pointermove', function (e) { if (!live) return; var q = at(e), n = live.length; if (Math.abs(q[0] - live[n - 2]) + Math.abs(q[1] - live[n - 1]) < 6) return; live.push(q[0], q[1]); redraw(); });
+      ['pointerup', 'pointercancel', 'pointerleave'].forEach(function (ev) { pad.addEventListener(ev, function () { live = null; }); });
+      el.querySelector('[data-d="text"]').addEventListener('input', function (e) { dlg.text = e.target.value; });
+    }
+    function saveNote() {
+      var n = { text: dlg.text.trim(), strokes: dlg.strokes.filter(function (s) { return s.length >= 2; }).slice(0, 60), image: dlg.image }, v = T.hasNote(n) ? n : null;
+      if (dlg.j < 0) photos[dlg.i].note = v; else photos[dlg.i].moreNotes[dlg.j] = v;
+      dlg = null; drawDlg(); note = null; draw(); save();
+    }
     function images(files) { return [].slice.call(files).filter(function (f) { return /^image\//.test(f.type); }); }
     function readAll(list, max, each) {
       var failed = 0;
@@ -684,11 +815,14 @@
       meta = { zh: (data.name && data.name.zh) || meta.zh, en: (data.name && data.name.en) || meta.en, avatars: { girl: img(av.girl), dad: img(av.dad), mom: img(av.mom) } };
       photos = T.photos.map(function (p) {
         var x = (data.photos || []).filter(function (r) { return r.age === p.age; })[0] || {};
-        return { age: p.age, zh: x.zh || p.zh, en: x.en || p.en, src: img(x.src), more: (x.more || []).map(img).filter(Boolean).slice(0, T.MAX_MORE) };
+        function clean(n) { return T.hasNote(n) ? { text: String(n.text || '').slice(0, 40), strokes: (n.strokes || []).slice(0, 60), image: img(n.image) } : null; }
+        var more = [], notes = [];
+        (x.more || []).forEach(function (v, k) { if (img(v) && more.length < T.MAX_MORE) { more.push(v); notes.push(clean((x.moreNotes || [])[k])); } });
+        return { age: p.age, zh: x.zh || p.zh, en: x.en || p.en, src: img(x.src), more: more, note: clean(x.note), moreNotes: notes };
       });
     }
     function exportPack() {
-      var text = '/* 十岁啦 相册包 — 放进网站的 album 文件夹，文件名保持 album.js */\nwindow.TENUP_ALBUM = ' + JSON.stringify({ v: 2, name: { zh: meta.zh, en: meta.en }, avatars: meta.avatars, photos: photos }) + ';\n';
+      var text = '/* 十岁啦 相册包 — 放进网站的 album 文件夹，文件名保持 album.js */\nwindow.TENUP_ALBUM = ' + JSON.stringify({ v: 3, name: { zh: meta.zh, en: meta.en }, avatars: meta.avatars, music: music, photos: photos }) + ';\n';
       var a = document.createElement('a'), url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
       a.href = url; a.download = 'album.js';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -701,7 +835,7 @@
         try {
           var t = String(rd.result), data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
           if (!data || !data.photos) throw new Error('shape');
-          fromData(data); note = null; draw(); save();
+          fromData(data); if (data.music) music = T.music.defaults(data.music); note = null; draw(); save();
         } catch (e) { note = ['这个文件不是相册包', 'That file is not an album file']; drawStatus(); }
       };
       rd.readAsText(f);
@@ -713,14 +847,25 @@
       if (act === 'pick' && sl) { target = i; file.click(); }
       else if (act === 'del' && sl) { photos[i].src = ''; note = null; draw(); save(); }
       else if (act === 'more' && sl) { moreTarget = i; moreFile.click(); }
-      else if (act === 'delmore' && sl) { photos[i].more.splice(+a.getAttribute('data-j'), 1); note = null; draw(); save(); }
+      else if (act === 'delmore' && sl) { photos[i].more.splice(+a.getAttribute('data-j'), 1); photos[i].moreNotes.splice(+a.getAttribute('data-j'), 1); note = null; draw(); save(); }
+      else if (act === 'note' && sl) openNote(i, +a.getAttribute('data-j'));
+      else if (act === 'undo') { dlg.strokes.pop(); drawDlg(); }
+      else if (act === 'wipe') { dlg.strokes = []; drawDlg(); }
+      else if (act === 'noteimg') q('[data-f="noteimg"]').click();
+      else if (act === 'noteimgdel') { dlg.image = ''; drawDlg(); }
+      else if (act === 'notesave') saveNote();
+      else if (act === 'noteno') { dlg = null; drawDlg(); }
+      else if (act === 'audio') q('[data-f="audio"]').click();
+      else if (act === 'listen') T.music.play(music.tracks[+a.getAttribute('data-i')].src);
+      else if (act === 'hush') T.music.stop();
+      else if (act === 'deltrack') { var gone = music.tracks.splice(+a.getAttribute('data-i'), 1)[0]; ['album', 'cake'].forEach(function (k) { if (music[k] === gone.src) music[k] = ''; }); T.music.stop(); note = null; draw(); save(); }
       else if (act === 'avatar') { avatarTarget = a.getAttribute('data-who'); avFile.click(); }
       else if (act === 'delavatar') { meta.avatars[a.getAttribute('data-who')] = ''; note = null; draw(); save(); }
       else if (act === 'export') exportPack();
       else if (act === 'import') pack.click();
       else if (act === 'clear') {
         if (!window.confirm('清空全部照片和说明？这一步不能撤销。\nClear all photos and captions? This cannot be undone.')) return;
-        photos = blank(); meta.avatars = {}; note = null; draw(); save();
+        photos = blank(); meta.avatars = {}; music = T.music.defaults(); note = null; draw(); save();
       }
     });
     root.addEventListener('change', function (e) {
@@ -729,6 +874,13 @@
       else if (n) { meta[n] = t.value.trim(); note = null; save(); }
       else if (f === 'cover') { addCovers(t.files, target); target = null; t.value = ''; }
       else if (f === 'more') { if (moreTarget != null) addMore(t.files, moreTarget); moreTarget = null; t.value = ''; }
+      else if (f === 'noteimg') { var nf = t.files[0]; t.value = ''; if (nf && dlg) T.readImage(nf, 900).then(function (src) { dlg.image = src; drawDlg(); }, function () {}); }
+      else if (f === 'audio') { addAudio(t.files[0]); t.value = ''; }
+      else if (t.getAttribute('data-m')) {
+        var mk = t.getAttribute('data-m');
+        if (mk === 'volume') { music.volume = +t.value / 100; T.music.volume(music.volume); } else { music[mk] = t.value; T.music.play(t.value); }
+        note = null; save();
+      }
       else if (f === 'avatar') {
         var who = avatarTarget, pick = t.files[0]; avatarTarget = null; t.value = '';
         if (who && pick) T.readImage(pick, 480).then(function (src) { meta.avatars[who] = src; note = null; draw(); save(); }, function () { note = ['这张读不出来，换一张试试', 'That one could not be read — try another']; drawStatus(); });
@@ -752,7 +904,8 @@
     });
 
     function reload() {
-      return Promise.all([T.store.get('photos'), T.store.get('meta')]).then(function (r) {
+      return Promise.all([T.store.get('photos'), T.store.get('meta'), T.store.get('music')]).then(function (r) {
+        music = T.music.defaults(r[2]);
         if (r[1]) meta = { zh: r[1].zh || '', en: r[1].en || '', avatars: r[1].avatars || {} };
         if (r[0]) fromData({ name: meta, avatars: meta.avatars, photos: r[0] });
         draw();
@@ -764,7 +917,7 @@
         if (o.account !== false) T.account(root.querySelector('.tu-mgr'));
         root.querySelector('.tu-mgr__help').innerHTML = T.bi('照片加密保存在家里的服务器上。所有登录过的设备都能上传和整理，改动几秒钟内自动同步。', 'Photos are kept sealed on the family server. Every logged-in device can add and arrange them, and changes reach the others within seconds.', 'tu-body');
         /* another device changed the album: show it, unless someone is typing here right now */
-        T.cloud.onChange(function (remote) { if (!remote) return drawStatus(); if (/^(INPUT|TEXTAREA)$/.test((document.activeElement || {}).tagName || '')) return; reload(); });
+        T.cloud.onChange(function (remote) { if (!remote) return drawStatus(); if (dlg || /^(INPUT|TEXTAREA|SELECT)$/.test((document.activeElement || {}).tagName || '')) return; reload(); });
       }
       return reload();
     });

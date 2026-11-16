@@ -96,7 +96,7 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   r = await a.call('POST', '/api/phone/change/confirm', { code: '111111', newPhone: '13900000009' }); ok('…a wrong code changes nothing', r.status === 400);
   r = await a.call('POST', '/api/phone/change/confirm', { code: codes()[n3], newPhone: '13900000009' }); ok('…the right code sends one to the new number', r.status === 200 && r.json.sentTo === '•••• 0009', r.json);
   r = await a.call('POST', '/api/phone/change/finish', { code: codes()[n3 + 1] }); ok('…and the new number is saved', r.status === 200 && r.json.phones[0] === '•••• 0009', r.json);
-  r = await b.call('POST', '/api/phone/change/start', { which: 0 }); ok('a device without a session cannot start a number change', r.status === 401);
+  r = await client('9.9.9.10').call('POST', '/api/phone/change/start', { which: 0 }); ok('a device without a session cannot start a number change', r.status === 401);
 
   await stop(); await start(FAST);
   r = await a.call('GET', '/api/state'); ok('after a restart the data is locked', r.json.state === 'locked');

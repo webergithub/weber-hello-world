@@ -16,7 +16,7 @@
   var photos = T.photos, mode = null, screen = 'opening', focus = 0, cur = 0, opened = false, blown = false, mood = 'happy';
   var year = null;      /* inside one year's album: the photos of that year, else null */
   var nameAt = 0;       /* which name of the ages is showing */
-  var gal = null, timer = null, camOn = false;
+  var gal = null, timer = null, camOn = false, music = T.music.defaults();
   var watch = CFG.watch || { photoMs: 4500, chapterMs: 12000 };
 
   /* ---------- fit the 1920×1080 stage into the window, letterboxed ---------- */
@@ -84,10 +84,10 @@
       if (year) {
         var p = photos[cur];
         return '<div class="x x-yearroom"></div><div class="x x-head">' + T.bi(p.age + ' 岁这一年', 'The year you were ' + p.age, 'tu-title') + '<span id="yr"></span></div>' +
-          '<div id="gal"></div>' + cueRow() + hint([['← →', '翻页', 'Browse'], ['↑', '回到相册', 'Back']]);
+          '<div id="gal"></div><div class="x x-note" id="note"></div>' + cueRow() + hint([['← →', '翻页', 'Browse'], ['↑', '回到相册', 'Back']]);
       }
       return '<div class="x x-head">' + T.bi('看，你是这样一点点长大的', 'Look how you grew, little by little', 'tu-title') + '<span id="yr"></span></div>' +
-        '<div class="x x-corner x-mood">' + mascot() + '</div><div id="gal"></div>' +
+        '<div class="x x-corner x-mood">' + mascot() + '</div><div id="gal"></div><div class="x x-note" id="note"></div>' +
         '<div class="x x-rail" id="rail"></div>' + cueRow() +
         hint(mode === 'watch' ? [['← →', '翻页', 'Browse'], ['↓', '这一年', 'This year'], NEXT] : [NEXT]);
     },
@@ -119,7 +119,8 @@
   };
 
   function onAlbum(i, p) {
-    var r = document.getElementById('rail'), y = document.getElementById('yr');
+    var r = document.getElementById('rail'), y = document.getElementById('yr'), n = document.getElementById('note');
+    if (n) n.innerHTML = T.noteCard(p.note);
     if (year) {
       if (y) y.innerHTML = T.bi(p.zh + ' · 第 ' + (i + 1) + ' / ' + year.length + ' 张', p.en + ' · photo ' + (i + 1) + ' of ' + year.length, 'tu-body');
       return;
@@ -169,6 +170,7 @@
     }
     if (screen === 'names') drawName();
     if (camOn) Sense.arm(cuesNow().map(function (c) { return c.id; }));
+    if (mode) tune();
     schedule();
   }
   function go(s) {
@@ -202,6 +204,12 @@
     });
   }
   function stopCamera() { if (Sense) Sense.stop(); camOn = false; stage.classList.remove('has-cam'); }
+
+  /* ---------- music ---------- */
+  function tune() {
+    T.music.volume(music.volume);
+    T.music.play(screen === 'opening' ? '' : (screen === 'cake' && blown) || screen === 'names' ? (music.cake || music.album) : music.album);
+  }
 
   /* ---------- actions ---------- */
   function ok() {
@@ -271,6 +279,7 @@
     else if (k === 38) { exitYear(); e.preventDefault(); }
     else if (k === 13 || k === 32) { if (year) exitYear(); else ok(); e.preventDefault(); }
     else if (k === 10009 || k === 27 || k === 8 || k === 4) { back(); e.preventDefault(); }
+    else if (k === 77) { T.toast(stage, T.music.mute() ? '音乐已静音' : '音乐已打开', T.music.muted ? 'Music muted' : 'Music on'); }
     else if (k === 70) {
       var d = document, el = d.documentElement;
       try { if (d.fullscreenElement) d.exitFullscreen(); else if (el.requestFullscreen) el.requestFullscreen(); } catch (err) {}
@@ -301,8 +310,9 @@
   }
   function loadAlbum() {
     var file = window.TENUP_ALBUM || null;
-    return Promise.all([T.store.get('photos'), T.store.get('meta')]).then(function (r) {
+    return Promise.all([T.store.get('photos'), T.store.get('meta'), T.store.get('music')]).then(function (r) {
       var saved = r[0] || [], meta = r[1] || {}, fname = (file && file.name) || {};
+      music = T.music.defaults(r[2] || (file && file.music));
       if (meta.zh || fname.zh) name.zh = meta.zh || fname.zh;
       if (meta.en || fname.en) name.en = meta.en || fname.en;
       var a = meta.avatars || {}, b = (file && file.avatars) || {};
@@ -310,7 +320,9 @@
       function pick(list, age) { return (list || []).filter(function (x) { return x.age === age; })[0] || {}; }
       return probe(T.photos.map(function (p) {
         var s = pick(saved, p.age), f = pick(file && file.photos, p.age);
-        return { age: p.age, zh: s.zh || f.zh || p.zh, en: s.en || f.en || p.en, src: s.src || f.src || '', more: (s.more && s.more.length ? s.more : f.more || []).slice(0, T.MAX_MORE) };
+        var own = s.more && s.more.length;
+        return { age: p.age, zh: s.zh || f.zh || p.zh, en: s.en || f.en || p.en, src: s.src || f.src || '', note: s.src ? s.note || null : f.note || null,
+          more: (own ? s.more : f.more || []).slice(0, T.MAX_MORE), moreNotes: (own ? s.moreNotes : f.moreNotes) || [] };
       }));
     });
   }
