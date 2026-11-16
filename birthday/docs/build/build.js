@@ -6,6 +6,13 @@ const here = __dirname, out = path.join(here, '..');
 const S = require('./status.js'), D = require('./content.js')(S);
 const TITLE = '十岁啦 · 成长相册', SUB = '需求与设计文档';
 const shot = f => path.join(here, 'shots', f);
+/* width and height of a JPEG, read from its header, scaled to fit the page */
+function fitSize(file) {
+  const d = fs.readFileSync(file); let i = 2, w = 16, h = 9;
+  while (i < d.length) { if (d[i] !== 0xFF) { i++; continue; } const m = d[i + 1]; if (m >= 0xC0 && m <= 0xCF && m !== 0xC4 && m !== 0xC8 && m !== 0xCC) { h = d.readUInt16BE(i + 5); w = d.readUInt16BE(i + 7); break; } i += 2 + d.readUInt16BE(i + 2); }
+  const k = Math.min(620 / w, 430 / h);
+  return { width: Math.round(w * k), height: Math.round(h * k) };
+}
 
 /* ---------- inline marks: **bold**, `code` ---------- */
 function parts(s) {
@@ -111,7 +118,7 @@ function docxDoc() {
     else if (b.t === 'ul' || b.t === 'ol') b.x.forEach(x => kids.push(new Paragraph({ numbering: { reference: b.t === 'ul' ? 'bul' : 'num', level: 0 }, spacing: { before: 40, after: 40, line: 340 }, children: runs(x) })));
     else if (b.t === 'table') { kids.push(tableOf(b)); kids.push(new Paragraph({ spacing: { before: 0, after: 120 }, children: [] })); }
     else if (b.t === 'img') {
-      kids.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 200, after: 60 }, children: [new ImageRun({ type: 'jpg', data: fs.readFileSync(shot(b.f)), transformation: { width: 620, height: Math.round(620 * (b.f === 'manage.jpg' ? 860 / 1280 : 9 / 16)) } })] }));
+      kids.push(new Paragraph({ alignment: AlignmentType.CENTER, keepNext: true, spacing: { before: 200, after: 60 }, children: [new ImageRun({ type: 'jpg', data: fs.readFileSync(shot(b.f)), transformation: fitSize(shot(b.f)) })] }));
       kids.push(new Paragraph({ alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 }, children: [new TextRun({ text: b.cap, font: FONT, size: 18, color: MUTED })] }));
     }
   }
