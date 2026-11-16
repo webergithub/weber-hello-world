@@ -1,0 +1,7 @@
+{
+  "name": "tenup-birthday-album",
+  "private": true,
+  "version": "1.0.0",
+  "type": "commonjs",
+  "description": "十岁啦 成长相册 — static site, docs builder and album server"
+}
