@@ -43,6 +43,20 @@
     smile: '<circle cx="24" cy="24" r="19"/><path d="M15 27c2 6 16 6 18 0"/><path d="M17 18v2M31 18v2"/>',
     cry: '<circle cx="24" cy="24" r="19"/><path d="M16 33c3-5 13-5 16 0"/><path d="M17 18v2M31 18v2"/><path d="M33 25c2 3 2 5 0 6c-2-1-2-3 0-6z" fill="currentColor"/>',
     wave: '<path d="M16 26V12M22 24V8M28 24V9M34 27V14"/><path d="M16 26l-5-5c-2-2-5 1-3 3l7 12c3 5 8 7 13 6c5-1 7-6 6-12V14"/><path d="M40 6c3 2 4 5 4 8M4 30c0 3 1 6 3 8"/>',
+    swipe: '<g transform="translate(7 -3) scale(.78)" stroke-width="5"><path d="M16 26V12M22 24V8M28 24V9M34 27V14"/><path d="M16 26l-5-5c-2-2-5 1-3 3l7 12c3 5 8 7 13 6c5-1 7-6 6-12V14"/></g><path d="M40 42H9M15 36l-6 6l6 5"/>',
+    palms: '<g transform="translate(-4 8) scale(.62)" stroke-width="6"><path d="M16 26V12M22 24V8M28 24V9M34 27V14"/><path d="M16 26l-5-5c-2-2-5 1-3 3l7 12c3 5 8 7 13 6c5-1 7-6 6-12V14"/></g><g transform="translate(52 8) scale(-.62 .62)" stroke-width="6"><path d="M16 26V12M22 24V8M28 24V9M34 27V14"/><path d="M16 26l-5-5c-2-2-5 1-3 3l7 12c3 5 8 7 13 6c5-1 7-6 6-12V14"/></g>',
+    fist: '<path d="M12 23c0-5 6-5 6 0M18 22c0-6 6-6 6 0M24 22c0-6 6-6 6 0M30 23c0-5 6-5 6 0"/><path d="M12 23v8c0 8 5 12 12 12s12-5 12-12v-8"/><path d="M12 30c5-4 10-3 13 1"/>',
+    /* pictures for the names of the ages */
+    book: '<path d="M24 12c-5-4-12-4-18-2v28c6-2 13-2 18 2c5-4 12-4 18-2V10c-6-2-13-2-18 2z"/><path d="M24 12v28"/>',
+    bud: '<path d="M24 44V24"/><path d="M24 24c-7-3-8-12 0-19c8 7 7 16 0 19z"/><path d="M24 36c-6 0-10-3-11-8c6 0 10 3 11 8zM24 32c5 0 8-3 9-7c-5 0-8 3-9 7z"/>',
+    hairpin: '<circle cx="24" cy="15" r="9"/><path d="M9 45c0-13 6-21 15-21s15 8 15 21"/><path d="M7 9l33 9"/><circle cx="42" cy="19" r="3" fill="currentColor"/>',
+    cap: '<path d="M13 34V21c0-9 22-9 22 0v13"/><path d="M8 34h32M5 23h38"/><path d="M19 34v8M29 34v8"/>',
+    stand: '<circle cx="24" cy="9" r="5"/><path d="M24 15v15M24 20l-10 6M24 20l10 6M24 30l-8 12M24 30l8 12M6 43h36"/>',
+    compass: '<circle cx="24" cy="24" r="19"/><path d="M31 17l-4 10l-10 4l4-10z"/><path d="M24 5v4M24 39v4M5 24h4M39 24h4"/>',
+    skystar: '<path d="M24 4l3 7l8 1l-6 5l2 8l-7-4l-7 4l2-8l-6-5l8-1z"/><path d="M4 43l11-13l7 7l6-6l16 12z"/>',
+    cycle: '<circle cx="24" cy="24" r="19"/><circle cx="24" cy="24" r="5"/><path d="M24 5v6M24 37v6M5 24h6M37 24h6M10.5 10.5l4 4M33.5 33.5l4 4M37.5 10.5l-4 4M14.5 33.5l-4 4"/>',
+    pine: '<path d="M24 4L13 18h6L9 30h9L8 40h32L30 30h9L29 18h6z"/><path d="M24 40v5"/>',
+    peach: '<path d="M24 43C9 39 6 23 16 15c3-2 6-2 8 0c2-2 5-2 8 0c10 8 7 24-8 28z"/><path d="M24 15c0-5 3-9 9-10c0 5-3 9-9 10zM24 15v14"/>',
     heart: '<path d="M24 41C10 31 5 24 5 16c0-10 13-13 19-4c6-9 19-6 19 4c0 8-5 15-19 25z"/>',
     arms: '<circle cx="24" cy="12" r="5"/><path d="M24 18v14M24 22L11 7M24 22L37 7M24 32l-8 12M24 32l8 12"/>',
     blow: '<circle cx="18" cy="24" r="14"/><circle cx="23" cy="28" r="3"/><path d="M13 19v2M22 19v2M36 20h8M37 27h9M36 34h6"/>',
@@ -173,25 +187,35 @@
     var b = kind === 'watch';
     return '<button type="button" class="tu-mode' + (b ? ' tu-mode--b' : '') + (cls ? ' ' + cls : '') + '" data-act="mode" data-mode="' + (b ? 'watch' : 'interactive') + '">' +
       '<span class="tu-mode__ico">' + T.icon(b ? 'play' : 'camera') + '</span>' +
-      (b ? T.bi('观看模式', 'Just watch', 'tu-label') + T.bi('坐好啦，照片自己播放', 'Sit back — the photos play by themselves', 'tu-body')
+      (b ? T.bi('观看模式', 'Just watch', 'tu-label') + T.bi('和爸爸妈妈靠在一起，慢慢看', 'Snuggle up with Mom and Dad and just watch', 'tu-body')
          : T.bi('互动模式', 'Interactive', 'tu-label') + T.bi('对着镜头笑一笑、挥挥手、摆个姿势', 'Smile, wave or strike a pose for the camera', 'tu-body')) +
       '</button>';
   };
+  /* The album's gestures. Other chapters arm a subset; inside one year's album it is swipe + fist. */
   T.cues = [
     { id: 'smile', icon: 'smile', zh: '笑一笑', en: 'Smile', does: ['撒彩带', 'Confetti'] },
     { id: 'cry', icon: 'cry', zh: '装哭脸', en: 'Sad face', does: ['求抱抱', 'Gets a hug'] },
-    { id: 'wave', icon: 'wave', zh: '挥挥手', en: 'Wave', does: ['下一张', 'Next photo'] },
+    { id: 'swipe', icon: 'swipe', zh: '向左挥手', en: 'Swipe left', does: ['下一张', 'Next photo'] },
     { id: 'heart', icon: 'heart', zh: '比个心', en: 'Heart hands', does: ['送爱心', 'Hearts'] },
-    { id: 'arms', icon: 'arms', zh: '举高手', en: 'Arms up', does: ['去许愿', 'To the cake'] }
+    { id: 'palms', icon: 'palms', zh: '张开双手', en: 'Both palms open', does: ['看这一年', 'This year\u2019s photos'] }
   ];
+  T.yearCues = [
+    { id: 'swipe', icon: 'swipe', zh: '向左挥手', en: 'Swipe left', does: ['下一张', 'Next photo'] },
+    { id: 'fist', icon: 'fist', zh: '握个拳', en: 'Make a fist', does: ['回到相册', 'Back to the album'] }
+  ];
+  /* One year's photos: the cover first, then the extras. */
+  T.yearPhotos = function (p) {
+    return [p].concat((p.more || []).map(function (src) { return { age: p.age, zh: p.zh, en: p.en, src: src }; }));
+  };
   T.cue = function (c, o) {
     o = o || {};
     return '<button type="button" class="tu-cue' + (o.on ? ' is-on' : '') + '" data-act="cue" data-cue="' + c.id + '"' + (o.p != null ? ' style="--p:' + o.p + '"' : '') + '>' +
       '<span class="tu-cue__ico">' + T.icon(o.on ? 'check' : c.icon) + '</span>' + T.bi(o.on ? c.does[0] : c.zh, o.on ? c.does[1] : c.en) + '</button>';
   };
+  /* n: how many dots (labelled 0…n-1), or an array of labels */
   T.rail = function (cur, n) {
-    var h = '<div class="tu-rail" role="list">';
-    for (var i = 0; i < (n || 11); i++) h += '<span role="listitem" class="tu-rail__dot' + (i < cur ? ' is-done' : i === cur ? ' is-current' : '') + '" data-act="go" data-i="' + i + '"' + (i === cur ? ' aria-current="true"' : '') + '>' + i + '</span>';
+    var labels = n && n.length ? n : null, count = labels ? labels.length : (n || 11), h = '<div class="tu-rail" role="list">';
+    for (var i = 0; i < count; i++) h += '<span role="listitem" class="tu-rail__dot' + (i < cur ? ' is-done' : i === cur ? ' is-current' : '') + '" data-act="go" data-i="' + i + '"' + (i === cur ? ' aria-current="true"' : '') + '>' + (labels ? labels[i] : i) + '</span>';
     return h + '</div>';
   };
   T.gift = function (theme, open) {
@@ -200,16 +224,18 @@
       '<div class="tu-gift"><div class="tu-gift__f tu-gift__f--back"></div><div class="tu-gift__f tu-gift__f--left"></div><div class="tu-gift__f tu-gift__f--bottom"></div>' +
       '<div class="tu-gift__f tu-gift__f--right"></div><div class="tu-gift__f tu-gift__f--front"></div><div class="tu-gift__lid"><i></i></div></div></div>';
   };
-  T.ages = function (age) {
+  /* avatars: { girl, dad, mom } image URLs; a missing one shows its drawn icon as the placeholder */
+  T.ages = function (age, avatars) {
     age = age == null ? 10 : age;
-    function card(icon, n, plus, zh, en, nz, ne) {
-      return '<div class="tu-agecard"><span class="tu-agecard__chip">' + T.icon(icon) + '</span>' +
+    avatars = avatars || {};
+    function card(who, n, plus, zh, en, nz, ne) {
+      return '<div class="tu-agecard"><span class="tu-agecard__chip">' + (avatars[who] ? '<img alt="" src="' + esc(avatars[who]) + '">' : T.icon(who)) + '</span>' +
         '<div class="tu-agecard__n">' + n + (plus ? '<small>' + plus + '</small>' : '') + '</div>' +
         T.bi(zh, en, 'tu-label tu-bi--center') + T.bi(nz, ne, 'tu-body tu-bi--center') + '</div>';
     }
     return '<div class="tu-ages">' +
-      card('girl', age, '', '你', 'You', '今天满 ' + age + ' 岁', 'Turning ' + age + ' today') +
-      card('dad', age, '', '爸爸', 'Dad', '你出生那天，他才当上爸爸', 'He became a dad the day you were born') +
+      card('girl', age, '', '你', 'You', '今天，你十岁啦', 'Today you turn ten!') +
+      card('dad', age, '', '爸爸', 'Dad', '你来那天，他才学着当爸爸', 'He began learning to be a dad the day you came') +
       card('mom', age + 1, '+1', '妈妈', 'Mom', '你在妈妈肚子里住了十个月', 'You lived in her tummy for ten months first') + '</div>';
   };
   T.together = function () {
@@ -219,9 +245,9 @@
         (nz ? T.bi(nz, ne, 'tu-body tu-together__note') : '') + '</div></div>';
     }
     return '<div class="tu-together">' +
-      row('0 – 10 岁', 'Ages 0–10', 100, '十年，天天在一起', 'Ten years, together every day') +
-      row('10 – 20 岁', 'Ages 10–20', 50, '大约五年', 'About five years', '你要上学，还会有自己的好朋友', 'You have school, and good friends of your own') +
-      row('上大学、工作以后', 'University, then work', 34, '', '', '会慢慢变少，就像爸爸妈妈和外公外婆、爷爷奶奶', 'A little less each year — like Mom and Dad with your grandparents') + '</div>';
+      row('0 – 10 岁', 'Ages 0–10', 100, '三千六百多天，天天在一起', 'More than 3,600 days, together every day') +
+      row('10 – 20 岁', 'Ages 10–20', 50, '大约五年', 'About five years', '你会去上学，也会交到好多好朋友', 'You will be at school, making lots of good friends') +
+      row('上大学、工作以后', 'University, then work', 34, '', '', '你会越飞越远，就像爸爸妈妈离开爷爷奶奶、外公外婆', 'You will fly farther — as Mom and Dad did from your grandparents') + '</div>';
   };
   T.cake = function (out, n) {
     var c = '';
@@ -233,6 +259,41 @@
     return '<div class="tu-hint">' + items.map(function (it) {
       return '<span class="tu-hint__i"><span class="tu-key">' + it[0] + '</span>' + T.bi(it[1], it[2]) + '</span>';
     }).join('') + '</div>';
+  };
+
+
+  /* ---------- the names of the ages 年岁的名字 ----------
+     Traditional Chinese names for the stages of life, from ten onwards. `who` marks a name used for girls or for boys. */
+  T.ageNames = [
+    { age: 10, zh: '幼学', py: 'Yòuxué', en: 'The age to begin learning', icon: 'book',
+      mz: '十岁，开始上学读书的年纪', me: 'Ten: the age to start school and study', fz: '出自《礼记》：人生十年曰幼，学', fe: 'From the Book of Rites' },
+    { age: 13, zh: '豆蔻', py: 'Dòukòu', en: 'The cardamom bud', icon: 'bud', who: ['女孩', 'Girls'],
+      mz: '十三岁的女孩，像枝头刚冒出的花苞', me: 'A girl of thirteen, like a bud just showing on the branch', fz: '出自唐代杜牧的诗', fe: 'From a Tang poem by Du Mu' },
+    { age: 15, zh: '及笄', py: 'Jíjī', en: 'The hairpin age', icon: 'hairpin', who: ['女孩', 'Girls'],
+      mz: '十五岁的女孩把头发盘起，插上发簪，表示长大了', me: 'At fifteen a girl pins up her hair — a sign of growing up', fz: '出自《礼记》：十有五年而笄', fe: 'From the Book of Rites' },
+    { age: 20, zh: '弱冠', py: 'Ruòguàn', en: 'The capping age', icon: 'cap', who: ['男孩', 'Boys'],
+      mz: '二十岁的男孩戴上帽子，成为大人；女孩二十岁叫“桃李年华”', me: 'At twenty a young man is capped as an adult; for a young woman it is “the peach-and-plum years”', fz: '出自《礼记》：二十曰弱，冠', fe: 'From the Book of Rites' },
+    { age: 30, zh: '而立', py: 'Érlì', en: 'Standing firm', icon: 'stand',
+      mz: '三十岁，能靠自己站稳了', me: 'Thirty: able to stand on your own feet', fz: '出自《论语》：三十而立', fe: 'From the Analects of Confucius' },
+    { age: 40, zh: '不惑', py: 'Búhuò', en: 'Free of doubt', icon: 'compass',
+      mz: '四十岁，遇到事情不再迷糊', me: 'Forty: no longer confused by things', fz: '出自《论语》：四十而不惑', fe: 'From the Analects of Confucius' },
+    { age: 50, zh: '知天命', py: 'Zhī tiānmìng', en: 'Knowing heaven’s will', icon: 'skystar',
+      mz: '五十岁，明白自己这一生该做什么', me: 'Fifty: understanding what your life is for', fz: '出自《论语》：五十而知天命', fe: 'From the Analects of Confucius' },
+    { age: 60, zh: '花甲', py: 'Huājiǎ', en: 'A full cycle', icon: 'cycle',
+      mz: '六十岁，古人记年份的六十个名字正好转完一圈', me: 'Sixty: the sixty year-names of the old calendar come full circle', fz: '来自干支纪年', fe: 'From the sixty-year calendar cycle' },
+    { age: 70, zh: '古稀', py: 'Gǔxī', en: 'Rare since ancient times', icon: 'pine',
+      mz: '七十岁，古时候能活到七十的人很少', me: 'Seventy: long ago, few people lived to seventy', fz: '出自唐代杜甫的诗：人生七十古来稀', fe: 'From a Tang poem by Du Fu' },
+    { age: 100, zh: '期颐', py: 'Qīyí', en: 'A hundred years', icon: 'peach',
+      mz: '一百岁，被大家好好照顾的年纪', me: 'One hundred: the age to be lovingly cared for', fz: '出自《礼记》：百年曰期，颐', fe: 'From the Book of Rites' }
+  ];
+  /* One name as a big card: picture, age, the name with pinyin and English, what it means, where it comes from. */
+  T.nameCard = function (i, here) {
+    var n = T.ageNames[i], wells = ['sky', 'sun', 'mint', 'grape', 'primary'];
+    return '<div class="tu-namecard"><div class="tu-namecard__pic tu-namecard__pic--' + wells[i % 5] + '">' + T.icon(n.icon) + T.age(n.age) + '</div>' +
+      '<div class="tu-namecard__txt"><div class="tu-namecard__tags">' +
+      (here ? '<span class="tu-namecard__tag tu-namecard__tag--here">' + T.bi('你在这里', 'You are here') + '</span>' : '') +
+      (n.who ? '<span class="tu-namecard__tag">' + T.bi(n.who[0], n.who[1]) + '</span>' : '') + '</div>' +
+      T.bi(n.zh, n.py + ' · ' + n.en, 'tu-hero tu-namecard__name') + T.bi(n.mz, n.me, 'tu-label tu-namecard__mean') + T.bi(n.fz, n.fe, 'tu-body') + '</div></div>';
   };
 
   /* ---------- three-up comparison (component previews) ---------- */
@@ -403,7 +464,7 @@
     return T.store.load().then(function (saved) {
       return T.photos.map(function (p) {
         var s = saved && saved.filter(function (x) { return x.age === p.age; })[0];
-        return s ? { age: p.age, zh: s.zh || p.zh, en: s.en || p.en, src: s.src || '' } : { age: p.age, zh: p.zh, en: p.en, src: '' };
+        return s ? { age: p.age, zh: s.zh || p.zh, en: s.en || p.en, src: s.src || '', more: s.more || [] } : { age: p.age, zh: p.zh, en: p.en, src: '', more: [] };
       });
     });
   };
@@ -423,6 +484,180 @@
       };
       img.onerror = function () { URL.revokeObjectURL(url); rej(new Error('cannot read image')); };
       img.src = url;
+    });
+  };
+
+
+  /* ---------- photo manager (phone / computer) ----------
+     T.manager(root, { playHref, defaultName }) — one cover photo per age plus up to T.MAX_MORE more per year,
+     captions in both languages, her name, album export / import. Everything stays in this browser. */
+  T.MAX_MORE = 8;
+  T.manager = function (root, o) {
+    o = o || {};
+    T.defs();
+    function blank() { return T.photos.map(function (p) { return { age: p.age, zh: p.zh, en: p.en, src: '', more: [] }; }); }
+    var photos = blank(), meta = { zh: (o.defaultName && o.defaultName.zh) || '', en: (o.defaultName && o.defaultName.en) || '', avatars: {} };
+    var WHO = [['girl', '她', 'Her'], ['dad', '爸爸', 'Dad'], ['mom', '妈妈', 'Mom']], avatarTarget = null;
+    var target = null, moreTarget = null, note = null;
+    function mini(zh, en, act, cls) { return '<button type="button" class="tu-mini ' + (cls || '') + '" data-act="' + act + '">' + zh + '<small>' + en + '</small></button>'; }
+
+    root.innerHTML = '<div class="tu-mgr"><div class="tu-mgr__head"><div class="tu-mgr__title">' +
+      T.bi('照片管理', 'Photo manager', 'tu-title') + T.bi('每个年龄一张封面，还可以再加这一年的更多照片', 'One cover photo per age, plus more photos from that year', 'tu-body') +
+      '</div><div class="tu-mgr__status" role="status"></div></div>' +
+      '<div class="tu-mgr__names"><label><span>孩子的名字或小名 · Her name (Chinese)</span><input class="tu-field" data-n="zh" maxlength="6" lang="zh-Hans"></label>' +
+      '<label><span>英文名 · Her name (English)</span><input class="tu-field" data-n="en" maxlength="14" lang="en"></label>' +
+      '<div class="tu-avatars"><span>头像（年龄那一页用）· Portraits for the ages page</span><div class="tu-avatars__row"></div></div></div>' +
+      '<label class="tu-drop">' + T.icon('upload') + T.bi('把封面照片拖到这里，或点一下选择（可多选）', 'Drop cover photos here, or tap to choose — several at once is fine') +
+      '<input type="file" data-f="cover" accept="image/*" multiple></label><div class="tu-slots"></div>' +
+      '<div class="tu-mgr__tools">' + (o.playHref ? '<a class="tu-mini tu-mini--go" href="' + esc(o.playHref) + '">去播放<small>Play the album</small></a>' : '') +
+      mini('导出相册包', 'Export album file', 'export') + mini('导入相册包', 'Import album file', 'import') + mini('全部清空', 'Clear everything', 'clear', 'tu-mini--danger') +
+      '<input type="file" data-f="more" accept="image/*" multiple><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
+      '<div class="tu-mgr__help">' + T.bi('照片只保存在这台设备的这个浏览器里，不会上传。要在另一台设备上播放：导出相册包，把下载到的 album.js 放进网站的 album 文件夹。',
+        'Photos stay in this browser on this device and are never uploaded. To play on another device, export the album file and put album.js into the site’s album folder.', 'tu-body') + '</div></div>';
+
+    function q(sel) { return root.querySelector(sel); }
+    var slots = q('.tu-slots'), drop = q('.tu-drop'), status = q('.tu-mgr__status');
+    var avRow = q('.tu-avatars__row'), avFile = q('[data-f="avatar"]'), file = q('[data-f="cover"]'), moreFile = q('[data-f="more"]'), pack = q('[data-f="pack"]'), nzh = q('[data-n="zh"]'), nen = q('[data-n="en"]');
+
+    function drawStatus() {
+      var n = photos.filter(function (p) { return p.src; }).length, m = 0, ok = T.store.persistent;
+      photos.forEach(function (p) { m += p.more.length; });
+      status.innerHTML = '<span>' + (note ? note[0] : '封面 ' + n + ' / ' + photos.length + ' · 更多照片 ' + m + ' 张' + (ok ? ' · 已保存在此浏览器' : ' · 仅本次打开有效')) + '</span>' +
+        '<span lang="en">' + (note ? note[1] : n + ' of ' + photos.length + ' covers · ' + m + ' more' + (ok ? ' · saved in this browser' : ' · kept for this visit only')) + '</span>';
+    }
+    function draw() {
+      nzh.value = meta.zh || ''; nen.value = meta.en || '';
+      avRow.innerHTML = WHO.map(function (w) {
+        var src = meta.avatars[w[0]];
+        return '<span class="tu-avatar"><button type="button" class="tu-avatar__pic" data-act="avatar" data-who="' + w[0] + '" aria-label="选择头像 Choose a portrait: ' + w[2] + '">' +
+          (src ? '<img alt="" src="' + esc(src) + '">' : T.icon(w[0])) + '</button><span class="tu-avatar__name">' + w[1] + '<small lang="en">' + w[2] + '</small></span>' +
+          (src ? '<button type="button" class="tu-avatar__del" data-act="delavatar" data-who="' + w[0] + '" aria-label="移除头像 Remove portrait: ' + w[2] + '">×</button>' : '') + '</span>';
+      }).join('');
+      slots.innerHTML = photos.map(function (p, i) {
+        return '<div class="tu-slot" data-i="' + i + '"><span class="tu-slot__age">' + p.age + ' 岁<small>age ' + p.age + '</small></span>' +
+          '<div class="tu-slot__img" data-act="pick" title="选择封面 Choose the cover">' + (p.src ? '<img alt="" src="' + esc(p.src) + '">' : T.placeholder(p)) + '</div>' +
+          '<input class="tu-field" data-k="zh" lang="zh-Hans" aria-label="中文说明 Chinese caption，' + p.age + ' 岁" value="' + esc(p.zh) + '" maxlength="12">' +
+          '<input class="tu-field tu-field--en" data-k="en" lang="en" aria-label="English caption 英文说明, age ' + p.age + '" value="' + esc(p.en) + '" maxlength="28">' +
+          '<div class="tu-slot__row">' + mini(p.src ? '换封面' : '选封面', p.src ? 'Replace' : 'Choose', 'pick') +
+          '<button type="button" class="tu-mini tu-mini--danger" data-act="del"' + (p.src ? '' : ' disabled') + '>移除<small>Remove</small></button></div>' +
+          '<div class="tu-more"><span class="tu-more__h"><span lang="zh-Hans">这一年的更多照片 ' + p.more.length + ' / ' + T.MAX_MORE + '</span><span lang="en">More from this year</span></span><div class="tu-more__list">' +
+          p.more.map(function (src, j) {
+            return '<span class="tu-more__it"><img alt="" src="' + esc(src) + '"><button type="button" data-act="delmore" data-j="' + j + '" aria-label="移除这张 Remove this photo">×</button></span>';
+          }).join('') +
+          (p.more.length < T.MAX_MORE ? '<button type="button" class="tu-more__add" data-act="more" aria-label="添加更多照片 Add more photos, age ' + p.age + '">+</button>' : '') +
+          '</div></div></div>';
+      }).join('');
+      drawStatus();
+    }
+    function save() { return Promise.all([T.store.set('photos', photos), T.store.set('meta', meta)]).then(drawStatus); }
+    function images(files) { return [].slice.call(files).filter(function (f) { return /^image\//.test(f.type); }); }
+    function readAll(list, max, each) {
+      var failed = 0;
+      return list.reduce(function (chain, f, k) {
+        return chain.then(function () { return T.readImage(f, max).then(function (src) { each(src, k); }, function () { failed++; }); });
+      }, Promise.resolve()).then(function () { return failed; });
+    }
+    function busy(n) { note = ['正在处理 ' + n + ' 张…', 'Reading ' + n + ' photo(s)…']; drawStatus(); }
+    function done(failed, extra, fullZh, fullEn) {
+      note = failed ? [failed + ' 张读不出来，换一张试试', failed + ' could not be read — try another'] : extra > 0 ? [fullZh.replace('#', extra), fullEn.replace('#', extra)] : null;
+      draw(); save();
+    }
+    function addCovers(files, at) {
+      var list = images(files), order = [];
+      if (!list.length) { note = ['没有找到图片文件', 'No image files found']; drawStatus(); return; }
+      if (at != null) order.push(at);
+      photos.forEach(function (p, i) { if (!p.src && i !== at) order.push(i); });
+      busy(list.length);
+      readAll(list.slice(0, order.length), 1600, function (src, k) { photos[order[k]].src = src; }).then(function (failed) {
+        done(failed, list.length - order.length, '封面位满了，多出 # 张没有导入', 'All cover slots are full — # photo(s) were not imported');
+      });
+    }
+    function addMore(files, i) {
+      var list = images(files), room = T.MAX_MORE - photos[i].more.length;
+      if (!list.length) { note = ['没有找到图片文件', 'No image files found']; drawStatus(); return; }
+      busy(list.length);
+      readAll(list.slice(0, room), 1280, function (src) { photos[i].more.push(src); }).then(function (failed) {
+        done(failed, list.length - room, '这一年最多 ' + T.MAX_MORE + ' 张，多出 # 张没有导入', 'A year holds ' + T.MAX_MORE + ' — # photo(s) were not imported');
+      });
+    }
+    function fromData(data) {
+      function img(v) { return /^data:image\//.test(v || '') ? v : ''; }
+      var av = data.avatars || meta.avatars || {};
+      meta = { zh: (data.name && data.name.zh) || meta.zh, en: (data.name && data.name.en) || meta.en, avatars: { girl: img(av.girl), dad: img(av.dad), mom: img(av.mom) } };
+      photos = T.photos.map(function (p) {
+        var x = (data.photos || []).filter(function (r) { return r.age === p.age; })[0] || {};
+        return { age: p.age, zh: x.zh || p.zh, en: x.en || p.en, src: img(x.src), more: (x.more || []).map(img).filter(Boolean).slice(0, T.MAX_MORE) };
+      });
+    }
+    function exportPack() {
+      var text = '/* 十岁啦 相册包 — 放进网站的 album 文件夹，文件名保持 album.js */\nwindow.TENUP_ALBUM = ' + JSON.stringify({ v: 2, name: { zh: meta.zh, en: meta.en }, avatars: meta.avatars, photos: photos }) + ';\n';
+      var a = document.createElement('a'), url = URL.createObjectURL(new Blob([text], { type: 'text/javascript' }));
+      a.href = url; a.download = 'album.js';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      note = ['已导出 album.js，把它放进 album 文件夹', 'Exported album.js — put it into the album folder']; drawStatus();
+    }
+    function importPack(f) {
+      var rd = new FileReader();
+      rd.onload = function () {
+        try {
+          var t = String(rd.result), data = JSON.parse(t.slice(t.indexOf('{'), t.lastIndexOf('}') + 1));
+          if (!data || !data.photos) throw new Error('shape');
+          fromData(data); note = null; draw(); save();
+        } catch (e) { note = ['这个文件不是相册包', 'That file is not an album file']; drawStatus(); }
+      };
+      rd.readAsText(f);
+    }
+
+    root.addEventListener('click', function (e) {
+      var a = e.target.closest('[data-act]'); if (!a) return;
+      var act = a.getAttribute('data-act'), sl = e.target.closest('.tu-slot'), i = sl ? +sl.getAttribute('data-i') : -1;
+      if (act === 'pick' && sl) { target = i; file.click(); }
+      else if (act === 'del' && sl) { photos[i].src = ''; note = null; draw(); save(); }
+      else if (act === 'more' && sl) { moreTarget = i; moreFile.click(); }
+      else if (act === 'delmore' && sl) { photos[i].more.splice(+a.getAttribute('data-j'), 1); note = null; draw(); save(); }
+      else if (act === 'avatar') { avatarTarget = a.getAttribute('data-who'); avFile.click(); }
+      else if (act === 'delavatar') { meta.avatars[a.getAttribute('data-who')] = ''; note = null; draw(); save(); }
+      else if (act === 'export') exportPack();
+      else if (act === 'import') pack.click();
+      else if (act === 'clear') {
+        if (!window.confirm('清空全部照片和说明？这一步不能撤销。\nClear all photos and captions? This cannot be undone.')) return;
+        photos = blank(); meta.avatars = {}; note = null; draw(); save();
+      }
+    });
+    root.addEventListener('change', function (e) {
+      var t = e.target, sl = t.closest('.tu-slot'), k = t.getAttribute('data-k'), f = t.getAttribute('data-f'), n = t.getAttribute('data-n');
+      if (sl && k) { var i = +sl.getAttribute('data-i'); photos[i][k] = t.value.trim() || T.photos[i][k]; t.value = photos[i][k]; note = null; save(); }
+      else if (n) { meta[n] = t.value.trim(); note = null; save(); }
+      else if (f === 'cover') { addCovers(t.files, target); target = null; t.value = ''; }
+      else if (f === 'more') { if (moreTarget != null) addMore(t.files, moreTarget); moreTarget = null; t.value = ''; }
+      else if (f === 'avatar') {
+        var who = avatarTarget, pick = t.files[0]; avatarTarget = null; t.value = '';
+        if (who && pick) T.readImage(pick, 480).then(function (src) { meta.avatars[who] = src; note = null; draw(); save(); }, function () { note = ['这张读不出来，换一张试试', 'That one could not be read — try another']; drawStatus(); });
+      }
+      else if (f === 'pack') { if (t.files[0]) importPack(t.files[0]); t.value = ''; }
+    });
+    drop.addEventListener('click', function () { target = null; });
+    function mark(e) {
+      var more = e && e.target.closest ? e.target.closest('.tu-more') : null, sl = e && e.target.closest ? e.target.closest('.tu-slot') : null;
+      [].forEach.call(root.querySelectorAll('.is-over'), function (c) { c.classList.remove('is-over'); });
+      if (!e) return null;
+      if (more) more.classList.add('is-over'); else if (sl) sl.classList.add('is-over'); else drop.classList.add('is-over');
+      return { more: !!more, i: sl ? +sl.getAttribute('data-i') : null };
+    }
+    ['dragenter', 'dragover'].forEach(function (ev) { root.addEventListener(ev, function (e) { e.preventDefault(); mark(e); }); });
+    root.addEventListener('dragleave', function (e) { e.preventDefault(); if (!root.contains(e.relatedTarget)) mark(null); });
+    root.addEventListener('drop', function (e) {
+      e.preventDefault();
+      var at = mark(e); mark(null);
+      if (at.more) addMore(e.dataTransfer.files, at.i); else addCovers(e.dataTransfer.files, at.i);
+    });
+
+    draw();
+    Promise.all([T.store.get('photos'), T.store.get('meta')]).then(function (r) {
+      if (r[1]) meta = { zh: r[1].zh || '', en: r[1].en || '', avatars: r[1].avatars || {} };
+      if (r[0]) fromData({ name: meta, avatars: meta.avatars, photos: r[0] });
+      draw();
     });
   };
 

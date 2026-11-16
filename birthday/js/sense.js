@@ -1,20 +1,22 @@
 /* 十岁啦 · 摄像头识别 Camera sensing
    Face blendshapes + hand landmarks, all on this computer. Nothing is recorded or uploaded.
-   TenUpSense.start({ video, config, cpu, onProgress(id, 0–100), onFire(id), onScores(scores) }) → Promise
-   TenUpSense.arm(['smile', 'wave', …])   which gestures count right now
+   TenUpSense.start({ video, config, cpu, onProgress(id, 0–100), onFire(id, direction), onScores(scores) }) → Promise
+   TenUpSense.arm(['smile', 'swipe', …])   which gestures count right now
+   Held gestures (smile, cry, blow, heart, palms, fist, arms) fill a ring and fire when it is full.
+   'swipe' is a quick sideways move of one hand and fires at once with 'next' or 'prev'.
    TenUpSense.stop() */
 (function () {
   'use strict';
   var S = {}, face = null, hands = null, stream = null, timer = null, opt = null;
-  var armed = {}, prog = {}, coolUntil = {}, wristX = [], last = 0, lastFire = 0;
-  var IDS = ['smile', 'cry', 'blow', 'wave', 'heart', 'arms'];
+  var armed = {}, prog = {}, coolUntil = {}, track = [], swipeCool = 0, last = 0, lastFire = 0;
+  var IDS = ['smile', 'cry', 'blow', 'heart', 'palms', 'fist', 'arms'];
 
   function dist(a, b) { var dx = a.x - b.x, dy = a.y - b.y; return Math.sqrt(dx * dx + dy * dy); }
   function clamp(v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
   /* One frame → a 0–1 score per gesture. */
   S.score = function (fr, hr) {
-    var sc = { smile: 0, cry: 0, blow: 0, wave: 0, heart: 0, arms: 0 }, b = {}, i;
+    var sc = { smile: 0, cry: 0, blow: 0, heart: 0, palms: 0, fist: 0, arms: 0 }, b = {}, i;
     var hasFace = fr && fr.faceBlendshapes && fr.faceBlendshapes.length;
     if (hasFace) {
       var cats = fr.faceBlendshapes[0].categories;
@@ -28,43 +30,72 @@
       sc.cry = clamp(Math.max(frown * 2.4, pout * 0.9 + brow * 0.45) - smile * 1.5);
       sc.blow = clamp(pucker - smile);
     }
-    var H = (hr && hr.landmarks) || [], G = (hr && hr.gestures) || [], now = Date.now();
+    var H = (hr && hr.landmarks) || [], G = (hr && hr.gestures) || [];
     var headY = hasFace && fr.faceLandmarks && fr.faceLandmarks[0] ? fr.faceLandmarks[0][10].y : 0.3;
-    var up = 0, open = 0, love = 0, lead = null;
+    var up = 0, opens = [], fist = 0, love = 0;
     for (i = 0; i < H.length; i++) {
       var g = G[i] && G[i][0] ? G[i][0] : { categoryName: '', score: 0 };
       if (H[i][0].y < headY - 0.02 && H[i][9].y < headY) up++;
-      if (g.categoryName === 'Open_Palm') { open = Math.max(open, g.score); lead = H[i][0]; }
+      if (g.categoryName === 'Open_Palm') opens.push(g.score);
+      if (g.categoryName === 'Closed_Fist') fist = Math.max(fist, g.score);
       if (g.categoryName === 'ILoveYou') love = Math.max(love, g.score);
     }
     if (H.length >= 2) {
       var size = (dist(H[0][0], H[0][9]) + dist(H[1][0], H[1][9])) / 2 || 0.1;
       var gap = Math.max(dist(H[0][8], H[1][8]), dist(H[0][4], H[1][4])) / size;   /* index tips and thumb tips touching */
       sc.heart = clamp(1.5 - gap);
-      sc.arms = up >= 2 ? 1 : up === 1 ? 0.4 : 0;
-    } else {
-      sc.arms = 0;
+      sc.arms = up >= 2 ? 1 : 0;
+      /* both palms open, side by side: not raised over the head and not joined into a heart */
+      sc.palms = opens.length >= 2 && up < 2 && sc.heart < 0.5 ? Math.min(opens[0], opens[1]) : 0;
     }
     sc.heart = Math.max(sc.heart, love);
-    /* wave: an open palm, better still a moving one; not while both arms are up or the hands make a heart */
-    wristX = wristX.filter(function (p) { return now - p.t < 1200; });
-    if (lead) wristX.push({ t: now, x: lead.x });
-    var lo = 1, hi = 0;
-    for (i = 0; i < wristX.length; i++) { lo = Math.min(lo, wristX[i].x); hi = Math.max(hi, wristX[i].x); }
-    var sway = wristX.length > 2 ? clamp((hi - lo) / 0.12) : 0;
-    sc.wave = sc.arms >= 1 || sc.heart > 0.6 ? 0 : clamp(open * 0.75 + sway * 0.4);
+    /* one hand closing into a fist */
+    sc.fist = H.length === 1 ? fist : 0;
     return sc;
   };
+
+  /* Swipe: one open hand travelling sideways fast. Feed it the hand's position each frame (null when there is
+     no single open hand); it answers 'next', 'prev' or null. The camera image is not mirrored, so the child's
+     hand moving from HER right to HER left is x growing — that is 'next'. */
+  S.swipe = function (pt, now, cfg) {
+    cfg = cfg || {};
+    var win = cfg.windowMs || 600, need = cfg.distance || 0.22;
+    track = track.filter(function (p) { return now - p.t <= win; });
+    if (!pt) return null;
+    track.push({ t: now, x: pt.x, y: pt.y });
+    if (now < swipeCool || track.length < 2) return null;
+    var first = track[0], dx = pt.x - first.x, dy = pt.y - first.y;
+    if (Math.abs(dx) < need || Math.abs(dy) > Math.abs(dx) * 0.6) return null;
+    track = []; swipeCool = now + (cfg.cooldownMs || 1000);     /* the hand coming back must not count as a swipe the other way */
+    var next = dx > 0;
+    if (cfg.invert) next = !next;
+    return next ? 'next' : 'prev';
+  };
+  function oneOpenHand(hr) {
+    var H = (hr && hr.landmarks) || [], G = (hr && hr.gestures) || [];
+    if (H.length !== 1) return null;
+    if (G[0] && G[0][0] && G[0][0].categoryName === 'Closed_Fist') return null;
+    return H[0][9];
+  }
 
   function tick() {
     var v = opt.video, now = performance.now(), dt = last ? now - last : opt.config.intervalMs, sc;
     last = now;
     if (v.readyState < 2 || !v.videoWidth) return;
+    var hr, dir = null, t = Date.now();
     try {
-      sc = S.score(face.detectForVideo(v, now), hands.recognizeForVideo(v, now));
+      hr = hands.recognizeForVideo(v, now);
+      sc = S.score(face.detectForVideo(v, now), hr);
     } catch (e) { return; }
     if (opt.onScores) opt.onScores(sc);
-    var th = opt.config.thresholds, t = Date.now(), best = null;
+    if (armed.swipe && t - lastFire >= 900) dir = S.swipe(oneOpenHand(hr), t, opt.config.swipe);
+    if (dir) {
+      lastFire = t;
+      IDS.forEach(function (id) { if (prog[id]) { prog[id] = 0; opt.onProgress(id, 0); } });
+      opt.onFire('swipe', dir);
+      return;
+    }
+    var th = opt.config.thresholds, best = null;
     IDS.forEach(function (id) {
       if (!armed[id] || t < (coolUntil[id] || 0) || t - lastFire < 900) { if (prog[id]) { prog[id] = 0; opt.onProgress(id, 0); } return; }
       var p = prog[id] || 0;

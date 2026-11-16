@@ -22,6 +22,10 @@ window.TENUP_CONFIG = {
     cooldownMs: 4000,  /* 同一个动作触发后休息多久 */
 
     /* 每个动作的灵敏度，0–1，数字越小越容易触发。网址后面加 ?debug=1 可以看到实时分数来调。 */
-    thresholds: { smile: 0.5, cry: 0.45, blow: 0.5, wave: 0.6, heart: 0.6, arms: 0.6 }
+    thresholds: { smile: 0.5, cry: 0.45, blow: 0.5, heart: 0.6, palms: 0.6, fist: 0.6, arms: 0.6 },
+
+    /* 挥手翻页：一只手在 windowMs 毫秒内横向移动超过画面宽度的 distance 才算一次。
+       孩子的手从她的右边挥到左边 = 下一张；反方向 = 上一张。想反过来就把 invert 改成 true。 */
+    swipe: { distance: 0.22, windowMs: 600, cooldownMs: 1000, invert: false }
   }
 };

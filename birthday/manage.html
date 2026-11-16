@@ -4,30 +4,15 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>十岁啦 · 照片管理 Photo manager</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=ZCOOL+KuaiLe&family=Nunito:wght@600;700;800&display=swap">
+<link rel="stylesheet" href="css/fonts.css">
 <link rel="stylesheet" href="css/tokens.css">
 <link rel="stylesheet" href="css/tenup.css">
-<style>
-  html,body{margin:0;min-height:100%;background:var(--ground)}
-  .tu-mgr{max-width:1240px;margin:0 auto}
-  .m-names{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));grid-gap:14px;margin-bottom:18px;padding:16px;border-radius:var(--radius-md);background:var(--surface);box-shadow:var(--shadow-button)}
-  .m-names label{display:flex;flex-direction:column;font:800 15px/1.3 var(--font-body);color:var(--ink)}
-  .m-names label span{font-size:13px;font-weight:700;color:var(--ink-muted);margin-bottom:6px}
-  .m-tools{display:flex;flex-wrap:wrap;margin:22px -6px 0}
-  .m-tools>*{margin:6px}
-  .m-tools .tu-mini{flex:none;padding:10px 22px;font-size:16px;text-decoration:none}
-  .m-tools .tu-mini small{font-size:13px}
-  .m-tools .m-go{background:var(--primary);color:var(--on-primary);border-color:var(--primary);box-shadow:var(--shadow-button)}
-  .m-help{margin-top:14px}
-  #pack{position:absolute;width:1px;height:1px;opacity:0}
-</style>
+<style>html,body{margin:0;min-height:100%;background:var(--ground)}.tu-mgr{max-width:1240px;margin:0 auto}</style>
 </head>
 <body>
 <div id="root"></div>
 <script src="js/config.js"></script>
 <script src="js/tenup.js"></script>
-<script src="js/manage.js"></script>
+<script>TenUp.manager(document.getElementById("root"), { playHref: "index.html", defaultName: (window.TENUP_CONFIG || {}).name });</script>
 </body>
 </html>
