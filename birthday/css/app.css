@@ -1,0 +1,45 @@
+/* 十岁啦 · 页面布局 Page layout（方案 B 毛绒云朵）。组件样式在 tenup.css，颜色字体在 tokens.css。 */
+html,body{margin:0;height:100%;overflow:hidden;background:var(--ground);color:var(--ink);font-family:var(--font-body)}
+#fit{position:fixed;left:0;top:0;right:0;bottom:0;overflow:hidden}
+#stage{position:absolute;left:0;top:0;outline:none}
+#view{position:absolute;left:0;top:0;right:0;bottom:0}
+.x{position:absolute}
+.x-head{left:96px;top:54px;max-width:1150px}
+.x-head>*{display:flex}
+.x-head>*+*{margin-top:14px}
+.x-ask{left:96px;top:392px}
+.x-modes{left:96px;top:560px;display:flex}
+.x-modes>*+*{margin-left:48px}
+.x-mascot{right:120px;top:170px}
+.x-mascot .tu-mascot{width:440px;height:440px}
+.x-foot{right:96px;bottom:54px}
+.x-corner{right:96px;top:40px}
+.x-corner .tu-mascot{width:190px;height:190px}
+.has-cam .x-corner{right:300px}
+.x-rail{left:0;right:0;bottom:186px;display:flex;justify-content:center}
+.x-rail--low{bottom:70px;justify-content:flex-start;left:96px}
+.x-cues{left:96px;bottom:54px;display:flex}
+.x-cues>*+*{margin-left:18px}
+.x-center{left:0;right:0;display:flex;justify-content:center}
+.x-big.tu-hero{font-size:108px;max-width:900px}
+.x-col{left:96px;top:120px;width:900px;display:flex;flex-direction:column;align-items:flex-start}
+.x-col>*+*{margin-top:36px}
+.x-giftbox{right:200px;top:300px;transform:scale(1.15);transform-origin:50% 50%}
+.x-cakebox{right:170px;top:250px;transform:scale(1.2);transform-origin:50% 50%}
+.x-close .tu-hero{font-size:88px}
+.x-close .tu-hero>.en{font-size:42px}
+.x-fade{animation:x-in .6s ease both}
+@keyframes x-in{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+.tu-agecard__n{font-size:160px}
+
+/* camera bubble: the child sees herself, mirrored */
+#cam{position:absolute;right:96px;top:54px;width:170px;height:170px;z-index:40;display:none}
+.has-cam #cam{display:block}
+#cam::before{content:"";position:absolute;top:-12px;right:-12px;bottom:-12px;left:-12px;border-radius:50%;background:var(--photo-mat);filter:url(#tu-fur);box-shadow:var(--shadow-card)}
+.tu-lowfx #cam::before{filter:none}
+#cam video{position:absolute;left:0;top:0;width:100%;height:100%;border-radius:50%;object-fit:cover;transform:scaleX(-1);background:var(--ground-alt)}
+#cam .x-camnote{position:absolute;left:50%;top:186px;transform:translateX(-50%);white-space:nowrap;align-items:center;text-align:center;font-size:22px;font-weight:800;color:var(--ink-muted)}
+#cam .x-camnote .en{font-size:16px}
+
+#debug{position:absolute;right:96px;top:270px;z-index:70;padding:10px 14px;border-radius:12px;background:var(--surface);color:var(--ink);font:700 20px/1.5 monospace;white-space:pre;display:none}
+.is-debug #debug{display:block}

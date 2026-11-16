@@ -1,0 +1,91 @@
+/* 十岁啦 成长相册 — generated from tokens.json */
+:root, [data-theme="plush"] {
+  --ground: #f6ede3;
+  --ground-alt: #eedfd0;
+  --surface: #fffaf4;
+  --photo-mat: #fbf3ea;
+  --ink: #4a3b33;
+  --ink-muted: #75625a;
+  --outline: #967a66;
+  --primary: #e8a0b4;
+  --on-primary: #4a2a35;
+  --sky: #a8c8dc;
+  --sun: #f0cf8a;
+  --mint: #b5cfae;
+  --grape: #c9b8e0;
+  --on-pop: #4a3b33;
+  --focus: #a8415f;
+  --success: #2c6c78;
+  --danger: #a83a36;
+  --pattern: #ead9c8;
+  --scrim: rgba(74,59,51,0.45);
+  --shadow-card: 0 22px 44px rgba(120,84,60,0.22), inset 0 -12px 20px rgba(120,84,60,0.10), inset 0 12px 18px rgba(255,255,255,0.85);
+  --shadow-button: 0 10px 20px rgba(120,84,60,0.24), inset 0 -7px 12px rgba(120,84,60,0.14), inset 0 7px 10px rgba(255,255,255,0.75);
+  --shadow-focus: 0 0 0 5px #f6ede3, 0 0 0 12px #a8415f, 0 26px 44px rgba(120,84,60,0.28);
+}
+[data-theme="toon"] {
+  --ground: #fff4d6;
+  --ground-alt: #ffe38a;
+  --surface: #ffffff;
+  --photo-mat: #ffffff;
+  --ink: #1b1230;
+  --ink-muted: #5a4a72;
+  --outline: #1b1230;
+  --primary: #ff4f9a;
+  --on-primary: #1b1230;
+  --sky: #29b6f6;
+  --sun: #ffd23f;
+  --mint: #3ddc97;
+  --grape: #b388ff;
+  --on-pop: #1b1230;
+  --focus: #6a2cff;
+  --success: #00708c;
+  --danger: #c4002b;
+  --pattern: #ffc21a;
+  --scrim: rgba(27,18,48,0.55);
+  --shadow-card: 10px 10px 0 #1b1230;
+  --shadow-button: 6px 6px 0 #1b1230;
+  --shadow-focus: 0 0 0 5px #fff4d6, 0 0 0 12px #6a2cff, 16px 16px 0 6px #1b1230;
+}
+[data-theme="star"] {
+  --ground: #0d1030;
+  --ground-alt: #1a1f55;
+  --surface: #1c2156;
+  --photo-mat: #232a6b;
+  --ink: #f6f1ff;
+  --ink-muted: #b9b6de;
+  --outline: #6f78d6;
+  --primary: #ff7ac3;
+  --on-primary: #1a0b2e;
+  --sky: #5ee6ff;
+  --sun: #ffd76a;
+  --mint: #7dffc8;
+  --grape: #b69cff;
+  --on-pop: #0d1030;
+  --focus: #ffd76a;
+  --success: #5ee6ff;
+  --danger: #ff9a9a;
+  --pattern: #2a3180;
+  --scrim: rgba(5,6,24,0.7);
+  --shadow-card: 0 0 40px rgba(94,230,255,0.30), 0 28px 60px rgba(0,0,0,0.55);
+  --shadow-button: 0 0 26px rgba(255,122,195,0.45);
+  --shadow-focus: 0 0 0 5px #0d1030, 0 0 0 11px #ffd76a, 0 0 60px rgba(255,215,106,0.55);
+}
+:root {
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 40px;
+  --space-5: 48px;
+  --safe-y: 54px;
+  --safe-x: 96px;
+  --radius-sm: 12px;
+  --radius-md: 24px;
+  --radius-lg: 40px;
+  --radius-xl: 64px;
+  --radius-pill: 999px;
+  --font-display: "Lilita One", "ZCOOL KuaiLe", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-round: "Fredoka", "ZCOOL KuaiLe", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-stage: "Unbounded", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-body: "Nunito", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
