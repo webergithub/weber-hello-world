@@ -50,6 +50,8 @@
     root.innerHTML = T.mascot('plush', msg ? 'cry' : view === 'sms' || view === 'setupCodes' ? 'wow' : 'happy', 'tu-mascot--bob') +
       '<form class="lg__card" novalidate>' + VIEWS[view]() + (msg ? '<div class="lg__msg" role="alert">' + T.esc(msg) + '</div>' : '') + (okMsg ? '<div class="lg__ok" role="status">' + T.esc(okMsg) + '</div>' : '') + '</form>';
     var f = root.querySelector('[autofocus]'); if (f) f.focus();
+    var code = { setup: ['L01', '首次设置', 'First-time setup'], setupCodes: ['L02', '设置验证码', 'Setup codes'], password: ['L03', '输入密码', 'Password'], sms: ['L04', '短信验证', 'Text-message check'] }[view];
+    if (code) T.tag(code[0], code[1], code[2]);
   }
   function run(p, done) {
     busy = true; msg = null; okMsg = null;

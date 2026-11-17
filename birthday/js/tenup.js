@@ -56,6 +56,7 @@
     skystar: '<path d="M24 4l3 7l8 1l-6 5l2 8l-7-4l-7 4l2-8l-6-5l8-1z"/><path d="M4 43l11-13l7 7l6-6l16 12z"/>',
     cycle: '<circle cx="24" cy="24" r="19"/><circle cx="24" cy="24" r="5"/><path d="M24 5v6M24 37v6M5 24h6M37 24h6M10.5 10.5l4 4M33.5 33.5l4 4M37.5 10.5l-4 4M14.5 33.5l-4 4"/>',
     pine: '<path d="M24 4L13 18h6L9 30h9L8 40h32L30 30h9L29 18h6z"/><path d="M24 40v5"/>',
+    blossom: '<circle cx="24" cy="22" r="4.5"/><path d="M24 17.5c-3-7 3-12 6-8c2 3 0 6-6 8zM28.3 20.6c5-5 12-2 10 3c-1.5 3-5 3-10-3zM26.6 25.7c6 3 6 10 1 10c-3 0-4-4-1-10zM21.4 25.7c-6 3-6 10-1 10c3 0 4-4 1-10zM19.7 20.6c-5-5-12-2-10 3c1.5 3 5 3 10-3z"/><path d="M24 36v8M24 41c-4 0-7-2-8-5"/>',
     peach: '<path d="M24 43C9 39 6 23 16 15c3-2 6-2 8 0c2-2 5-2 8 0c10 8 7 24-8 28z"/><path d="M24 15c0-5 3-9 9-10c0 5-3 9-9 10zM24 15v14"/>',
     heart: '<path d="M24 41C10 31 5 24 5 16c0-10 13-13 19-4c6-9 19-6 19 4c0 8-5 15-19 25z"/>',
     arms: '<circle cx="24" cy="12" r="5"/><path d="M24 18v14M24 22L11 7M24 22L37 7M24 32l-8 12M24 32l8 12"/>',
@@ -167,6 +168,19 @@
   };
   T.mascotFor = function (theme, mood, cls) { return T.mascot(theme === 'plush' ? 'plush' : theme === 'star' ? 'star' : 'toon', mood, cls); };
 
+  /* ---------- screen codes ----------
+     Every main screen has a code and a name (P01 开场 …), listed in docs/screens.html. With ?labels or #labels in the
+     address, T.tag shows the current one in a corner so people can say which screen they mean. */
+  T.labels = /[?&#]labels\b/.test(location.search + location.hash);
+  T.tag = function (code, zh, en, host) {
+    if (!T.labels || !document.body) return;
+    var el = document.getElementById('tu-tag');
+    if (!el) { el = document.createElement('div'); el.id = 'tu-tag'; el.className = 'tu-tag'; }
+    var to = host || document.body;
+    if (el.parentNode !== to) to.appendChild(el);
+    el.innerHTML = '<b>' + esc(code) + '</b>' + T.bi(zh, en);
+  };
+
   /* ---------- markup builders ---------- */
   T.button = function (zh, en, o) {
     o = o || {};
@@ -271,8 +285,8 @@
       mz: '十三岁的女孩，像枝头刚冒出的花苞', me: 'A girl of thirteen, like a bud just showing on the branch', fz: '出自唐代杜牧的诗', fe: 'From a Tang poem by Du Mu' },
     { age: 15, zh: '及笄', py: 'Jíjī', en: 'The hairpin age', icon: 'hairpin', who: ['女孩', 'Girls'],
       mz: '十五岁的女孩把头发盘起，插上发簪，表示长大了', me: 'At fifteen a girl pins up her hair — a sign of growing up', fz: '出自《礼记》：十有五年而笄', fe: 'From the Book of Rites' },
-    { age: 20, zh: '弱冠', py: 'Ruòguàn', en: 'The capping age', icon: 'cap', who: ['男孩', 'Boys'],
-      mz: '二十岁的男孩戴上帽子，成为大人；女孩二十岁叫“桃李年华”', me: 'At twenty a young man is capped as an adult; for a young woman it is “the peach-and-plum years”', fz: '出自《礼记》：二十曰弱，冠', fe: 'From the Book of Rites' },
+    { age: 20, zh: '桃李年华', py: 'Táolǐ niánhuá', en: 'The peach-and-plum years', icon: 'blossom', who: ['女孩', 'Girls'],
+      mz: '二十岁的女孩，像春天里开满枝头的桃花和李花', me: 'A young woman of twenty, like peach and plum trees in full spring bloom', fz: '旧时对女子二十岁的美称', fe: 'A traditional name for a young woman of twenty' },
     { age: 30, zh: '而立', py: 'Érlì', en: 'Standing firm', icon: 'stand',
       mz: '三十岁，能靠自己站稳了', me: 'Thirty: able to stand on your own feet', fz: '出自《论语》：三十而立', fe: 'From the Analects of Confucius' },
     { age: 40, zh: '不惑', py: 'Búhuò', en: 'Free of doubt', icon: 'compass',
@@ -719,6 +733,7 @@
       }).join('');
       drawMusic();
       drawStatus();
+      if (!dlg) T.tag('M01', '照片管理', 'Photo manager');
     }
     function save() { return Promise.all([T.store.set('photos', photos), T.store.set('meta', meta), T.store.set('music', music)]).then(drawStatus); }
 
@@ -753,7 +768,7 @@
     }
     function drawDlg() {
       var old = root.querySelector('.tu-dlg'); if (old) old.parentNode.removeChild(old);
-      if (!dlg) return;
+      if (!dlg) return T.tag('M01', '照片管理', 'Photo manager');
       var p = photos[dlg.i], src = dlg.j < 0 ? p.src : p.more[dlg.j], el = document.createElement('div');
       el.className = 'tu-dlg';
       el.innerHTML = '<div class="tu-dlg__box" role="dialog" aria-modal="true" aria-label="照片寄语 Photo note"><div class="tu-dlg__head"><img alt="" src="' + esc(src) + '">' + T.bi(p.age + ' 岁 · 给这张照片的寄语', 'Age ' + p.age + ' · A note for this photo', 'tu-title') + '</div>' +
@@ -765,6 +780,7 @@
         '<div class="tu-dlg__img">' + (dlg.image ? '<img alt="" src="' + esc(dlg.image) + '">' : '') + mini(dlg.image ? '换一张' : '选图片', dlg.image ? 'Replace' : 'Choose', 'noteimg') + (dlg.image ? mini('移除', 'Remove', 'noteimgdel', 'tu-mini--danger') : '') + '</div>' +
         '<div class="tu-dlg__foot">' + mini('保存寄语', 'Save the note', 'notesave', 'tu-mini--go') + mini('取消', 'Cancel', 'noteno') + '</div></div>';
       root.appendChild(el);
+      T.tag('M02', '寄语对话框', 'Note dialog');
       var pad = el.querySelector('.tu-pad'), live = null;
       function at(e) { var r = pad.getBoundingClientRect(); return [Math.round((e.clientX - r.left) / r.width * 1000), Math.round((e.clientY - r.top) / r.height * 500)]; }
       function redraw() { pad.innerHTML = T.strokesSvg(dlg.strokes); }
@@ -943,6 +959,7 @@
       h += '<div class="tu-acct__note">' + T.bi('要换掉一个手机号，验证码会发到另一个手机号上。', 'To change one number, the code is sent to the other one.', 'tu-body') + '</div>';
       if (msg) h += '<div class="tu-acct__msg" role="alert">' + esc(msg) + '</div>';
       box.innerHTML = h + '</div></div>';
+      if (T.labels) { var t = document.createElement('span'); t.className = 'tu-tag tu-tag--inline'; t.innerHTML = '<b>M03</b>' + T.bi('账户与设备', 'Account and devices'); box.insertBefore(t, box.firstChild); }
     }
     function load() { return T.cloud.call('GET', 'devices').then(function (r) { draw(r.json); }); }
     function post(url, body) { return T.cloud.call('POST', url, body).then(function (r) { msg = r.status === 200 ? null : r.json.message; return r; }); }

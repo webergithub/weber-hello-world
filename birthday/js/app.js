@@ -170,6 +170,9 @@
       onAlbum(year ? 0 : cur, (year || photos)[year ? 0 : cur]);
     }
     if (screen === 'names') drawName();
+    var code = { opening: ['P01', '开场', 'Opening'], gift: ['P02', '礼物', 'The gift'], album: year ? ['P04', '这一年', 'One year\u2019s photos'] : ['P03', '成长相册', 'The album'],
+      ages: ['P05', '年龄', 'Our ages'], together: ['P06', '陪伴', 'Time together'], cake: blown ? ['P08', '生日快乐', 'Happy birthday'] : ['P07', '许愿', 'Make a wish'], names: ['P09', '年岁的名字', 'Names of the ages'] }[screen];
+    T.tag(code[0], code[1], code[2], stage);
     if (camOn) Sense.arm(cuesNow().map(function (c) { return c.id; }));
     if (mode) tune();
     schedule();
