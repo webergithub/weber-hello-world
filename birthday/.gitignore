@@ -2,3 +2,4 @@ vendor/
 server/data/
 server/master.key
 server/*.mmdb
+docs/build/screens-raw/

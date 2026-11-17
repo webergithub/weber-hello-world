@@ -63,12 +63,32 @@ const ACC_FILE = path.join(CFG.data, 'account.enc'), ALBUM_FILE = path.join(CFG.
 const K_ACC = hkdf(MASTER, 'tenup account');
 let ACC = null, DEK = null;           /* DEK stays in memory only, and only after someone has logged in with the password */
 if (fs.existsSync(ACC_FILE)) ACC = JSON.parse(unseal(K_ACC, fs.readFileSync(ACC_FILE), 'account').toString());
-function saveAcc() { writeAtomic(ACC_FILE, seal(K_ACC, Buffer.from(JSON.stringify(ACC)), 'account')); }
+function saveAcc() { if (ACC.log.length > 300) ACC.log = ACC.log.slice(-300); writeAtomic(ACC_FILE, seal(K_ACC, Buffer.from(JSON.stringify(ACC)), 'account')); }
+/* v1 had one family password. v2 keeps it as an account with no e-mail, so it still works, and adds e-mail accounts,
+   the SMS policy and the admin. Sessions from v1 carry no account, so everyone logs in once more. */
+if (ACC && !(ACC.v >= 2)) {
+  ACC.accounts = [{ id: rand(6), email: '', name: '家庭密码 Family password', salt: ACC.salt, check: ACC.check, wrapped: ACC.wrapped, role: 'member', created: ACC.phonesSetAt || Date.now() }];
+  delete ACC.salt; delete ACC.check; delete ACC.wrapped;
+  ACC.smsPolicy = 'new-device'; ACC.admin = null; ACC.sessions = {}; ACC.v = 2; ACC.log = ACC.log || [];
+  ACC.log.push({ t: Date.now(), what: 'upgraded to accounts (v2)' });
+  saveAcc();
+}
+function audit(what, who) { ACC.log.push({ t: Date.now(), what, who: who || '' }); }
 
 /* One scrypt run gives both the password check value and, together with the master key, the key that wraps the data key. */
 function stretch(password, saltHex) { return crypto.scryptSync(String(password), Buffer.from(saltHex, 'hex'), 32, { N: 32768, r: 8, p: 1, maxmem: 96 * 1024 * 1024 }); }
 const checkOf = k => crypto.createHmac('sha256', k).update('tenup verify').digest('hex');
 const kekOf = k => hkdf(Buffer.concat([k, MASTER]), 'tenup kek');
+const B32 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+function b32enc(buf) { let bits = 0, val = 0, out = ''; for (const b of buf) { val = (val << 8) | b; bits += 8; while (bits >= 5) { out += B32[(val >>> (bits - 5)) & 31]; bits -= 5; } } if (bits > 0) out += B32[(val << (5 - bits)) & 31]; return out; }
+function b32dec(str) { let bits = 0, val = 0; const out = []; for (const ch of String(str).toUpperCase().replace(/[^A-Z2-7]/g, '')) { val = (val << 5) | B32.indexOf(ch); bits += 5; if (bits >= 8) { out.push((val >>> (bits - 8)) & 255); bits -= 8; } } return Buffer.from(out); }
+function hotp(key, counter) { const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(counter)); const h = crypto.createHmac('sha1', key).update(c).digest(), o = h[19] & 15; return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0'); }
+/* The matching time step (one step either side allowed for clock drift), or 0. A step at or before `last` is refused, so a code works once. */
+function totpCheck(secret, code, last, now) { const k = b32dec(secret), t = Math.floor((now || Date.now()) / 30000), c6 = String(code || '').replace(/\s/g, ''); for (const d of [0, -1, 1]) { const step = t + d; if (step > (last || 0) && /^\d{6}$/.test(c6) && safeEq(hotp(k, step), c6)) return step; } return 0; }
+const normEmail = e => String(e || '').trim().toLowerCase();
+const okEmail = e => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e);
+const acctOf = id => ACC && ACC.accounts.find(a => a.id === id);
+function newAccount(email, name, password, role) { const salt = rand(16), k = stretch(password, salt); return { id: rand(6), email, name: String(name || '').slice(0, 30), salt, check: checkOf(k), wrapped: seal(kekOf(k), DEK, 'dek').toString('base64'), role: role || 'member', created: Date.now() }; }
 function safeEq(a, b) { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); }
 
 /* ------------------------------------------------------------------ small in-memory state */
@@ -77,6 +97,11 @@ const otps = new Map();      /* key → { hash, exp, tries, phone } */
 const smsLog = new Map();    /* phone → { last, day, count } */
 let pwFails = { n: 0, until: 0 };
 let setupDraft = null, phoneDraft = null;
+const admPre = new Map();     /* admin password + authenticator were right, SMS still owed: id → { exp, ses } */
+const admSes = new Map();     /* admin session: sha(token) → { ses, acct, exp } — memory only, so a restart always asks again */
+let admFails = { n: 0, until: 0 }, enrollDraft = null;
+const ADMIN_IDLE = 15 * 60000;
+const POLICIES = ['off', 'new-device', 'always'];
 const SETUP_TOKEN = CFG.setupToken || (ACC ? '' : rand(4));
 
 function normPhone(p) {
@@ -148,18 +173,19 @@ function countryChanged(was, now) { return !!was && !!now && was.length === 2 &&
 function sessionOf(req) {
   if (!ACC) return { state: 'setup' };
   const t = cookies(req).tu_ses, h = t && sha(t), s = h && ACC.sessions[h], dev = deviceOf(req);
-  if (!s || !dev || s.dev !== dev.hash) return { state: 'password' };
+  if (!s || !dev || s.dev !== dev.hash || !acctOf(s.acct)) return { state: 'password' };
   if (s.exp && Date.now() > s.exp) { delete ACC.sessions[h]; saveAcc(); return { state: 'password' }; }
   const now = countryOf(req);
   if (countryChanged(dev.rec.country, now)) { delete ACC.sessions[h]; saveAcc(); return { state: 'password', why: 'country' }; }
   if (!DEK) return { state: 'locked' };
-  return { state: 'ok', dev, ses: h };
+  return { state: 'ok', dev, ses: h, acct: acctOf(s.acct) };
 }
-function startSession(req, res, devHash) {
+function startSession(req, res, devHash, acctId) {
   const t = rand(32);
-  ACC.sessions[sha(t)] = { dev: devHash, exp: CFG.sessionDays > 0 ? Date.now() + CFG.sessionDays * DAY : 0, created: Date.now() };
+  ACC.sessions[sha(t)] = { dev: devHash, acct: acctId, exp: CFG.sessionDays > 0 ? Date.now() + CFG.sessionDays * DAY : 0, created: Date.now() };
+  const a = acctOf(acctId); if (a) a.lastLogin = Date.now();
   ACC.devices[devHash].seen = Date.now();
-  for (const k of Object.keys(ACC.sessions)) { const s = ACC.sessions[k]; if ((s.exp && Date.now() > s.exp) || !ACC.devices[s.dev]) delete ACC.sessions[k]; }
+  for (const k of Object.keys(ACC.sessions)) { const s = ACC.sessions[k]; if ((s.exp && Date.now() > s.exp) || !ACC.devices[s.dev] || !acctOf(s.acct)) delete ACC.sessions[k]; }
   saveAcc();
   setCookie(res, req, 'tu_ses', t, CFG.sessionDays > 0 ? CFG.sessionDays * 86400 : null);
 }
@@ -193,11 +219,26 @@ function readFile(id) {
 }
 const TYPES = /^(image\/(jpeg|png|webp|gif)|audio\/(mpeg|mp4|aac|ogg|wav|x-wav|webm|x-m4a|mp3))$/;
 
+/* ------------------------------------------------------------------ admin sessions */
+function admSesKeys() { const o = {}; for (const k of admSes.keys()) o[k] = 1; return o; }
+function startAdmin(req, res, s) {
+  const t = rand(32);
+  admSes.set(sha(t), { ses: s.ses, acct: s.acct.id, exp: Date.now() + ADMIN_IDLE });
+  setCookie(res, req, 'tu_adm', t, null);
+}
+/* An admin session belongs to one login session on one device and lapses after 15 minutes without use. */
+function requireAdmin(req, s) {
+  const t = cookies(req).tu_adm, h = t && sha(t), a = h && admSes.get(h);
+  if (!a || a.ses !== s.ses || Date.now() > a.exp || !ACC.admin) { if (h) admSes.delete(h); throw httpErr(403, 'need_admin', '请先通过管理员验证 Please pass the admin check first'); }
+  a.exp = Date.now() + ADMIN_IDLE;
+  return s.acct;
+}
+
 /* ------------------------------------------------------------------ API */
 const api = {
   'GET /api/state': async (req, res) => {
     const s = sessionOf(req);
-    send(res, 200, { server: 'tenup', state: s.state, why: s.why || null, setupTokenNeeded: !ACC, sessionDays: CFG.sessionDays });
+    send(res, 200, { server: 'tenup', state: s.state, why: s.why || null, setupTokenNeeded: !ACC, sessionDays: CFG.sessionDays, adminSet: !!(ACC && ACC.admin), email: s.acct ? s.acct.email : null, legacy: !!(ACC && ACC.accounts.some(a => !a.email)) });
   },
 
   /* ---- first-time setup: password + two phones, each proven by a code. Works exactly once. ---- */
@@ -205,10 +246,11 @@ const api = {
     if (ACC) throw httpErr(409, 'already_set', '已经设置过了 This album is already set up');
     const b = await jsonBody(req), a = normPhone(b.phones && b.phones[0]), c = normPhone(b.phones && b.phones[1]);
     if (!safeEq(SETUP_TOKEN, String(b.token || '').trim())) throw httpErr(403, 'bad_token', '设置口令不对（看服务器启动时打印的那一行） The setup token is not right — it is printed when the server starts');
+    if (!okEmail(normEmail(b.email))) throw httpErr(400, 'bad_email', '邮箱格式不对 That e-mail address does not look right');
     if (String(b.password || '').length < 10) throw httpErr(400, 'weak_password', '密码至少 10 位 The password needs at least 10 characters');
     if (!a || !c) throw httpErr(400, 'bad_phone', '手机号格式不对 Those phone numbers do not look right');
     if (a === c) throw httpErr(400, 'same_phone', '两个手机号不能相同 The two numbers must be different');
-    setupDraft = { password: String(b.password), phones: [a, c], exp: Date.now() + PRE_MS };
+    setupDraft = { email: normEmail(b.email), password: String(b.password), phones: [a, c], exp: Date.now() + PRE_MS };
     await issueOtp('setup0', a, 'setup'); await issueOtp('setup1', c, 'setup');
     send(res, 200, { ok: true, phones: [mask(a), mask(c)] });
   },
@@ -217,12 +259,13 @@ const api = {
     const b = await jsonBody(req);
     if (!setupDraft || Date.now() > setupDraft.exp) throw httpErr(400, 'setup_expired', '请重新开始设置 Please start the setup again');
     checkOtp('setup0', b.codes && b.codes[0]); checkOtp('setup1', b.codes && b.codes[1]);
-    const salt = rand(16), k = stretch(setupDraft.password, salt);
     DEK = crypto.randomBytes(32);
-    ACC = { v: 1, salt, check: checkOf(k), wrapped: seal(kekOf(k), DEK, 'dek').toString('base64'), phones: setupDraft.phones, phonesSetAt: Date.now(), devices: {}, sessions: {}, log: [] };
+    const first = newAccount(setupDraft.email, '', setupDraft.password, 'owner');
+    ACC = { v: 2, accounts: [first], smsPolicy: 'new-device', admin: null, phones: setupDraft.phones, phonesSetAt: Date.now(), devices: {}, sessions: {}, log: [] };
+    audit('set up', first.email);
     setupDraft = null;
     const dev = trustDevice(req, res, countryOf(req));
-    startSession(req, res, dev);
+    startSession(req, res, dev, first.id);
     send(res, 200, { ok: true });
   },
 
@@ -230,23 +273,25 @@ const api = {
   'POST /api/login': async (req, res) => {
     if (!ACC) throw httpErr(409, 'not_set', '还没有设置 This album is not set up yet');
     if (Date.now() < pwFails.until) throw httpErr(429, 'locked_out', '输错太多次，请 15 分钟后再试 Too many wrong tries — try again in 15 minutes');
-    const b = await jsonBody(req), k = stretch(b.password || '', ACC.salt);
-    if (!safeEq(ACC.check, checkOf(k))) {
+    const b = await jsonBody(req), email = normEmail(b.email), acct = ACC.accounts.find(a => a.email === email);
+    const k = stretch(b.password || '', acct ? acct.salt : 'ab'.repeat(16));      /* the same work for an unknown e-mail, so timing does not tell which exist */
+    if (!acct || !safeEq(acct.check, checkOf(k))) {
       if (++pwFails.n >= 5) pwFails = { n: 0, until: Date.now() + 15 * 60000 };
-      throw httpErr(401, 'bad_password', '密码不对 That password is not right');
+      throw httpErr(401, 'bad_password', '邮箱或密码不对 That e-mail or password is not right');
     }
     pwFails = { n: 0, until: 0 };
-    if (!DEK) DEK = unseal(kekOf(k), Buffer.from(ACC.wrapped, 'base64'), 'dek');
-    const dev = deviceOf(req), country = countryOf(req);
-    if (dev && !countryChanged(dev.rec.country, country)) {
-      if (country.length === 2 && country !== 'ZZ') dev.rec.country = country;
-      startSession(req, res, dev.hash);
+    if (!DEK) DEK = unseal(kekOf(k), Buffer.from(acct.wrapped, 'base64'), 'dek');
+    const dev = deviceOf(req), country = countryOf(req), policy = ACC.smsPolicy || 'new-device';
+    if (policy === 'off' || (policy === 'new-device' && dev && !countryChanged(dev.rec.country, country))) {
+      let h = dev ? dev.hash : trustDevice(req, res, country);
+      if (country.length === 2 && country !== 'ZZ') ACC.devices[h].country = country;
+      startSession(req, res, h, acct.id);
       return send(res, 200, { ok: true });
     }
     const id = rand(16);
-    pre.set(id, { exp: Date.now() + PRE_MS, country, dev: dev ? dev.hash : null });
+    pre.set(id, { exp: Date.now() + PRE_MS, country, dev: dev ? dev.hash : null, acct: acct.id });
     setCookie(res, req, 'tu_pre', id, 600);
-    send(res, 200, { ok: false, need: 'sms', why: dev ? 'country' : 'new_device', phones: ACC.phones.map(mask) });
+    send(res, 200, { ok: false, need: 'sms', why: policy === 'always' && dev && !countryChanged(dev.rec.country, country) ? 'always' : dev ? 'country' : 'new_device', phones: ACC.phones.map(mask) });
   },
   'POST /api/sms/send': async (req, res) => {
     const id = cookies(req).tu_pre, p = id && pre.get(id);
@@ -263,7 +308,7 @@ const api = {
     pre.delete(id); setCookie(res, req, 'tu_pre', '', 0);
     let h = p.dev && ACC.devices[p.dev] ? p.dev : null;
     if (h) ACC.devices[h].country = p.country || ACC.devices[h].country; else h = trustDevice(req, res, p.country);
-    startSession(req, res, h);
+    startSession(req, res, h, p.acct);
     send(res, 200, { ok: true });
   },
   'POST /api/logout': async (req, res, s) => {
@@ -274,7 +319,7 @@ const api = {
 
   /* ---- devices ---- */
   'GET /api/devices': async (req, res, s) => {
-    send(res, 200, { phones: ACC.phones.map(mask), devices: Object.keys(ACC.devices).map(h => ({ id: h.slice(0, 12), name: ACC.devices[h].name, country: ACC.devices[h].country, seen: ACC.devices[h].seen, current: h === s.dev.hash })) });
+    send(res, 200, { me: s.acct.email || s.acct.name, adminSet: !!ACC.admin, phones: ACC.phones.map(mask), devices: Object.keys(ACC.devices).map(h => ({ id: h.slice(0, 12), name: ACC.devices[h].name, country: ACC.devices[h].country, seen: ACC.devices[h].seen, current: h === s.dev.hash })) });
   },
   'POST /api/devices/remove': async (req, res, s) => {
     const b = await jsonBody(req), h = Object.keys(ACC.devices).find(x => x.slice(0, 12) === b.id);
@@ -306,9 +351,129 @@ const api = {
     if (!phoneDraft || phoneDraft.step !== 2 || Date.now() > phoneDraft.exp) throw httpErr(400, 'change_expired', '请重新开始 Please start again');
     checkOtp('phone:new', b.code);
     ACC.phones[phoneDraft.which] = phoneDraft.newPhone;
-    ACC.log.push({ t: Date.now(), what: 'phone ' + phoneDraft.which + ' changed' });
+    audit('phone ' + (phoneDraft.which + 1) + ' changed');
     phoneDraft = null; saveAcc();
     send(res, 200, { ok: true, phones: ACC.phones.map(mask) });
+  },
+
+  /* ---- admin: admin password + authenticator code + a text message to one of the locked phones, every time ---- */
+  'POST /api/admin/start': async (req, res, s) => {
+    if (!ACC.admin) throw httpErr(409, 'no_admin', '还没有设置管理员 No admin has been set up yet');
+    if (Date.now() < admFails.until) throw httpErr(429, 'admin_locked', '输错太多次，请 30 分钟后再试 Too many wrong tries — try again in 30 minutes');
+    const b = await jsonBody(req), k = stretch(b.password || '', ACC.admin.salt);
+    const pwOk = safeEq(ACC.admin.check, checkOf(k)), step = totpCheck(ACC.admin.totp, b.totp, ACC.admin.totpLast);
+    if (!pwOk || !step) {
+      if (++admFails.n >= 5) { admFails = { n: 0, until: Date.now() + 30 * 60000 }; audit('admin locked after wrong tries', s.acct.email); saveAcc(); }
+      throw httpErr(401, 'bad_admin', '管理员密码或动态码不对 The admin password or the authenticator code is not right');
+    }
+    admFails = { n: 0, until: 0 }; ACC.admin.totpLast = step; saveAcc();
+    const id = rand(16);
+    admPre.set(id, { exp: Date.now() + PRE_MS, ses: s.ses });
+    setCookie(res, req, 'tu_admpre', id, 600);
+    send(res, 200, { ok: false, need: 'sms', phones: ACC.phones.map(mask) });
+  },
+  'POST /api/admin/sms/send': async (req, res, s) => {
+    const id = cookies(req).tu_admpre, p = id && admPre.get(id);
+    if (!p || p.ses !== s.ses || Date.now() > p.exp) throw httpErr(401, 'need_admin_password', '请先输入管理员密码和动态码 Enter the admin password and code first');
+    const b = await jsonBody(req), which = b.which === 1 ? 1 : 0;
+    await issueOtp('admin:' + id, ACC.phones[which], 'admin');
+    send(res, 200, { ok: true, sentTo: mask(ACC.phones[which]) });
+  },
+  'POST /api/admin/sms/verify': async (req, res, s) => {
+    const id = cookies(req).tu_admpre, p = id && admPre.get(id);
+    if (!p || p.ses !== s.ses || Date.now() > p.exp) throw httpErr(401, 'need_admin_password', '请先输入管理员密码和动态码 Enter the admin password and code first');
+    checkOtp('admin:' + id, (await jsonBody(req)).code);
+    admPre.delete(id); setCookie(res, req, 'tu_admpre', '', 0);
+    startAdmin(req, res, s);
+    audit('admin signed in', s.acct.email); saveAcc();
+    send(res, 200, { ok: true });
+  },
+  'POST /api/admin/logout': async (req, res) => {
+    const t = cookies(req).tu_adm; if (t) admSes.delete(sha(t));
+    setCookie(res, req, 'tu_adm', '', 0); send(res, 200, { ok: true });
+  },
+
+  /* ---- setting up the admin: one phone the first time, both phones to replace an existing admin ---- */
+  'POST /api/admin/enroll/start': async (req, res, s) => {
+    const b = await jsonBody(req), both = !!ACC.admin;
+    enrollDraft = { ses: s.ses, exp: Date.now() + PRE_MS, both, ok: false };
+    if (both) { await issueOtp('enroll0', ACC.phones[0], 'admin-setup'); await issueOtp('enroll1', ACC.phones[1], 'admin-setup'); }
+    else await issueOtp('enroll0', ACC.phones[b.which === 1 ? 1 : 0], 'admin-setup');
+    send(res, 200, { ok: true, both, sentTo: both ? ACC.phones.map(mask) : [mask(ACC.phones[b.which === 1 ? 1 : 0])] });
+  },
+  'POST /api/admin/enroll/verify': async (req, res, s) => {
+    if (!enrollDraft || enrollDraft.ses !== s.ses || Date.now() > enrollDraft.exp) throw httpErr(400, 'enroll_expired', '请重新开始 Please start again');
+    const b = await jsonBody(req), c = b.codes || [];
+    checkOtp('enroll0', c[0]); if (enrollDraft.both) checkOtp('enroll1', c[1]);
+    enrollDraft.ok = true; enrollDraft.secret = b32enc(crypto.randomBytes(20));
+    send(res, 200, { ok: true, secret: enrollDraft.secret, uri: 'otpauth://totp/' + encodeURIComponent('十岁啦:admin') + '?secret=' + enrollDraft.secret + '&issuer=' + encodeURIComponent('十岁啦') + '&algorithm=SHA1&digits=6&period=30' });
+  },
+  'POST /api/admin/enroll/finish': async (req, res, s) => {
+    if (!enrollDraft || !enrollDraft.ok || enrollDraft.ses !== s.ses || Date.now() > enrollDraft.exp) throw httpErr(400, 'enroll_expired', '请重新开始 Please start again');
+    const b = await jsonBody(req);
+    if (String(b.password || '').length < 12) throw httpErr(400, 'weak_password', '管理员密码至少 12 位 The admin password needs at least 12 characters');
+    const step = totpCheck(enrollDraft.secret, b.totp, 0);
+    if (!step) throw httpErr(400, 'bad_totp', '动态码不对，确认验证器 App 已经添加好，再输入它现在显示的 6 位数 That code is not right — check the authenticator app and type the 6 digits it shows now');
+    const salt = rand(16), k = stretch(b.password, salt);
+    for (const t of Object.keys(admSesKeys())) admSes.delete(t);      /* replacing the admin signs every admin session out */
+    ACC.admin = { salt, check: checkOf(k), totp: enrollDraft.secret, totpLast: step, since: Date.now(), by: s.acct.email || s.acct.name };
+    enrollDraft = null;
+    audit('admin set up', s.acct.email); saveAcc();
+    startAdmin(req, res, s);
+    send(res, 200, { ok: true });
+  },
+
+  /* ---- what the admin can change ---- */
+  'GET /api/admin/settings': async (req, res, s) => {
+    requireAdmin(req, s);
+    send(res, 200, { smsPolicy: ACC.smsPolicy, phones: ACC.phones.map(mask), admin: { since: ACC.admin.since, by: ACC.admin.by }, me: s.acct.id,
+      accounts: ACC.accounts.map(a => ({ id: a.id, email: a.email, name: a.name, role: a.role, created: a.created, lastLogin: a.lastLogin || null, devices: Object.values(ACC.sessions).filter(x => x.acct === a.id).length })),
+      log: ACC.log.slice(-30).reverse() });
+  },
+  'POST /api/admin/policy': async (req, res, s) => {
+    const a = requireAdmin(req, s), b = await jsonBody(req);
+    if (!POLICIES.includes(b.smsPolicy)) throw httpErr(400, 'bad_policy', 'Bad policy');
+    ACC.smsPolicy = b.smsPolicy; audit('sms policy → ' + b.smsPolicy, a.email); saveAcc();
+    send(res, 200, { ok: true, smsPolicy: ACC.smsPolicy });
+  },
+  'POST /api/admin/accounts/add': async (req, res, s) => {
+    const a = requireAdmin(req, s), b = await jsonBody(req), email = normEmail(b.email);
+    if (!okEmail(email)) throw httpErr(400, 'bad_email', '邮箱格式不对 That e-mail address does not look right');
+    if (ACC.accounts.some(x => x.email === email)) throw httpErr(409, 'email_taken', '这个邮箱已经有账号了 That e-mail already has an account');
+    if (String(b.password || '').length < 10) throw httpErr(400, 'weak_password', '密码至少 10 位 The password needs at least 10 characters');
+    if (ACC.accounts.length >= 20) throw httpErr(400, 'too_many', '最多 20 个账号 At most 20 accounts');
+    const n = newAccount(email, b.name, String(b.password), 'member');
+    ACC.accounts.push(n); audit('account added: ' + email, a.email); saveAcc();
+    send(res, 200, { ok: true, id: n.id });
+  },
+  'POST /api/admin/accounts/update': async (req, res, s) => {
+    const a = requireAdmin(req, s), b = await jsonBody(req), t = acctOf(b.id);
+    if (!t) throw httpErr(404, 'no_account', 'No such account');
+    if (b.email != null) {
+      const email = normEmail(b.email);
+      if (!okEmail(email)) throw httpErr(400, 'bad_email', '邮箱格式不对 That e-mail address does not look right');
+      if (ACC.accounts.some(x => x.email === email && x.id !== t.id)) throw httpErr(409, 'email_taken', '这个邮箱已经有账号了 That e-mail already has an account');
+      audit('account e-mail: ' + (t.email || t.name) + ' → ' + email, a.email); t.email = email;
+    }
+    if (b.name != null) t.name = String(b.name).slice(0, 30);
+    if (b.password != null) {
+      if (String(b.password).length < 10) throw httpErr(400, 'weak_password', '密码至少 10 位 The password needs at least 10 characters');
+      const fresh = newAccount(t.email, t.name, String(b.password), t.role);
+      t.salt = fresh.salt; t.check = fresh.check; t.wrapped = fresh.wrapped;
+      for (const k of Object.keys(ACC.sessions)) if (ACC.sessions[k].acct === t.id && k !== s.ses) delete ACC.sessions[k];    /* a new password signs that account out elsewhere */
+      audit('password changed: ' + (t.email || t.name), a.email);
+    }
+    saveAcc(); send(res, 200, { ok: true });
+  },
+  'POST /api/admin/accounts/remove': async (req, res, s) => {
+    const a = requireAdmin(req, s), b = await jsonBody(req), t = acctOf(b.id);
+    if (!t) throw httpErr(404, 'no_account', 'No such account');
+    if (t.id === s.acct.id) throw httpErr(400, 'is_you', '不能移除自己正在用的账号 You cannot remove the account you are using');
+    if (ACC.accounts.length <= 1) throw httpErr(400, 'last_account', '至少要留一个账号 At least one account must remain');
+    ACC.accounts = ACC.accounts.filter(x => x.id !== t.id);
+    for (const k of Object.keys(ACC.sessions)) if (ACC.sessions[k].acct === t.id) delete ACC.sessions[k];
+    audit('account removed: ' + (t.email || t.name), a.email); saveAcc();
+    send(res, 200, { ok: true });
   },
 
   /* ---- album ---- */
@@ -355,7 +520,7 @@ function serveFile(req, res, id) {
 /* ------------------------------------------------------------------ the site itself: nothing but the login page without a session */
 const OPEN_API = new Set(['GET /api/state', 'POST /api/setup/start', 'POST /api/setup/finish', 'POST /api/login', 'POST /api/sms/send', 'POST /api/sms/verify']);
 const PUBLIC = [/^\/login\.html$/, /^\/css\/(fonts|tokens|tenup|login)\.css$/, /^\/js\/(tenup|login)\.js$/, /^\/fonts\/[\w.-]+\.woff2$/, /^\/manifest\.webmanifest$/, /^\/icons\/[\w.-]+\.png$/];
-const SERVED = /^\/(index\.html|manage\.html|login\.html|sw\.js|manifest\.webmanifest|(css|js|fonts|album|vendor|icons|docs)\/[\w./-]+)$/;
+const SERVED = /^\/(index\.html|manage\.html|login\.html|admin\.html|sw\.js|manifest\.webmanifest|(css|js|fonts|album|vendor|icons|docs)\/[\w./-]+)$/;
 const MIME = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', json: 'application/json', webmanifest: 'application/manifest+json',
   woff2: 'font/woff2', png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', wasm: 'application/wasm', task: 'application/octet-stream', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown; charset=utf-8' };
 function serveSite(req, res, pathname, authed) {
@@ -388,6 +553,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET' && req.headers['x-tenup'] !== '1') throw httpErr(403, 'bad_origin', 'Forbidden');
     const isFile = req.method === 'GET' && pathname.startsWith('/api/file/');
     const fn = api[key];
+    if (fn && pathname.startsWith('/api/admin/')) res.setHeader('Cache-Control', 'no-store');
     if (!fn && !isFile) throw httpErr(404, 'no_route', 'Not found');
     let s = null;
     if (!OPEN_API.has(key)) {

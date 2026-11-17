@@ -2,6 +2,8 @@
    用法：cd birthday/docs/build && mkdir -p screens-raw && node screens-capture.js，然后把 screens-raw/*.png 转成 screens/*.jpg（宽不超过 1600）并复制 marks.json。 */
 /* 截每个界面，并记录每个标号区域的位置。输出 screens/<code>.png 和 screens/marks.json */
 const { chromium } = require('playwright');
+const crypto = require('crypto');
+function totp(secret, off) { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, val = 0; const key = []; for (const ch of secret.replace(/\s/g, '')) { val = (val << 5) | A.indexOf(ch); bits += 5; if (bits >= 8) { key.push((val >>> (bits - 8)) & 255); bits -= 8; } } const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + (off || 0))); const h = crypto.createHmac('sha1', Buffer.from(key)).update(c).digest(), o = h[19] & 15; return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0'); }
 const CAMCSS = '#cam video{background:repeating-linear-gradient(45deg,#e6d6c6 0 14px,#efe2d4 14px 28px)!important}'; const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
 const OUT = path.join(__dirname, 'screens-raw'), SITE = 'http://127.0.0.1:8080', marks = {};
 async function grab(pg, code, list, opt) {
@@ -84,16 +86,36 @@ async function grab(pg, code, list, opt) {
   const codes = () => [...out.matchAll(/code: (\d{6})/g)].map(m => m[1]), B = 'http://127.0.0.1:18795';
   const b2 = await chromium.launch(), lp = await (await b2.newContext({ viewport: { width: 1000, height: 1040 } })).newPage();
   await lp.goto(B + '/manage.html'); await lp.waitForSelector('#token');
-  await lp.fill('#token', 'k7Q2'); await lp.fill('#pw', 'a long password 1'); await lp.fill('#pw2', 'a long password 1'); await lp.fill('#p0', '13800000001'); await lp.fill('#p1', '13800000002');
-  await grab(lp, 'L01', [['.lg .tu-mascot', '小兔子', 'The bunny'], ['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['.lg__card > .tu-bi:nth-child(2)', '规则说明', 'The rules'], ['label:has(#token)', '设置口令', 'Setup token'], ['label:has(#pw)', '密码', 'Password'], ['label:has(#pw2)', '再输一次密码', 'Password again'], ['label:has(#p0)', '手机号一', 'Phone 1'], ['label:has(#p1)', '手机号二', 'Phone 2'], ['.lg__go', '发送验证码', 'Send the codes']]);
+  await lp.fill('#token', 'k7Q2'); await lp.fill('#em', 'mom@example.com'); await lp.fill('#pw', 'a long password 1'); await lp.fill('#pw2', 'a long password 1'); await lp.fill('#p0', '13800000001'); await lp.fill('#p1', '13800000002');
+  await grab(lp, 'L01', [['.lg .tu-mascot', '小兔子', 'The bunny'], ['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['.lg__card > .tu-bi:nth-child(2)', '规则说明', 'The rules'], ['label:has(#token)', '设置口令', 'Setup token'], ['label:has(#em)', '你的邮箱', 'Your e-mail'], ['label:has(#pw)', '密码', 'Password'], ['label:has(#pw2)', '再输一次密码', 'Password again'], ['label:has(#p0)', '手机号一', 'Phone 1'], ['label:has(#p1)', '手机号二', 'Phone 2'], ['.lg__go', '发送验证码', 'Send the codes']]);
   await lp.click('.lg__go'); await lp.waitForSelector('#c0');
   await grab(lp, 'L02', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['label:has(#c0)', '手机号一的验证码', 'Code from phone 1'], ['label:has(#c1)', '手机号二的验证码', 'Code from phone 2'], ['.lg__go', '完成设置', 'Finish setup']]);
   await lp.fill('#c0', codes()[0]); await lp.fill('#c1', codes()[1]); await lp.click('.lg__go'); await lp.waitForSelector('.tu-acct__row'); await lp.waitForTimeout(800);
   await lp.evaluate(() => scrollTo(0, document.body.scrollHeight)); await lp.waitForTimeout(300);
-  await grab(lp, 'M03', [['.tu-acct__head', '标题 / 退出这台设备', 'Title / log out'], ['.tu-acct__grid > div:nth-child(1)', '可信设备列表', 'Trusted devices'], ['.tu-acct__grid > div:nth-child(2) .tu-acct__row:nth-of-type(2)', '手机号与"更换"', 'Phones and Change'], ['.tu-acct__note', '更换规则', 'How changing works']], { clip: '.tu-acct' });
+  await grab(lp, 'M03', [['.tu-acct__head', '标题 / 管理员设置入口 / 退出这台设备', 'Title / admin settings / log out'], ['.tu-acct__me', '当前账号', 'Signed in as'], ['.tu-acct__grid > div:nth-child(1)', '可信设备列表', 'Trusted devices'], ['.tu-acct__grid > div:nth-child(2) .tu-acct__row:nth-of-type(2)', '手机号与"更换"', 'Phones and Change'], ['.tu-acct__note', '更换规则', 'How changing works']], { clip: '.tu-acct' });
+
+  /* admin: A03 set up, A02 settings, A01 the three checks */
+  await lp.goto(B + '/admin.html'); await lp.waitForSelector('[data-act=esend]');
+  let n = codes().length; await lp.click('[data-act=esend][data-i="0"]'); await lp.waitForSelector('#c0');
+  await grab(lp, 'A03', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['.lg__card > .tu-bi:nth-child(2)', '说明', 'What it does'], ['.lg__row', '选一个手机号收验证码', 'Choose a phone'], ['label:has(#c0)', '验证码', 'Code'], ['.lg__go', '下一步', 'Next'], ['.lg__back', '取消', 'Cancel']]);
+  await lp.fill('#c0', codes()[n]); await lp.click('.lg__go'); await lp.waitForSelector('#key');
+  const secret = (await lp.$eval('#key', e => e.textContent)).replace(/\s/g, '');
+  await lp.fill('#apw', 'admin password 2026!'); await lp.fill('#apw2', 'admin password 2026!');
+  await grab(lp, 'A03B', [['.ad__steps', '三步说明', 'Three steps'], ['.ad__qrimg', '二维码', 'QR code'], ['.ad__key', '密钥与复制', 'Key and copy'], ['label:has(#apw)', '管理员密码', 'Admin password'], ['label:has(#apw2)', '再输一次', 'Again'], ['label:has(#totp)', '验证器上的 6 位数', 'Code from the app'], ['.lg__go', '完成设置', 'Finish']]);
+  await lp.fill('#totp', totp(secret)); await lp.click('.lg__go'); await lp.waitForSelector('.ad__pols');
+  await lp.fill('#ne', 'dad@example.com'); await lp.fill('#nn', '爸爸'); await lp.fill('#np', 'dad password 1'); await lp.fill('#np2', 'dad password 1'); await lp.click('.ad__addgo'); await lp.waitForTimeout(700);
+  await lp.evaluate(() => { const t = document.querySelector('.lg__ok'); if (t) t.remove(); scrollTo(0, 0); });
+  await grab(lp, 'A02', [['.ad__head > div:first-child', '标题与管理员信息', 'Title and admin info'], ['.ad__acts', '回到照片管理 / 退出管理', 'Back / leave admin'], ['.ad__pol[data-p=off]', '短信：关闭', 'SMS: off'], ['.ad__pol[data-p=new-device]', '短信：新设备或换国家（默认）', 'SMS: new device or country (default)'], ['.ad__pol[data-p=always]', '短信：每次登录', 'SMS: every login'], ['.ad__card:nth-of-type(1) .ad__note', '始终需要短信的事', 'Always needs a text'],
+    ['.ad__acct:nth-child(1)', '账号一行', 'One account'], ['.ad__acct:nth-child(1) .ad__row-acts', '改邮箱 / 改密码 / 移除', 'E-mail / password / remove'], ['.ad__add', '添加账号', 'Add an account'], ['.ad__card:nth-of-type(3)', '重新设置管理员', 'Replace the admin'], ['.ad__log', '操作记录', 'Activity']], { full: true });
+  await lp.click('[data-act=alogout]'); await lp.waitForURL(/manage/);
+  await lp.goto(B + '/admin.html'); await lp.waitForSelector('#apw');
+  await lp.fill('#apw', 'admin password 2026!'); await lp.fill('#totp', totp(secret, 1));
+  await grab(lp, 'A01', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['.lg__card > .tu-bi:nth-child(2)', '三样都要', 'All three'], ['label:has(#apw)', '管理员密码', 'Admin password'], ['label:has(#totp)', '验证器动态码', 'Authenticator code'], ['.lg__go', '下一步：短信', 'Next: text message'], ['.lg__back', '回到照片管理', 'Back to photos']]);
+  await lp.click('.lg__go'); await lp.waitForSelector('[data-act=asend]'); n = codes().length; await lp.click('[data-act=asend][data-i="1"]'); await lp.waitForSelector('#code');
+  await grab(lp, 'A01B', [['.lg__row', '选一个手机号', 'Choose a phone'], ['label:has(#code)', '短信验证码', 'Text-message code'], ['.lg__go', '进入管理员设置', 'Open admin settings'], ['.lg__ok', '已发送提示', 'Sent notice']]);
   const np = await (await b2.newContext({ viewport: { width: 1000, height: 900 } })).newPage();
-  await np.goto(B + '/index.html'); await np.waitForSelector('#pw'); await np.fill('#pw', 'wrong password!!'); await np.click('.lg__go'); await np.waitForSelector('.lg__msg');
-  await grab(np, 'L03', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['label:has(#pw)', '密码', 'Password'], ['.lg__go', '进入相册', 'Open the album'], ['.lg__msg', '出错提示', 'Error message'], ['.lg .tu-mascot', '小兔子（难过）', 'The bunny, sad']]);
+  await np.goto(B + '/index.html'); await np.waitForSelector('#pw'); await np.fill('#em', 'mom@example.com'); await np.fill('#pw', 'wrong password!!'); await np.click('.lg__go'); await np.waitForSelector('.lg__msg');
+  await grab(np, 'L03', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['label:has(#em)', '邮箱', 'E-mail'], ['label:has(#pw)', '密码', 'Password'], ['.lg__go', '进入相册', 'Open the album'], ['.lg__msg', '出错提示', 'Error message'], ['.lg .tu-mascot', '小兔子（难过）', 'The bunny, sad']]);
   await np.fill('#pw', 'a long password 1'); await np.click('.lg__go'); await np.waitForSelector('[data-act=send]'); await np.click('[data-act=send][data-i="0"]'); await np.waitForSelector('#code');
   await grab(np, 'L04', [['.lg__card > .tu-bi:nth-child(1)', '标题', 'Title'], ['.lg__card > .tu-bi:nth-child(2)', '为什么要验证', 'Why it asks'], ['.lg__row', '选择接收的手机号', 'Choose a phone'], ['label:has(#code)', '验证码', 'Code'], ['.lg__go', '确认', 'Confirm'], ['.lg__ok', '已发送提示', 'Sent notice']]);
   await b2.close(); srv.kill(); fs.rmSync(dir, { recursive: true, force: true });

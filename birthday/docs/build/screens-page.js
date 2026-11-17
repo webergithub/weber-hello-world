@@ -29,10 +29,15 @@ const GROUPS = [
     { code: 'M03', zh: '账户与设备', en: 'Account and devices', shots: ['M03'], reach: '连接相册服务器时，M01 页面的最下方。', job: '看和移除可信设备，更换手机号，退出这台设备。' }
   ] },
   { id: 'L', zh: '登录（连接相册服务器时）', en: 'Signing in', note: '只有由相册服务器提供网页时才会出现。', screens: [
-    { code: 'L01', zh: '首次设置', en: 'First-time setup', shots: ['L01'], reach: '服务器第一次使用时，打开任何页面都会到这里。', job: '填设置口令、密码和两个手机号。' },
+    { code: 'L01', zh: '首次设置', en: 'First-time setup', shots: ['L01'], reach: '服务器第一次使用时，打开任何页面都会到这里。', job: '填设置口令、你的邮箱、密码和两个手机号。这个邮箱就是第一个登录账号。' },
     { code: 'L02', zh: '设置验证码', en: 'Setup codes', shots: ['L02'], reach: 'L01 点"发送验证码"之后。', job: '两个手机号各收一条短信，两个验证码都填对才算设置完成。' },
-    { code: 'L03', zh: '输入密码', en: 'Password', shots: ['L03'], reach: '登录过期或服务器重启后。截图是输错密码的样子。', job: '输入密码。' },
-    { code: 'L04', zh: '短信验证', en: 'Text-message check', shots: ['L04'], reach: '新设备，或已验证的设备换了国家时，L03 之后。', job: '选一个手机号收验证码，填进去。' }
+    { code: 'L03', zh: '输入密码', en: 'Password', shots: ['L03'], reach: '登录过期或服务器重启后。截图是输错密码的样子。', job: '输入邮箱和密码。用原来的家庭密码时邮箱留空。' },
+    { code: 'L04', zh: '短信验证', en: 'Text-message check', shots: ['L04'], reach: 'L03 之后，按管理员设的短信开关：默认是新设备或换了国家时。', job: '选一个手机号收验证码，填进去。' }
+  ] },
+  { id: 'A', zh: '管理员（连接相册服务器时）', en: 'Admin', note: '从 M03 的"管理员设置"进入，或打开 admin.html。管理员状态 15 分钟不操作、退出管理或服务器重启后要重新验证。', screens: [
+    { code: 'A01', zh: '管理员验证', en: 'Admin check', shots: ['A01', 'A01B'], states: ['管理员密码与动态码', '短信验证码'], reach: '已登录后点 M03 的"管理员设置"；管理员已经设置好时。', job: '三样都过才能进入：管理员密码、验证器 App 上的 6 位动态码、发到两个锁定手机号之一的短信验证码。' },
+    { code: 'A02', zh: '管理员设置', en: 'Admin settings', shots: ['A02'], reach: '通过 A01 或 A03 之后。', job: '短信验证开关（关闭 / 新设备或换国家 / 每次登录）；添加、改邮箱、改密码、移除登录账号；重新设置管理员；操作记录。', tall: true },
+    { code: 'A03', zh: '设置管理员', en: 'Set up the admin', shots: ['A03', 'A03B'], states: ['短信验证', '绑定验证器 App'], reach: '还没有管理员时点"管理员设置"；或在 A02 点"重新设置管理员"（要两个手机号都验证）。', job: '验证手机号后，设管理员密码，用验证器 App 扫码绑定。' }
   ] }
 ];
 const GLOBAL = [
@@ -177,7 +182,7 @@ ${GROUPS.map(g => '    <section><h2>' + esc(g.zh) + '<small>' + esc(g.en) + '</s
 ${GROUPS.map(g => '  <div class="grp"><header><h2>' + esc(g.zh) + '<small>' + esc(g.en) + '</small></h2><p>' + esc(g.note) + '</p></header>\n' + g.screens.map(screenBlock).join('\n') + '</div>').join('\n')}
   <div class="grp"><header><h2>全局元素<small>Shown on many screens</small></h2><p>不属于某一个界面，在好几个地方出现。</p></header>
     <div class="glob">${GLOBAL.map(g => '<div id="' + g[0] + '"><h3><span class="code">' + g[0] + '</span>' + esc(g[1]) + '<small>' + esc(g[2]) + '</small></h3><p>' + esc(g[3]) + '</p></div>').join('')}</div></div>
-  <footer>2026-11-17 · 对应分支 claude/determined-ritchie-rc72lc。点右侧任一条可复制它的编号和名字。</footer>
+  <footer>2026-11-17 · v2.2 · 对应分支 claude/determined-ritchie-rc72lc。点右侧任一条可复制它的编号和名字。</footer>
 </div>
 <script>
 (function () {

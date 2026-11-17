@@ -25,6 +25,7 @@ python3 -m http.server 8080
 | `index.html` | 播放相册 |
 | `manage.html` | 导入照片、写寄语、选音乐、填名字和头像 |
 | `login.html` | 连接相册服务器时的登录页 |
+| `admin.html` | 管理员设置：短信验证开关、登录账号（连接相册服务器时） |
 
 ## 两种运行方式
 
@@ -38,7 +39,7 @@ python3 -m http.server 8080
 
 网页会自己判断：由相册服务器提供时走服务器，否则走单机，不需要改任何设置。
 
-需求和设计的完整说明见 `docs/tenup-requirements-design.html`（同目录有 Word 版）。
+需求和设计的完整说明见 `docs/tenup-requirements-design.html`（同目录有 Word 版）；每个界面的编号和截图见 `docs/screens.html`，网址后加 `?labels` 时页面角落会显示当前界面的编号。
 
 ## 章节与操作
 

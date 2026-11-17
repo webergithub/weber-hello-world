@@ -16,6 +16,8 @@
   function go(zh, en) { return '<button type="submit" class="lg__go"' + (busy ? ' disabled' : '') + '>' + zh + '<small lang="en">' + en + '</small></button>'; }
   function alt(zh, en, act, extra) { return '<button type="button" class="lg__alt" data-act="' + act + '"' + (extra || '') + (busy ? ' disabled' : '') + '>' + zh + '<small lang="en">' + en + '</small></button>'; }
   function val(id) { var e = document.getElementById(id); return e ? e.value : ''; }
+  function lastEmail() { try { return localStorage.getItem('tenup-email') || ''; } catch (e) { return ''; } }
+  function keepEmail(v) { try { localStorage.setItem('tenup-email', v); } catch (e) {} }
 
   var VIEWS = {
     loading: function () { return T.bi('请稍等…', 'One moment…', 'tu-body'); },
@@ -24,6 +26,7 @@
       return T.bi('第一次设置', 'First-time setup', 'tu-title') +
         T.bi('设一个密码，再填两个接收验证码的手机号。手机号写入后不能直接修改，只能由另一个号码验证后更换。', 'Choose a password and two phones for codes. A number can later be changed only with a code sent to the other one.', 'tu-body') +
         field('token', '设置口令', 'Setup token — printed when the server starts', 'autocomplete="off"') +
+        field('em', '你的邮箱（以后用它登录）', 'Your e-mail — you will log in with it', 'type="email" autocomplete="email"') +
         field('pw', '密码（至少 10 位）', 'Password, at least 10 characters', 'type="password" autocomplete="new-password"') +
         field('pw2', '再输一次密码', 'Password again', 'type="password" autocomplete="new-password"') +
         field('p0', '手机号一', 'Phone 1', 'inputmode="tel" autocomplete="off"') + field('p1', '手机号二', 'Phone 2', 'inputmode="tel" autocomplete="off"') +
@@ -37,11 +40,14 @@
     password: function () {
       return T.bi(info.locked ? '输入密码解锁' : '输入密码', info.locked ? 'Enter the password to unlock' : 'Enter the password', 'tu-title') +
         (info.why === 'country' ? T.bi('这台设备换了国家，需要重新验证。', 'This device is in a different country, so it needs checking again.', 'tu-body') : '') +
+        (info.legacy ? field('em', '邮箱（用原来的家庭密码登录时留空）', 'E-mail — leave empty for the old family password', 'type="email" autocomplete="username" value="' + T.esc(lastEmail()) + '"')
+                     : field('em', '邮箱', 'E-mail', 'type="email" autocomplete="username" value="' + T.esc(lastEmail()) + '"')) +
         field('pw', '密码', 'Password', 'type="password" autocomplete="current-password" autofocus') + go('进入相册', 'Open the album');
     },
     sms: function () {
       return T.bi('短信验证', 'Text-message check', 'tu-title') +
-        T.bi(info.why === 'country' ? '这台设备换了国家。选一个手机号接收验证码。' : '这是一台新设备。选一个手机号接收验证码。', info.why === 'country' ? 'This device is in a different country. Choose a phone to receive the code.' : 'This is a new device. Choose a phone to receive the code.', 'tu-body') +
+        T.bi(info.why === 'country' ? '这台设备换了国家。选一个手机号接收验证码。' : info.why === 'always' ? '每次登录都要短信验证。选一个手机号接收验证码。' : '这是一台新设备。选一个手机号接收验证码。',
+          info.why === 'country' ? 'This device is in a different country. Choose a phone to receive the code.' : info.why === 'always' ? 'Every login needs a text message. Choose a phone to receive the code.' : 'This is a new device. Choose a phone to receive the code.', 'tu-body') +
         '<div class="lg__row">' + alt(info.phones[0], 'Send to phone 1', 'send', ' data-i="0"') + alt(info.phones[1], 'Send to phone 2', 'send', ' data-i="1"') + '</div>' +
         (info.sent ? field('code', '验证码', 'Code', 'inputmode="numeric" maxlength="6" autocomplete="one-time-code" autofocus') + go('确认', 'Confirm') : '');
     }
@@ -64,9 +70,10 @@
     e.preventDefault(); if (busy) return;
     if (view === 'setup') {
       if (val('pw') !== val('pw2')) { msg = '两次密码不一样 The two passwords do not match'; return draw(); }
-      run(api('POST', 'setup/start', { token: val('token'), password: val('pw'), phones: [val('p0'), val('p1')] }), function (j) { info.phones = j.phones; view = 'setupCodes'; draw(); });
+      keepEmail(val('em').trim());
+      run(api('POST', 'setup/start', { token: val('token'), email: val('em'), password: val('pw'), phones: [val('p0'), val('p1')] }), function (j) { info.phones = j.phones; view = 'setupCodes'; draw(); });
     } else if (view === 'setupCodes') run(api('POST', 'setup/finish', { codes: [val('c0'), val('c1')] }), enter);
-    else if (view === 'password') run(api('POST', 'login', { password: val('pw') }), function (j) { if (j.ok) return enter(); info.phones = j.phones; info.why = j.why; info.sent = false; view = 'sms'; draw(); });
+    else if (view === 'password') { keepEmail(val('em').trim()); run(api('POST', 'login', { email: val('em'), password: val('pw') }), function (j) { if (j.ok) return enter(); info.phones = j.phones; info.why = j.why; info.sent = false; view = 'sms'; draw(); }); }
     else if (view === 'sms') run(api('POST', 'sms/verify', { code: val('code') }), enter);
   });
   root.addEventListener('click', function (e) {
@@ -78,7 +85,7 @@
   fetch('api/state', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
     if (!j || j.server !== 'tenup') { view = 'none'; return draw(); }
     if (j.state === 'ok') return enter();
-    info.why = j.why; info.locked = j.state === 'locked';
+    info.why = j.why; info.locked = j.state === 'locked'; info.legacy = j.legacy;
     view = j.state === 'setup' ? 'setup' : 'password'; draw();
   }).catch(function () { view = 'none'; draw(); });
 })();

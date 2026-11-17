@@ -946,7 +946,9 @@
     host.appendChild(box);
     function mini(zh, en, act, cls, extra) { return '<button type="button" class="tu-mini ' + (cls || '') + '" data-act="' + act + '"' + (extra || '') + '>' + zh + '<small>' + en + '</small></button>'; }
     function draw(d) {
-      var h = '<div class="tu-acct__head">' + T.bi('账户与设备', 'Account and devices', 'tu-title') + mini('退出这台设备', 'Log out this device', 'out', 'tu-mini--danger') + '</div>';
+      var h = '<div class="tu-acct__head">' + T.bi('账户与设备', 'Account and devices', 'tu-title') + '<span class="tu-acct__acts">' +
+        '<a class="tu-mini" href="admin.html">管理员设置<small>Admin settings</small></a>' + mini('退出这台设备', 'Log out this device', 'out', 'tu-mini--danger') + '</span></div>' +
+        (d.me ? '<div class="tu-acct__me">' + T.bi('当前账号：' + esc(d.me), 'Signed in as ' + esc(d.me)) + '</div>' : '');
       h += '<div class="tu-acct__grid"><div><div class="tu-acct__h">' + T.bi('可信设备', 'Trusted devices') + '</div>' + d.devices.map(function (v) {
         return '<div class="tu-acct__row"><span>' + esc(v.name) + ' · ' + esc(v.country) + (v.current ? ' · <b>这台 this one</b>' : '') + '<small>' + new Date(v.seen).toLocaleDateString() + '</small></span>' +
           (v.current ? '' : mini('移除', 'Remove', 'rmdev', 'tu-mini--danger', ' data-id="' + esc(v.id) + '"')) + '</div>';
