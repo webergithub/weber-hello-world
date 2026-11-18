@@ -21,7 +21,7 @@ const GROUPS = [
     { code: 'P06', zh: '陪伴', en: 'Time together', shots: ['P06'], reach: '在 P05 按 OK 或挥手。', job: '核心信息三：三条越来越短的陪伴时间。' },
     { code: 'P07', zh: '许愿', en: 'Make a wish', shots: ['P07'], reach: '在 P06 按 OK 或挥手。', job: '十根蜡烛的蛋糕，等她吹。' },
     { code: 'P08', zh: '生日快乐', en: 'Happy birthday', shots: ['P08'], reach: '在 P07 吹蜡烛（按 OK 或对镜头吹气）。', job: '蜡烛吹灭，放烟花，爸爸妈妈说一句话。' },
-    { code: 'P09', zh: '年岁的名字', en: 'Names of the ages', shots: ['P09', 'P09-20'], states: ['第一个：幼学（你在这里）', '换到 20 岁：桃李年华'], reach: '在 P08 按 OK。← → 或挥手换一个，OK 回到开场。', job: '从十岁起，中国传统里每个年岁的叫法。下面附全部十个名字。', names: true }
+    { code: 'P09', zh: '年岁的名字', en: 'Names of the ages', shots: ['P09', 'P09-20'], states: ['第一个：幼学（你在这里）', '换到 20 岁：桃李年华'], reach: '在 P08 按 OK。← → 或挥手换一个，OK 回到开场。', job: '从十岁起，中国传统里每个年岁的叫法。下面附全部十二个名字。', names: true }
   ] },
   { id: 'M', zh: '照片管理（电脑或手机）', en: 'Managing photos', note: '打开 manage.html，或点 P01 右上角的"整理照片"。', screens: [
     { code: 'M01', zh: '照片管理', en: 'Photo manager', shots: ['M01', 'M01B'], states: ['电脑', '手机和平板：多了拍照、录视频按钮'], reach: 'manage.html。', job: '导入封面和每年的更多照片或视频，写说明和寄语，选背景音乐，填名字和头像。手机和平板上可以直接拍照、录视频。', tall: true },

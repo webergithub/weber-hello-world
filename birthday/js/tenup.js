@@ -57,6 +57,8 @@
     cycle: '<circle cx="24" cy="24" r="19"/><circle cx="24" cy="24" r="5"/><path d="M24 5v6M24 37v6M5 24h6M37 24h6M10.5 10.5l4 4M33.5 33.5l4 4M37.5 10.5l-4 4M14.5 33.5l-4 4"/>',
     pine: '<path d="M24 4L13 18h6L9 30h9L8 40h32L30 30h9L29 18h6z"/><path d="M24 40v5"/>',
     blossom: '<circle cx="24" cy="22" r="4.5"/><path d="M24 17.5c-3-7 3-12 6-8c2 3 0 6-6 8zM28.3 20.6c5-5 12-2 10 3c-1.5 3-5 3-10-3zM26.6 25.7c6 3 6 10 1 10c-3 0-4-4-1-10zM21.4 25.7c-6 3-6 10-1 10c3 0 4-4 1-10zM19.7 20.6c-5-5-12-2-10 3c1.5 3 5 3 10-3z"/><path d="M24 36v8M24 41c-4 0-7-2-8-5"/>',
+    cane: '<path d="M14 13c0-5 4-9 9-9s9 4 9 9"/><path d="M32 13v30"/><path d="M27 43h10"/><path d="M14 13v3"/>',
+    fish: '<path d="M5 25c6-11 21-13 31-4l8-6v20l-8-6c-10 9-25 7-31-4z"/><circle cx="13" cy="23" r="1.6" fill="currentColor"/><path d="M19 17.5h.5M24.5 16h.5M30 17.5h.5M22 21h.5M27.5 20.5h.5"/>',
     peach: '<path d="M24 43C9 39 6 23 16 15c3-2 6-2 8 0c2-2 5-2 8 0c10 8 7 24-8 28z"/><path d="M24 15c0-5 3-9 9-10c0 5-3 9-9 10zM24 15v14"/>',
     heart: '<path d="M24 41C10 31 5 24 5 16c0-10 13-13 19-4c6-9 19-6 19 4c0 8-5 15-19 25z"/>',
     arms: '<circle cx="24" cy="12" r="5"/><path d="M24 18v14M24 22L11 7M24 22L37 7M24 32l-8 12M24 32l8 12"/>',
@@ -301,6 +303,10 @@
       mz: '六十岁，古人记年份的六十个名字正好转完一圈', me: 'Sixty: the sixty year-names of the old calendar come full circle', fz: '来自干支纪年', fe: 'From the sixty-year calendar cycle' },
     { age: 70, zh: '古稀', py: 'Gǔxī', en: 'Rare since ancient times', icon: 'pine',
       mz: '七十岁，古时候能活到七十的人很少', me: 'Seventy: long ago, few people lived to seventy', fz: '出自唐代杜甫的诗：人生七十古来稀', fe: 'From a Tang poem by Du Fu' },
+    { age: 80, zh: '耄耋', py: 'Màodié', en: 'The silver years', icon: 'cane',
+      mz: '八十岁，头发白了，走路慢了，肚子里的故事却最多', me: 'Eighty: white hair, slower steps, and the most stories to tell', fz: '也泛指八九十岁。八十岁又叫“杖朝之年”，出自《礼记》', fe: 'Also used for the eighties and nineties; eighty is “the age of a cane at court” in the Book of Rites' },
+    { age: 90, zh: '鲐背', py: 'Táibèi', en: 'Spots like a globefish', icon: 'fish',
+      mz: '九十岁，背上长出像鲐鱼一样的斑点，是很长寿的样子', me: 'Ninety: spots on the back like a globefish — the look of a very long life', fz: '出自《尔雅》：鲐背，寿也。也叫“鲐背之年”', fe: 'From the Erya, the oldest Chinese dictionary' },
     { age: 100, zh: '期颐', py: 'Qīyí', en: 'A hundred years', icon: 'peach',
       mz: '一百岁，被大家好好照顾的年纪', me: 'One hundred: the age to be lovingly cared for', fz: '出自《礼记》：百年曰期，颐', fe: 'From the Book of Rites' }
   ];
