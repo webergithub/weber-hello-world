@@ -35,8 +35,9 @@ targets:
         CFBundleShortVersionString: "1.0.0"
         CFBundleVersion: "1"
         TenUpServerURL: ""
-        NSCameraUsageDescription: 互动模式用摄像头识别笑脸和手势，画面只在这台设备上处理，不会上传。
-        NSPhotoLibraryUsageDescription: 从相册里选择要放进成长相册的照片。
+        NSCameraUsageDescription: 互动模式用摄像头识别笑脸和手势（画面只在这台设备上处理）；整理相册时可以直接拍照或录视频放进相册。
+        NSMicrophoneUsageDescription: 录视频时录下声音，放进成长相册。
+        NSPhotoLibraryUsageDescription: 从相册里选择要放进成长相册的照片和视频。
         UILaunchScreen: {}
         UIRequiresFullScreen: true
         UIStatusBarHidden: true

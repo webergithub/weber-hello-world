@@ -1,7 +1,7 @@
 /* 重新截取界面总览用的截图。需要 playwright，并且 birthday/ 已在 8080 端口提供（python3 -m http.server 8080）。
    用法：cd birthday/docs/build && mkdir -p screens-raw && node screens-capture.js，然后把 screens-raw/*.png 转成 screens/*.jpg（宽不超过 1600）并复制 marks.json。 */
 /* 截每个界面，并记录每个标号区域的位置。输出 screens/<code>.png 和 screens/marks.json */
-const { chromium } = require('playwright');
+const { chromium, devices } = require('playwright');
 const crypto = require('crypto');
 function totp(secret, off) { const A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; let bits = 0, val = 0; const key = []; for (const ch of secret.replace(/\s/g, '')) { val = (val << 5) | A.indexOf(ch); bits += 5; if (bits >= 8) { key.push((val >>> (bits - 8)) & 255); bits -= 8; } } const c = Buffer.alloc(8); c.writeBigUInt64BE(BigInt(Math.floor(Date.now() / 30000) + (off || 0))); const h = crypto.createHmac('sha1', Buffer.from(key)).update(c).digest(), o = h[19] & 15; return String((h.readUInt32BE(o) & 0x7fffffff) % 1000000).padStart(6, '0'); }
 const CAMCSS = '#cam video{background:repeating-linear-gradient(45deg,#e6d6c6 0 14px,#efe2d4 14px 28px)!important}'; const { spawn } = require('child_process'); const fs = require('fs'), os = require('os'), path = require('path');
@@ -9,7 +9,10 @@ const OUT = path.join(__dirname, 'screens-raw'), SITE = 'http://127.0.0.1:8080',
 async function grab(pg, code, list, opt) {
   opt = opt || {};
   let clip = null;
-  if (opt.clip) { const b = await pg.$eval(opt.clip, e => { const r = e.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; }); clip = { x: Math.max(0, b.x - 16), y: Math.max(0, b.y - 16), width: b.w + 32, height: b.h + 32 }; }
+  if (opt.clip) {      /* one selector, or several: the box around all of them */
+    const b = await pg.evaluate(sels => { let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9; sels.forEach(s => { const r = document.querySelector(s).getBoundingClientRect(); x0 = Math.min(x0, r.left); y0 = Math.min(y0, r.top); x1 = Math.max(x1, r.right); y1 = Math.max(y1, r.bottom); }); return { x: x0 + scrollX, y: y0 + scrollY, w: x1 - x0, h: y1 - y0 }; }, [].concat(opt.clip));
+    clip = { x: Math.max(0, b.x - 16), y: Math.max(0, b.y - 16), width: b.w + 32, height: b.h + 32 };
+  }
   const items = [];
   for (const [sel, zh, en] of list) {
     const r = await pg.$eval(sel, e => { const r = e.getBoundingClientRect(); return { x: r.left + scrollX, y: r.top + scrollY, w: r.width, h: r.height }; }).catch(() => null);
@@ -31,6 +34,7 @@ async function grab(pg, code, list, opt) {
   await pg.evaluate(() => indexedDB.deleteDatabase('tenup')); await pg.reload(); await pg.waitForTimeout(900);
   await pg.setInputFiles('[data-f=cover]', [path.join(__dirname, 'samples/') + 'p0.jpg', path.join(__dirname, 'samples/') + 'p1.jpg', path.join(__dirname, 'samples/') + 'p2.jpg', path.join(__dirname, 'samples/') + 'p3.jpg']); await pg.waitForTimeout(1800);
   let fc = pg.waitForEvent('filechooser'); await pg.click('.tu-slot[data-i="1"] [data-act=more]'); (await fc).setFiles([path.join(__dirname, 'samples/') + 'p4.jpg', path.join(__dirname, 'samples/') + 'p5.jpg', path.join(__dirname, 'samples/') + 'p2.jpg']); await pg.waitForTimeout(1800);
+  fc = pg.waitForEvent('filechooser'); await pg.click('.tu-slot[data-i="2"] .tu-slot__img'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'clip.webm'); await pg.waitForSelector('.tu-slot[data-i="2"] .tu-vbadge'); await pg.waitForTimeout(800);
   fc = pg.waitForEvent('filechooser'); await pg.click('[data-act=avatar][data-who=dad]'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'p5.jpg'); await pg.waitForTimeout(700);
   fc = pg.waitForEvent('filechooser'); await pg.click('[data-act=avatar][data-who=mom]'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'p3.jpg'); await pg.waitForTimeout(700);
   await pg.fill('[data-n=zh]', '朵朵'); await pg.press('[data-n=zh]', 'Tab'); await pg.fill('[data-n=en]', 'Dora'); await pg.press('[data-n=en]', 'Tab');
@@ -48,7 +52,7 @@ async function grab(pg, code, list, opt) {
   await grab(pg, 'M01', [['.tu-mgr__title', '标题', 'Title'], ['.tu-mgr__status', '保存状态', 'Save status'], ['.tu-mgr__names > label:nth-child(1)', '中文名字', 'Her name in Chinese'], ['.tu-mgr__names > label:nth-child(2)', '英文名字', 'Her name in English'], ['.tu-avatars', '三个人的头像', 'Portraits'],
     ['.tu-musicbox', '背景音乐', 'Background music'], ['.tu-drop', '封面拖放区', 'Drop zone for covers'], ['.tu-slot[data-i="1"] .tu-slot__age', '年龄标签', 'Age label'], ['.tu-slot[data-i="1"] .tu-slot__img', '封面照片', 'Cover photo'],
     ['.tu-slot[data-i="1"] [data-k=zh]', '中文说明', 'Chinese caption'], ['.tu-slot[data-i="1"] [data-k=en]', '英文说明', 'English caption'], ['.tu-slot[data-i="1"] .tu-slot__row', '换封面 / 寄语 / 移除', 'Replace / note / remove'],
-    ['.tu-slot[data-i="1"] .tu-more', '这一年的更多照片', 'More from this year'], ['.tu-slot[data-i="2"]', '一个年龄格（共 11 格）', 'One age slot (11 in all)'], ['.tu-mgr__tools', '去播放 / 导出 / 导入 / 清空', 'Play / export / import / clear'], ['.tu-mgr__help', '保存说明', 'Where photos are kept']], { full: true });
+    ['.tu-slot[data-i="1"] .tu-more', '这一年的更多照片', 'More from this year'], ['.tu-slot[data-i="2"]', '一个年龄格（共 11 格）', 'One age slot (11 in all)'], ['.tu-slot[data-i="2"] .tu-vbadge', '视频封面的标记', 'A video cover'], ['.tu-mgr__tools', '去播放 / 导出 / 导入 / 清空', 'Play / export / import / clear'], ['.tu-mgr__help', '保存说明', 'Where photos are kept']], { full: true });
 
   /* the player, at TV size */
   await pg.setViewportSize({ width: 1920, height: 1080 });
@@ -63,6 +67,9 @@ async function grab(pg, code, list, opt) {
   await pg.keyboard.press('Enter'); await pg.waitForTimeout(1500); await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(3000);
   await grab(pg, 'P03', [['.x-head .tu-title', '标题', 'Title'], ['#yr', '这一年三个人的年龄', 'Our ages that year'], ['.x-corner', '小兔子', 'The bunny'], ['.tu-gal__card.is-current', '当前照片（相框）', 'Photo in front'], ['#note .tu-note__text', '寄语：一句话', 'Note: one line'], ['#note .tu-ink', '寄语：手写', 'Note: handwriting'], ['#note .tu-note__pic', '寄语：配图', 'Note: picture'],
     ['.tu-gal__card:nth-child(3)', '两侧的照片', 'Photos at the sides'], ['#rail', '年龄时间轴', 'Age timeline'], ['#cues', '动作提示条', 'Gesture cues'], ['.x-foot', '按键提示', 'Key hints'], ['#cam', '摄像头小窗（互动模式下显示孩子自己）', 'Camera bubble (shows her, in interactive mode)']]);
+  await pg.keyboard.press('ArrowRight'); await pg.waitForSelector('.tu-photo__video'); await pg.waitForTimeout(1800);
+  await grab(pg, 'P03B', [['.tu-gal__card.is-current .tu-photo__video', '视频：转到前面就自动播放', 'A video plays by itself when it comes to the front'], ['.tu-gal__card.is-current .tu-photo__cap', '说明与年龄', 'Caption and age'], ['.tu-gal__card:nth-child(4)', '下一张', 'The next one']]);
+  await pg.keyboard.press('ArrowLeft'); await pg.waitForTimeout(1500);
   await pg.keyboard.press('ArrowDown'); await pg.waitForTimeout(1500); await pg.keyboard.press('ArrowRight'); await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(2200);
   await grab(pg, 'P04', [['.x-head .tu-title', '标题', 'Title'], ['#yr', '说明与第几张', 'Caption and photo count'], ['.x-yearroom', '当年的"房间"背景', 'The year’s room'], ['.tu-gal__card.is-current', '当前照片', 'Photo in front'], ['#note .tu-note', '这张照片的寄语', 'This photo’s note'], ['#cues', '动作提示：挥手 / 握拳', 'Cues: swipe / fist'], ['.x-foot', '按键提示', 'Key hints']]);
   await pg.keyboard.press('ArrowUp'); await pg.waitForTimeout(800); await pg.keyboard.press('Enter'); await pg.waitForTimeout(1600);
@@ -77,6 +84,14 @@ async function grab(pg, code, list, opt) {
   await grab(pg, 'P09', [['.x-head .tu-title', '标题', 'Title'], ['.x-head .tu-body', '说明', 'Line under it'], ['.tu-namecard__pic', '图示与年龄', 'Picture and age'], ['.tu-namecard__tags', '标签', 'Tags'], ['.tu-namecard__name', '名字、拼音、英文名', 'Name, pinyin, English'], ['.tu-namecard__mean', '含义', 'Meaning'], ['.tu-namecard__txt > .tu-body', '出处', 'Source'], ['#rail', '年龄时间轴', 'Age timeline'], ['#cues', '动作提示条', 'Gesture cues'], ['.x-foot', '按键提示', 'Key hints']]);
   for (let i = 0; i < 3; i++) await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(1500);
   await pg.screenshot({ path: path.join(OUT, 'P09-20.png') });
+
+  /* on a phone: the camera buttons (M01) and camera-or-library (M04) */
+  const pc = await b.newContext(Object.assign({}, devices['Pixel 7'], { deviceScaleFactor: 2 })), pp = await pc.newPage();
+  await pp.goto(SITE + '/manage.html'); await pp.waitForSelector('.tu-capbar');
+  await pp.evaluate(() => document.querySelector('.tu-drop').scrollIntoView());
+  await grab(pp, 'M01B', [['.tu-drop', '拖放或选择', 'Drop or choose'], ['.tu-capbar [data-act=shoot]', '拍照：直接打开相机', 'Take a photo: opens the camera'], ['.tu-capbar [data-act=film]', '录视频：直接打开相机录像', 'Record a video: opens the camera'], ['.tu-capbar [data-act=library]', '从相册选照片或视频', 'Photos and videos from the library']], { clip: ['.tu-drop', '.tu-capbar', '.tu-slot[data-i="0"] .tu-slot__img'] });
+  await pp.click('.tu-slot[data-i="3"] .tu-slot__img'); await pp.waitForSelector('.tu-sheet'); await pp.waitForTimeout(400);
+  await grab(pp, 'M04', [['.tu-sheet__box > .tu-bi', '加到哪一格', 'Where it goes'], ['.tu-sheet [data-act=shoot]', '拍照', 'Take a photo'], ['.tu-sheet [data-act=film]', '录视频', 'Record a video'], ['.tu-sheet [data-act=library]', '从相册选', 'Photos and videos'], ['.tu-sheet [data-act=sheetno]', '取消', 'Cancel']]);
   await b.close();
 
   /* login and account: these need the album server */

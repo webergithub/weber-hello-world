@@ -379,6 +379,31 @@
 .tu-more__add:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
 .tu-more__it button:focus-visible{outline:3px solid var(--focus);outline-offset:-3px}
 .tu-more.is-over{outline:3px solid var(--focus);outline-offset:3px}
+/* videos: a play mark on the still, and the video itself laid over it while it plays */
+.tu-vbadge{position:absolute;left:8px;bottom:8px;display:flex;align-items:center;padding:4px 10px 4px 6px;border-radius:999px;background:rgba(40,24,18,.72);color:#fff;font:800 12px/1.1 var(--font-body);pointer-events:none}
+.tu-vbadge svg{width:16px;height:16px;margin-right:5px}
+.tu-vbadge span+span{margin-left:5px;font-weight:700;opacity:.85}
+.tu-more__v{position:absolute;left:50%;top:50%;width:22px;height:22px;margin:-11px 0 0 -11px;padding:5px;box-sizing:border-box;border-radius:50%;background:rgba(40,24,18,.66);color:#fff;pointer-events:none}
+.tu-more__v svg{display:block;width:100%;height:100%}
+.tu-photo__vid{position:absolute;left:50%;top:50%;width:120px;height:120px;margin:-60px 0 0 -60px;padding:30px 26px 30px 34px;box-sizing:border-box;border-radius:50%;background:rgba(40,24,18,.5);color:#fff;transition:opacity .4s}
+.tu-photo__vid svg{display:block;width:100%;height:100%}
+.tu-photo__video{position:absolute;top:0;right:0;bottom:0;left:0;width:100%;height:100%;object-fit:contain;background:#1b120e}
+.is-playing .tu-photo__vid{opacity:0}
+.tu-vsound{position:absolute;right:18px;bottom:18px;z-index:2;display:flex;flex-direction:column;align-items:flex-start;padding:10px 20px;border:0;border-radius:999px;background:rgba(40,24,18,.78);color:#fff;font:800 24px/1.2 var(--font-body);cursor:pointer}
+.tu-vsound .en{font-size:16px;font-weight:700;opacity:.85}
+/* camera buttons: phones and tablets only (a computer has no camera to hand) */
+.tu-capbar{display:none;margin:-8px 0 20px;gap:10px}
+.is-touch .tu-capbar{display:flex}
+.tu-cap{flex:1;display:flex;flex-direction:column;align-items:center;min-height:88px;padding:12px 6px;border-radius:var(--radius-md);border:3px solid var(--outline);background:var(--surface);color:var(--ink);box-shadow:var(--shadow-button);cursor:pointer;font-family:var(--font-body)}
+.tu-cap svg{width:34px;height:34px;margin-bottom:6px}
+.tu-cap .zh{font-family:var(--tu-display);font-weight:var(--tu-dw);font-size:18px}.tu-cap .en{font-size:12px;font-weight:700;color:var(--ink-muted)}
+.tu-cap:active{transform:scale(.97)}
+.tu-cap:focus-visible{outline:3px solid var(--focus);outline-offset:3px}
+.tu-sheet{position:fixed;left:0;top:0;right:0;bottom:0;z-index:110;display:flex;align-items:flex-end;justify-content:center;background:var(--scrim)}
+.tu-sheet__box{box-sizing:border-box;width:100%;max-width:560px;padding:20px 16px calc(16px + env(safe-area-inset-bottom, 0px));border-radius:var(--radius-md) var(--radius-md) 0 0;background:var(--surface);color:var(--ink);box-shadow:var(--shadow-card)}
+.tu-sheet__box .tu-title{font-size:22px}.tu-sheet__box .tu-title>.en{font-size:14px}
+.tu-sheet__opts{display:flex;gap:10px;margin:16px 0 12px}
+.tu-sheet__box>.tu-mini{width:100%;padding:10px}
 
 @media (prefers-reduced-motion:reduce){.tu-stage *,.tu-stage::before,.tu-tri *{animation-duration:.01s!important;animation-iteration-count:1!important;transition-duration:.01s!important}}
 

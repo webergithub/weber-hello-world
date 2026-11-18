@@ -1,6 +1,6 @@
 /* 十岁啦 · 相册服务端 Album server
    纯 Node.js（18+），不依赖任何 npm 包。 用法： node birthday/server/server.js
-   它做四件事：登录与短信验证、可信设备与国家判断、相册读写与同步、照片和音频的加密存放。
+   它做四件事：登录与短信验证、可信设备与国家判断、相册读写与同步、照片、视频和音频的加密存放。
    配置全部来自环境变量，见 README.md。设计说明见 ../docs/。 */
 'use strict';
 const http = require('http'), fs = require('fs'), path = require('path'), crypto = require('crypto');
@@ -20,7 +20,8 @@ const CFG = {
   insecure: env.TENUP_INSECURE === '1',          /* 仅本机调试：允许在 http 下使用登录 cookie */
   setupToken: env.TENUP_SETUP_TOKEN || '',
   smsWaitMs: env.TENUP_SMS_WAIT_MS == null || env.TENUP_SMS_WAIT_MS === '' ? 60000 : +env.TENUP_SMS_WAIT_MS,   /* 同一号码两次短信之间的间隔 */
-  maxFile: 25 * 1024 * 1024
+  maxFile: 25 * 1024 * 1024,
+  maxVideo: (+env.TENUP_MAX_VIDEO_MB || 200) * 1024 * 1024    /* 一段视频最大多少 MB */
 };
 const DAY = 86400000, OTP_MS = 5 * 60000, PRE_MS = 10 * 60000;
 
@@ -218,6 +219,85 @@ function readFile(id) {
   return rec;
 }
 const TYPES = /^(image\/(jpeg|png|webp|gif)|audio\/(mpeg|mp4|aac|ogg|wav|x-wav|webm|x-m4a|mp3))$/;
+const VIDEO = /^video\/(mp4|quicktime|webm|x-m4v|3gpp)$/;
+
+/* Videos are big and are played with byte ranges, so they are not sealed in one piece: <id>.seg holds the video
+   in 1 MiB parts, each sealed on its own (its number is in the AAD, so parts cannot be swapped or dropped), and
+   <id>.meta holds its type and size. A range request opens only the parts it needs, and memory use stays small. */
+const SEG = 1024 * 1024;
+function receiveVideo(req, id, type) {
+  return new Promise((resolve, reject) => {
+    const dir = path.join(CFG.data, 'files'), tmp = path.join(dir, id + '.' + rand(4) + '.tmp'), key = fileKey();
+    let fd = fs.openSync(tmp, 'w', 0o600), parts = [], have = 0, total = 0, n = 0, dead = false;
+    function flush(final) {
+      while (have >= SEG || (final && have > 0)) {
+        const all = Buffer.concat(parts), part = all.subarray(0, SEG);
+        fs.writeSync(fd, seal(key, part, 'file:' + id + ':' + n)); n++;
+        parts = [all.subarray(part.length)]; have = all.length - part.length;
+      }
+    }
+    function fail(e) {
+      if (dead) return; dead = true; parts = [];
+      try { fs.closeSync(fd); } catch (x) {}
+      fs.rmSync(tmp, { force: true }); reject(e);
+    }
+    req.on('data', c => {
+      if (dead) return;                       /* after a refusal the rest is read and dropped, so the answer still reaches the phone */
+      total += c.length;
+      if (total > CFG.maxVideo) return fail(httpErr(413, 'too_large', '视频太大（最大 ' + Math.round(CFG.maxVideo / 1048576) + ' MB） That video is too large'));
+      parts.push(c); have += c.length;
+      try { flush(false); } catch (e) { fail(e); }
+    });
+    req.on('end', () => {
+      if (dead) return;
+      try {
+        if (!total) throw httpErr(400, 'empty', '文件是空的 The file is empty');
+        flush(true); fs.closeSync(fd); fd = null;
+        fs.renameSync(tmp, path.join(dir, id + '.seg'));
+        writeAtomic(path.join(dir, id + '.meta'), seal(key, Buffer.from(JSON.stringify({ type, size: total, seg: SEG, at: Date.now() })), 'file:' + id + ':meta'));
+        resolve(total);
+      } catch (e) { fail(e); }
+    });
+    req.on('aborted', () => fail(httpErr(400, 'aborted', '上传中断了 The upload was interrupted')));
+    req.on('error', fail);
+  });
+}
+function videoMeta(id) {
+  const f = path.join(CFG.data, 'files', id + '.meta');
+  return fs.existsSync(f) ? JSON.parse(unseal(fileKey(), fs.readFileSync(f), 'file:' + id + ':meta').toString()) : null;
+}
+function rangeOf(req, total) {
+  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
+  if (!m || !(m[1] || m[2])) return null;
+  let a = m[1] ? +m[1] : total - +m[2], z = m[1] && m[2] ? +m[2] : total - 1;
+  a = Math.max(0, a); z = Math.min(total - 1, z);
+  return a > z ? false : [a, z];
+}
+async function serveVideo(req, res, id, meta) {
+  const total = meta.size, r = rangeOf(req, total), h = { 'Content-Type': meta.type, 'Cache-Control': 'private, max-age=31536000, immutable', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
+  if (r === false) { res.writeHead(416, { 'Content-Range': 'bytes */' + total }); return res.end(); }
+  const a = r ? r[0] : 0, z = r ? r[1] : total - 1;
+  if (r) h['Content-Range'] = 'bytes ' + a + '-' + z + '/' + total;
+  h['Content-Length'] = z - a + 1;
+  const fd = fs.openSync(path.join(CFG.data, 'files', id + '.seg'), 'r'), key = fileKey(), S = meta.seg || SEG;
+  let closed = false;
+  res.on('close', () => { closed = true; });
+  res.writeHead(r ? 206 : 200, h);
+  try {
+    for (let n = Math.floor(a / S), last = Math.floor(z / S); n <= last && !closed; n++) {
+      const len = Math.min(S, total - n * S) + 31, b = Buffer.alloc(len);
+      if (fs.readSync(fd, b, 0, len, n * (S + 31)) !== len) throw new Error('video part ' + n + ' is missing');
+      const plain = unseal(key, b, 'file:' + id + ':' + n);
+      const piece = plain.subarray(n === Math.floor(a / S) ? a - n * S : 0, n === last ? z - n * S + 1 : plain.length);
+      if (!res.write(piece)) await new Promise(ok => { res.once('drain', ok); res.once('close', ok); });
+    }
+  } catch (e) {
+    console.error('[tenup] video ' + id + ':', e.message);
+    res.destroy();                          /* a part that does not open is never sent; the player sees a broken download, not altered video */
+    return;
+  } finally { fs.closeSync(fd); }
+  res.end();
+}
 
 /* ------------------------------------------------------------------ admin sessions */
 function admSesKeys() { const o = {}; for (const k of admSes.keys()) o[k] = 1; return o; }
@@ -238,7 +318,7 @@ function requireAdmin(req, s) {
 const api = {
   'GET /api/state': async (req, res) => {
     const s = sessionOf(req);
-    send(res, 200, { server: 'tenup', state: s.state, why: s.why || null, setupTokenNeeded: !ACC, sessionDays: CFG.sessionDays, adminSet: !!(ACC && ACC.admin), email: s.acct ? s.acct.email : null, legacy: !!(ACC && ACC.accounts.some(a => !a.email)) });
+    send(res, 200, { server: 'tenup', state: s.state, why: s.why || null, setupTokenNeeded: !ACC, sessionDays: CFG.sessionDays, adminSet: !!(ACC && ACC.admin), email: s.acct ? s.acct.email : null, legacy: !!(ACC && ACC.accounts.some(a => !a.email)), maxVideoMB: Math.round(CFG.maxVideo / 1048576) });
   },
 
   /* ---- first-time setup: password + two phones, each proven by a code. Works exactly once. ---- */
@@ -494,7 +574,8 @@ const api = {
   /* ---- files: one upload each, stored sealed, served only to a logged-in device ---- */
   'POST /api/file': async (req, res) => {
     const type = String(req.headers['content-type'] || '').split(';')[0].trim().toLowerCase();
-    if (!TYPES.test(type)) throw httpErr(415, 'bad_type', '只能上传图片或音频 Only pictures and audio can be uploaded');
+    if (VIDEO.test(type)) { const vid = rand(16); await receiveVideo(req, vid, type); return send(res, 200, { id: vid }); }
+    if (!TYPES.test(type)) throw httpErr(415, 'bad_type', '只能上传图片、视频或音频 Only pictures, videos and audio can be uploaded');
     const data = await body(req, CFG.maxFile), id = rand(16), meta = Buffer.from(JSON.stringify({ type, size: data.length, at: Date.now() })), head = Buffer.alloc(2);
     head.writeUInt16BE(meta.length);
     writeAtomic(path.join(CFG.data, 'files', id + '.enc'), seal(fileKey(), Buffer.concat([head, meta, data]), 'file:' + id));
@@ -503,14 +584,15 @@ const api = {
 };
 function serveFile(req, res, id) {
   if (!/^[0-9a-f]{32}$/.test(id)) throw httpErr(404, 'no_file', 'Not found');
+  const vm = videoMeta(id);
+  if (vm) return serveVideo(req, res, id, vm);
   const f = readFile(id);
   if (!f) throw httpErr(404, 'no_file', 'Not found');
   const total = f.data.length, h = { 'Content-Type': f.meta.type, 'Cache-Control': 'private, max-age=31536000, immutable', 'Accept-Ranges': 'bytes', 'X-Content-Type-Options': 'nosniff' };
-  const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range || '');
-  if (m && (m[1] || m[2])) {       /* Safari will not play audio without byte ranges */
-    let a = m[1] ? +m[1] : total - +m[2], z = m[1] && m[2] ? +m[2] : total - 1;
-    a = Math.max(0, a); z = Math.min(total - 1, z);
-    if (a > z) { res.writeHead(416, { 'Content-Range': 'bytes */' + total }); return res.end(); }
+  const r = rangeOf(req, total);       /* Safari will not play audio or video without byte ranges */
+  if (r === false) { res.writeHead(416, { 'Content-Range': 'bytes */' + total }); return res.end(); }
+  if (r) {
+    const a = r[0], z = r[1];
     h['Content-Range'] = 'bytes ' + a + '-' + z + '/' + total; h['Content-Length'] = z - a + 1;
     res.writeHead(206, h); return res.end(f.data.slice(a, z + 1));
   }
@@ -560,7 +642,7 @@ const server = http.createServer(async (req, res) => {
       s = sessionOf(req);
       if (s.state !== 'ok') throw httpErr(s.state === 'locked' ? 423 : 401, s.state, s.state === 'locked' ? '服务刚重启，请输入密码解锁 The server restarted — enter the password to unlock' : '请登录 Please log in');
     }
-    if (isFile) return serveFile(req, res, pathname.slice(10));
+    if (isFile) return await serveFile(req, res, pathname.slice(10));
     await fn(req, res, s);
   } catch (e) {
     if (!e.status) console.error('[tenup]', e);

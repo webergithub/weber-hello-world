@@ -8,7 +8,7 @@ let proc, out = '', passed = 0, failed = 0;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function start(extra) {
   out = '';
-  proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { TENUP_PORT: PORT, TENUP_DATA: path.join(dir, 'data'), TENUP_MASTER_KEY: KEY, TENUP_INSECURE: '1', TENUP_TRUST_PROXY: '1', TENUP_SETUP_TOKEN: 'tok123', TENUP_GEOIP: MMDB, TENUP_SMS: 'console' }, extra || {}) });
+  proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { TENUP_PORT: PORT, TENUP_DATA: path.join(dir, 'data'), TENUP_MASTER_KEY: KEY, TENUP_INSECURE: '1', TENUP_TRUST_PROXY: '1', TENUP_SETUP_TOKEN: 'tok123', TENUP_GEOIP: MMDB, TENUP_SMS: 'console', TENUP_MAX_VIDEO_MB: '3' }, extra || {}) });
   proc.stdout.on('data', d => out += d); proc.stderr.on('data', d => out += d);
   return new Promise(async (res, rej) => { for (let i = 0; i < 50; i++) { if (/listening/.test(out)) return res(); await sleep(100); } rej(new Error('server did not start: ' + out)); });
 }
@@ -72,6 +72,25 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   const disk = fs.readdirSync(path.join(dir, 'data', 'files')).map(f => fs.readFileSync(path.join(dir, 'data', 'files', f)));
   ok('the stored picture is not readable on disk', disk.length === 1 && !disk[0].includes('PLAINTEXT-MARKER') && !fs.readFileSync(path.join(dir, 'data', 'album.enc')).includes('朵朵'));
   ok('the account file does not show phone numbers', !fs.readFileSync(path.join(dir, 'data', 'account.enc')).includes('13800000001'));
+
+  /* videos: stored in sealed 1 MiB parts and played with byte ranges */
+  const vid = Buffer.concat([Buffer.from('VIDEO-MARKER-'), crypto.randomBytes(2600000)]);
+  r = await a.call('GET', '/api/state'); ok('the server tells the pages its video size limit', r.json.maxVideoMB === 3, r.json);
+  r = await a.call('POST', '/api/file', vid, { type: 'video/mp4' }); const vidId = r.json && r.json.id; ok('a video uploads', r.status === 200 && /^[0-9a-f]{32}$/.test(vidId), r.json);
+  r = await a.call('GET', '/api/file/' + vidId); ok('the video reads back identical', r.status === 200 && r.buf.equals(vid) && r.headers.get('content-type') === 'video/mp4' && r.headers.get('accept-ranges') === 'bytes');
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=1048000-1049999' } }); ok('a range across two video parts', r.status === 206 && r.buf.equals(vid.slice(1048000, 1050000)) && r.headers.get('content-range') === 'bytes 1048000-1049999/' + vid.length);
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=2500000-' } }); ok('an open-ended range (how players ask)', r.status === 206 && r.buf.equals(vid.slice(2500000)));
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=-100' } }); ok('the last bytes of a video (where phones keep the index)', r.status === 206 && r.buf.equals(vid.slice(-100)));
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=9000000-' } }); ok('a range past the end is refused', r.status === 416);
+  r = await a.call('POST', '/api/file', Buffer.from('ftypqt  '), { type: 'video/quicktime' }); ok('an iPhone video (.mov) is accepted', r.status === 200);
+  r = await a.call('POST', '/api/file', crypto.randomBytes(3 * 1048576 + 10), { type: 'video/mp4' }); ok('a video over the size limit is refused', r.status === 413 && r.json.error === 'too_large', r.json);
+  const vdir = path.join(dir, 'data', 'files'), vfiles = fs.readdirSync(vdir);
+  ok('the video is sealed on disk, nothing left half-written', fs.existsSync(path.join(vdir, vidId + '.seg')) && !fs.readFileSync(path.join(vdir, vidId + '.seg')).includes('VIDEO-MARKER') && !vfiles.some(f => /\.tmp$/.test(f)), vfiles);
+  const segFile = path.join(vdir, vidId + '.seg'), seg = fs.readFileSync(segFile), bad = Buffer.from(seg); bad[(1048576 + 31) + 500] ^= 1; fs.writeFileSync(segFile, bad);
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=1048576-1049000' } }).catch(() => ({ status: 0, buf: Buffer.alloc(0) }));
+  ok('a changed byte in a stored video is never sent', !r.buf.equals(vid.slice(1048576, 1049001)));
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=0-99' } }); ok('…the untouched parts still play', r.status === 206 && r.buf.equals(vid.slice(0, 100)));
+  fs.writeFileSync(segFile, seg);
 
   const b = client(US2);
   r = await b.call('GET', '/api/file/' + id); ok('a stranger cannot read a picture', r.status === 401);
@@ -160,6 +179,7 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   r = await a.call('GET', '/api/admin/settings'); ok('after a restart the admin must sign in again', r.status === 401 || r.status === 423 || r.status === 403);
   r = await a.call('POST', '/api/login', { email: EMAIL, password: PW }); ok('the password unlocks it, no text message', r.json.ok === true);
   r = await a.call('GET', '/api/file/' + id); ok('…and the picture is back', r.status === 200 && r.buf.equals(pic));
+  r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=1000000-1100000' } }); ok('…and so is the video', r.status === 206 && r.buf.equals(vid.slice(1000000, 1100001)));
   r = await a.call('GET', '/api/album'); ok('…with the album as saved', r.json.version === 1 && r.json.album.meta.zh === '朵朵');
 
   const x = client('9.9.9.9');

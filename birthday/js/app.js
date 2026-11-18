@@ -119,7 +119,48 @@
     }
   };
 
+  /* ---------- videos: the one in front plays by itself, with sound when the browser allows it ---------- */
+  var vid = null;
+  function stopVideo() {
+    if (!vid) return;
+    var v = vid, card = v.closest('.tu-photo'), btn = card && card.querySelector('.tu-vsound');
+    vid = null; v.onplaying = v.onended = v.onerror = v.onvolumechange = null;
+    try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+    if (card) card.classList.remove('is-playing');
+    if (btn) btn.parentNode.removeChild(btn);
+    if (v.parentNode) v.parentNode.removeChild(v);
+    T.music.duck(false);
+  }
+  function playVideo(p) {
+    stopVideo();
+    var box = p && p.video && screen === 'album' ? view.querySelector('.tu-gal__card.is-current .tu-photo__img') : null;
+    if (!box) return;
+    var v = document.createElement('video'), card = box.parentNode;
+    v.className = 'tu-photo__video'; v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('webkit-playsinline', ''); v.preload = 'auto';
+    if (p.src) v.poster = p.src;
+    v.src = p.video; box.appendChild(v); vid = v;
+    v.onplaying = function () { card.classList.add('is-playing'); T.music.duck(!v.muted); };
+    v.onvolumechange = function () { T.music.duck(!v.muted && !v.paused); };
+    /* watch mode waits for the video to finish, then moves on */
+    v.onended = function () { card.classList.remove('is-playing'); T.music.duck(false); if (mode === 'watch' && !year) { clearTimeout(timer); timer = setTimeout(albumNext, 1500); } };
+    v.onerror = function () { if (vid !== v) return; stopVideo(); T.toast(stage, '这段视频在这台设备上放不了', 'This video cannot play on this device'); schedule(); };
+    var started = v.play();
+    if (started && started.catch) started.catch(function () {
+      /* the browser wants a tap before sound: play it silently and offer the sound */
+      if (vid !== v) return;
+      v.muted = true;
+      v.play().then(function () {
+        if (vid !== v) return;
+        var b = document.createElement('button');
+        b.type = 'button'; b.className = 'tu-vsound'; b.innerHTML = T.bi('点一下听声音', 'Tap for sound');
+        b.addEventListener('click', function (e) { e.stopPropagation(); v.muted = false; if (b.parentNode) b.parentNode.removeChild(b); });
+        box.appendChild(b);
+      }, function () {});
+    });
+  }
+
   function onAlbum(i, p) {
+    playVideo(p);
     var r = document.getElementById('rail'), y = document.getElementById('yr'), n = document.getElementById('note');
     if (n) n.innerHTML = T.noteCard(p.note);
     if (year) {
@@ -152,6 +193,7 @@
   function schedule() {
     clearTimeout(timer);
     if (mode !== 'watch' || year) return;
+    if (screen === 'album' && vid && !vid.ended) return;       /* a playing video moves on by itself when it ends */
     var ms = screen === 'album' ? watch.photoMs : screen === 'gift' ? (opened ? 7000 : 3500) : screen === 'names' ? 7000 : screen === 'cake' ? 0 : watch.chapterMs;
     if (!ms || screen === 'opening') return;
     timer = setTimeout(function () {
@@ -162,6 +204,7 @@
   }
 
   function render() {
+    stopVideo();
     gal = null;
     stage.classList.toggle('is-year', !!year);
     view.innerHTML = SCREENS[screen]();
@@ -326,13 +369,20 @@
         var s = pick(saved, p.age), f = pick(file && file.photos, p.age);
         var own = s.more && s.more.length;
         return { age: p.age, zh: s.zh || f.zh || p.zh, en: s.en || f.en || p.en, src: s.src || f.src || '', note: s.src ? s.note || null : f.note || null,
-          more: (own ? s.more : f.more || []).slice(0, T.MAX_MORE), moreNotes: (own ? s.moreNotes : f.moreNotes) || [] };
+          video: (s.src ? s.video : f.video) || '',
+          more: (own ? s.more : f.more || []).slice(0, T.MAX_MORE), moreNotes: (own ? s.moreNotes : f.moreNotes) || [], moreVideos: (own ? s.moreVideos : f.moreVideos) || [] };
       }));
     });
   }
 
   render();
-  function refresh() { return loadAlbum().then(function (list) { photos = list; if (cur >= photos.length) cur = 0; if (screen === 'opening' || screen === 'album' || screen === 'ages') render(); }).catch(function () {}); }
+  function refresh() {
+    return loadAlbum().then(function (list) {
+      photos = list; if (cur >= photos.length) cur = 0;
+      if (screen === 'album' && vid && !vid.paused && !vid.ended) return;     /* do not cut off a video that is playing; the next page shows the change */
+      if (screen === 'opening' || screen === 'album' || screen === 'ages') render();
+    }).catch(function () {});
+  }
   /* with the family server: follow what the other devices change; without it this resolves at once and nothing differs */
   T.cloud.init().then(function (on) { if (on) T.cloud.onChange(function (remote) { if (remote && !year) refresh(); }); return refresh(); });
   if (Q.mode === 'watch' || Q.mode === 'interactive') { focus = Q.mode === 'watch' ? 1 : 0; ok(); }

@@ -15,8 +15,8 @@ const GROUPS = [
   { id: 'P', zh: '播放（电视大屏）', en: 'The album on the TV', note: '打开 index.html。截图按 1920 × 1080 拍摄，照片是示例色块。', screens: [
     { code: 'P01', zh: '开场', en: 'Opening', shots: ['P01'], reach: '打开网站后的第一屏。', job: '叫她的名字，说生日快乐，问她要不要用摄像头一起玩。' },
     { code: 'P02', zh: '礼物', en: 'The gift', shots: ['P02', 'P02B'], states: ['打开前', '打开后'], reach: '在 P01 选好模式之后。', job: '核心信息一：你是上天送给爸爸妈妈的礼物。礼物盒打开，小兔子探出头。' },
-    { code: 'P03', zh: '成长相册', en: 'The album', shots: ['P03'], reach: '在 P02 按 OK 或向左挥手。', job: '0 到 10 岁，一岁一张，旋转木马式 3D 相册；照片旁边显示寄语。' },
-    { code: 'P04', zh: '这一年', en: 'One year’s photos', shots: ['P04'], reach: '在 P03 按 ↓ 或张开双手；按 ↑ 或握拳回到 P03。', job: '某一岁的更多照片，每张都可以带自己的寄语。' },
+    { code: 'P03', zh: '成长相册', en: 'The album', shots: ['P03', 'P03B'], states: ['照片', '视频（自动播放）'], reach: '在 P02 按 OK 或向左挥手。', job: '0 到 10 岁，一岁一张，旋转木马式 3D 相册；照片旁边显示寄语。转到前面的是视频时自动播放，背景音乐让开；观看模式等视频放完再翻页；浏览器不让带声音播放时先静音播放，出现"点一下听声音"。' },
+    { code: 'P04', zh: '这一年', en: 'One year’s photos', shots: ['P04'], reach: '在 P03 按 ↓ 或张开双手；按 ↑ 或握拳回到 P03。', job: '某一岁的更多照片和视频，每张都可以带自己的寄语；视频同样自动播放。' },
     { code: 'P05', zh: '年龄', en: 'Our ages', shots: ['P05'], reach: 'P03 翻过最后一张，或按 OK。', job: '核心信息二：你十岁，爸爸也十岁，妈妈十一岁。' },
     { code: 'P06', zh: '陪伴', en: 'Time together', shots: ['P06'], reach: '在 P05 按 OK 或挥手。', job: '核心信息三：三条越来越短的陪伴时间。' },
     { code: 'P07', zh: '许愿', en: 'Make a wish', shots: ['P07'], reach: '在 P06 按 OK 或挥手。', job: '十根蜡烛的蛋糕，等她吹。' },
@@ -24,9 +24,10 @@ const GROUPS = [
     { code: 'P09', zh: '年岁的名字', en: 'Names of the ages', shots: ['P09', 'P09-20'], states: ['第一个：幼学（你在这里）', '换到 20 岁：桃李年华'], reach: '在 P08 按 OK。← → 或挥手换一个，OK 回到开场。', job: '从十岁起，中国传统里每个年岁的叫法。下面附全部十个名字。', names: true }
   ] },
   { id: 'M', zh: '照片管理（电脑或手机）', en: 'Managing photos', note: '打开 manage.html，或点 P01 右上角的"整理照片"。', screens: [
-    { code: 'M01', zh: '照片管理', en: 'Photo manager', shots: ['M01'], reach: 'manage.html。', job: '导入封面和每年的更多照片，写说明和寄语，选背景音乐，填名字和头像。', tall: true },
+    { code: 'M01', zh: '照片管理', en: 'Photo manager', shots: ['M01', 'M01B'], states: ['电脑', '手机和平板：多了拍照、录视频按钮'], reach: 'manage.html。', job: '导入封面和每年的更多照片或视频，写说明和寄语，选背景音乐，填名字和头像。手机和平板上可以直接拍照、录视频。', tall: true },
     { code: 'M02', zh: '寄语对话框', en: 'Note dialog', shots: ['M02'], reach: '在 M01 点封面下的"寄语"，或点"这一年的更多照片"里的缩略图。', job: '给一张照片写一句话、手写一段、配一张小图。' },
-    { code: 'M03', zh: '账户与设备', en: 'Account and devices', shots: ['M03'], reach: '连接相册服务器时，M01 页面的最下方。', job: '看和移除可信设备，更换手机号，退出这台设备。' }
+    { code: 'M03', zh: '账户与设备', en: 'Account and devices', shots: ['M03'], reach: '连接相册服务器时，M01 页面的最下方。', job: '看和移除可信设备，更换手机号，退出这台设备。' },
+    { code: 'M04', zh: '拍照或选择', en: 'Camera or library', shots: ['M04'], reach: '手机和平板上，在 M01 点某一格的封面或"＋"。电脑上不出现，直接打开选择文件。', job: '选拍照、录视频，或从相册选照片和视频。拍照和录视频直接打开后置相机（iPhone、iPad、安卓都一样）。' }
   ] },
   { id: 'L', zh: '登录（连接相册服务器时）', en: 'Signing in', note: '只有由相册服务器提供网页时才会出现。', screens: [
     { code: 'L01', zh: '首次设置', en: 'First-time setup', shots: ['L01'], reach: '服务器第一次使用时，打开任何页面都会到这里。', job: '填设置口令、你的邮箱、密码和两个手机号。这个邮箱就是第一个登录账号。' },
@@ -57,7 +58,7 @@ function figure(code, shot, startAt, state) {
       '<button type="button" class="pin" data-k="' + code + '-' + n + '" style="left:' + Math.min(97, Math.max(0, l + .4)).toFixed(2) + '%;top:' + Math.min(97, Math.max(0, t + .4)).toFixed(2) + '%" aria-label="' + code + '-' + n + ' ' + esc(it.zh) + '">' + n + '</button>';
   }).join('');
   return '<figure class="shot">' + (state ? '<figcaption class="state">' + esc(state) + '</figcaption>' : '') +
-    '<div class="frame"><img loading="lazy" src="' + img(shot + '.jpg') + '" width="' + Math.round(m.w) + '" height="' + Math.round(m.h) + '" alt="' + code + ' ' + esc(state || '') + '">' + pins + '</div></figure>';
+    '<div class="frame"' + (m.w < 700 ? ' style="max-width:' + Math.round(m.w) + 'px"' : '') + '><img loading="lazy" src="' + img(shot + '.jpg') + '" width="' + Math.round(m.w) + '" height="' + Math.round(m.h) + '" alt="' + code + ' ' + esc(state || '') + '">' + pins + '</div></figure>';
 }
 function legend(code, list) {
   return '<ol class="legend">' + list.map(([n, it]) => '<li><button type="button" class="key" data-k="' + code + '-' + n + '"><span class="num">' + code + '-' + n + '</span><span class="lab"><span>' + esc(it.zh) + '</span><small>' + esc(it.en) + '</small></span></button></li>').join('') + '</ol>';

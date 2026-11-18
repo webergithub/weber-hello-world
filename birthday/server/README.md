@@ -26,7 +26,8 @@ location / {
     proxy_pass http://127.0.0.1:8787;
     proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
-    client_max_body_size 30m;
+    client_max_body_size 210m;      # 要比 TENUP_MAX_VIDEO_MB 稍大，否则大视频会被 Nginx 挡掉
+    proxy_request_buffering off;    # 视频边收边加密，不先落到 Nginx 的临时文件
 }
 ```
 
@@ -46,6 +47,7 @@ location / {
 | `TENUP_GEOIP` | IP 归属地库文件（`.mmdb`），用来判断国家 | 不设则不做国家判断 |
 | `TENUP_COUNTRY_HEADER` | 反向代理已经算好国家时，读取的请求头名，例如 `cf-ipcountry` | 无 |
 | `TENUP_SETUP_TOKEN` | 自己指定首次设置口令 | 随机生成并打印 |
+| `TENUP_MAX_VIDEO_MB` | 一段视频最大多少 MB（改大时 Nginx 的 `client_max_body_size` 也要跟着改大） | `200` |
 
 ### 短信
 
@@ -110,3 +112,10 @@ node server/test/api.test.js /path/to/dbip-country.mmdb
 
 - 没有清理不再被相册引用的旧文件，长期使用后数据文件夹会比实际需要的大一些。
 - 没有经过专业安全审计，定位是家用。
+
+### 视频
+
+- 手机拍的视频（iPhone 的 `.mov`、安卓的 `.mp4`，以及 `.webm`、`.m4v`、`.3gp`）可以上传，每段默认不超过 200 MB。
+- 视频不是整块加密的：按 1 MB 一段分别用 AES-256-GCM 加密，段号写进校验，段不能被调换或删掉。播放时按需要的字节范围只解密用到的那几段，内存占用很小，拖动进度条也快。
+- 存放方式：`files/<编号>.seg`（加密的视频分段）和 `files/<编号>.meta`（加密的类型和大小）。备份时和其他文件一样，整个数据文件夹拷走即可。
+- 服务端不转码。iPhone 默认的 HEVC 视频在电视、iPhone、iPad、Mac 上能放；个别电脑浏览器放不了时，上传页会提示。想让所有设备都能放，可以在 iPhone 设置 → 相机 → 格式里选"兼容性最佳"。

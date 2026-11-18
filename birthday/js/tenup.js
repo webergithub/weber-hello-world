@@ -63,6 +63,8 @@
     blow: '<circle cx="18" cy="24" r="14"/><circle cx="23" cy="28" r="3"/><path d="M13 19v2M22 19v2M36 20h8M37 27h9M36 34h6"/>',
     camera: '<rect x="4" y="13" width="40" height="27" rx="6"/><circle cx="24" cy="26" r="8"/><path d="M16 13l3-6h10l3 6"/>',
     play: '<path d="M14 7l26 17L14 41z" fill="currentColor"/>',
+    video: '<rect x="4" y="12" width="28" height="24" rx="5"/><path d="M32 21l12-7v20l-12-7z"/>',
+    images: '<rect x="4" y="9" width="40" height="30" rx="5"/><circle cx="16" cy="19" r="4"/><path d="M5 35l12-11l9 8l6-5l11 9"/>',
     upload: '<path d="M24 31V7M14 16l10-10l10 10"/><path d="M6 30v8c0 2 2 4 4 4h28c2 0 4-2 4-4v-8"/>',
     check: '<path d="M8 25l11 11L41 12"/>',
     gift: '<rect x="7" y="20" width="34" height="22" rx="3"/><rect x="4" y="12" width="40" height="8" rx="3"/><path d="M24 12v30M24 12c-9 0-11-9-5-9c4 0 5 5 5 9zM24 12c9 0 11-9 5-9c-4 0-5 5-5 9z"/>',
@@ -192,9 +194,11 @@
     return '<div class="tu-ph tu-ph--' + (p.age % 5) + '"><span class="tu-ph__n">' + p.age + '</span>' +
       '<span class="tu-ph__t"><span lang="zh-Hans">照片占位</span><br><span lang="en">Photo placeholder</span></span></div>';
   };
+  /* a video is kept as a still picture (src, shown until it plays) plus the video itself (video) */
   T.photoCard = function (p, cls) {
-    return '<figure class="tu-photo ' + (cls || '') + '"><div class="tu-photo__img">' +
+    return '<figure class="tu-photo ' + (cls || '') + (p.video ? ' has-video' : '') + '"><div class="tu-photo__img">' +
       (p.src ? '<img alt="' + esc(p.zh + ' ' + p.en) + '" src="' + esc(p.src) + '">' : T.placeholder(p)) +
+      (p.video ? '<span class="tu-photo__vid" aria-hidden="true">' + T.icon('play') + '</span>' : '') +
       '</div><figcaption class="tu-photo__cap">' + T.bi(p.zh, p.en, 'tu-label') + T.age(p.age) + '</figcaption></figure>';
   };
   T.modeCard = function (kind, cls) {
@@ -219,7 +223,7 @@
   ];
   /* One year's photos: the cover first, then the extras. */
   T.yearPhotos = function (p) {
-    return [p].concat((p.more || []).map(function (src, j) { return { age: p.age, zh: p.zh, en: p.en, src: src, note: (p.moreNotes || [])[j] || null }; }));
+    return [p].concat((p.more || []).map(function (src, j) { return { age: p.age, zh: p.zh, en: p.en, src: src, video: (p.moreVideos || [])[j] || '', note: (p.moreNotes || [])[j] || null }; }));
   };
   T.cue = function (c, o) {
     o = o || {};
@@ -497,6 +501,21 @@
     });
   }
   C.call = call;
+  /* a big file (a video) goes up straight from the phone, with progress; → Promise<'api/file/<id>'> */
+  C.send = function (blob, type, onProgress) {
+    return new Promise(function (res, rej) {
+      var x = new XMLHttpRequest();
+      x.open('POST', 'api/file'); x.setRequestHeader('X-TenUp', '1'); x.setRequestHeader('Content-Type', type);
+      x.upload.onprogress = function (e) { if (onProgress && e.lengthComputable) onProgress(e.loaded / e.total); };
+      x.onload = function () {
+        var j = {}; try { j = JSON.parse(x.responseText); } catch (e) {}
+        if (x.status === 401 || x.status === 423) { toLogin(); return; }
+        if (x.status === 200 && j.id) res('api/file/' + j.id); else rej(new Error(j.message || '上传没有成功 The upload did not go through'));
+      };
+      x.onerror = function () { rej(new Error('连不上服务器 Cannot reach the server')); };
+      x.send(blob);
+    });
+  };
   /* every string in the album: 'f:<id>' on the server ↔ 'api/file/<id>' in the page */
   function walk(o, fn) {
     if (Array.isArray(o)) return Promise.all(o.map(function (v, i) { return Promise.resolve(typeof v === 'string' ? fn(v) : walk(v, fn)).then(function (r) { if (typeof v === 'string') o[i] = r; }); })).then(function () { return o; });
@@ -558,7 +577,7 @@
     return fetch('api/state', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (!j || j.server !== 'tenup') return false;
       if (j.state !== 'ok') return toLogin();
-      C.on = true; C.version = -1;
+      C.on = true; C.version = -1; C.maxVideoMB = j.maxVideoMB || 200;
       return pull().then(function () {
         setInterval(function () { if (document.hidden) return; pull().then(function (changed) { if (changed) tell(true); }).catch(function () { if (!cDirty) setStatus('offline'); }); }, 4000);
         return true;
@@ -594,6 +613,72 @@
       img.src = url;
     });
   };
+  /* ---------- videos ----------
+     Phones label their videos video/mp4 (Android) or video/quicktime (iPhone .mov); a few send no type, so the name decides. */
+  var VEXT = { mp4: 'video/mp4', m4v: 'video/x-m4v', mov: 'video/quicktime', qt: 'video/quicktime', webm: 'video/webm', '3gp': 'video/3gpp' };
+  T.videoType = function (f) {
+    if (f && /^video\//.test(f.type)) return f.type.toLowerCase();
+    var m = /\.([a-z0-9]+)$/i.exec((f && f.name) || '');
+    return m && VEXT[m[1].toLowerCase()] || '';
+  };
+  T.isVideo = function (f) { return !!T.videoType(f); };
+  T.isMedia = function (f) { return !!f && (/^image\//.test(f.type) || T.isVideo(f)); };
+  /* a still for a video that this browser cannot open: a soft card with a play mark */
+  T.videoStill = function () {
+    var c = document.createElement('canvas'), x = c.getContext('2d');
+    c.width = 960; c.height = 720;
+    var g = x.createLinearGradient(0, 0, 960, 720); g.addColorStop(0, '#ffd9cf'); g.addColorStop(1, '#cfe4ff');
+    x.fillStyle = g; x.fillRect(0, 0, 960, 720);
+    x.fillStyle = 'rgba(255,255,255,.85)'; x.beginPath(); x.arc(480, 340, 120, 0, 6.2832); x.fill();
+    x.fillStyle = '#e0607e'; x.beginPath(); x.moveTo(445, 280); x.lineTo(545, 340); x.lineTo(445, 400); x.closePath(); x.fill();
+    x.fillStyle = '#5b3a2e'; x.font = 'bold 44px sans-serif'; x.textAlign = 'center'; x.fillText('视频 · Video', 480, 560);
+    return c.toDataURL('image/jpeg', 0.86);
+  };
+  /* a picked video → { poster: a JPEG data URL from about half a second in, playable: whether this browser can show it, duration } */
+  T.videoPoster = function (file, max) {
+    max = max || 1600;
+    return new Promise(function (res) {
+      var url = URL.createObjectURL(file), v = document.createElement('video'), done = false, tm;
+      function finish(poster, playable) {
+        if (done) return; done = true; clearTimeout(tm);
+        var d = isFinite(v.duration) ? v.duration : 0;
+        try { v.pause(); v.removeAttribute('src'); v.load(); } catch (e) {}
+        URL.revokeObjectURL(url);
+        res({ poster: poster || T.videoStill(), playable: playable, duration: d });
+      }
+      function grab() {
+        if (done || !v.videoWidth || v.readyState < 2) return;
+        try {
+          var k = Math.min(1, max / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement('canvas');
+          c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
+          c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
+          finish(c.toDataURL('image/jpeg', 0.86), true);
+        } catch (e) { finish('', true); }
+      }
+      tm = setTimeout(function () { finish('', v.readyState >= 1); }, 12000);
+      v.muted = true; v.playsInline = true; v.setAttribute('playsinline', ''); v.setAttribute('muted', ''); v.preload = 'auto';
+      v.onloadedmetadata = function () { var t = Math.min(0.5, (v.duration || 1) / 3); try { v.currentTime = t; } catch (e) {} };
+      v.onseeked = grab; v.onloadeddata = function () { setTimeout(grab, 60); }; v.ontimeupdate = grab;
+      v.onerror = function () { finish('', false); };
+      v.src = url;
+      /* iPhones load nothing until asked to play; a muted, inline play is allowed and is stopped at once */
+      var p = v.play && v.play(); if (p && p.then) p.then(function () { v.pause(); }, function () {});
+    });
+  };
+  /* the video itself, ready for the album: on the family server it is uploaded now (it is too big to wait for
+     the next save), else it is kept in this browser as a data URL */
+  T.LOCAL_VIDEO_MB = 30;
+  T.videoLimitMB = function () { return T.cloud.on ? T.cloud.maxVideoMB || 200 : T.LOCAL_VIDEO_MB; };
+  T.keepVideo = function (file, onProgress) {
+    var type = T.videoType(file);
+    if (T.cloud.on) return T.cloud.send(file, type, onProgress);
+    return new Promise(function (res, rej) {
+      var rd = new FileReader();
+      rd.onload = function () { var u = String(rd.result); res(u.replace(/^data:[^;,]*/, 'data:' + type)); };
+      rd.onerror = function () { rej(new Error('cannot read video')); };
+      rd.readAsDataURL(file);
+    });
+  };
 
 
 
@@ -626,13 +711,13 @@
   };
   T.tunes = [['', '不放音乐', 'No music'], ['builtin:birthday', '生日快乐歌（八音盒）', 'Happy Birthday (music box)'], ['builtin:lullaby', '摇篮曲（八音盒）', 'Lullaby (music box)']];
   function freq(name) { var m = /^([A-G])(#?)(\d)$/.exec(name); if (!m) return 0; var n = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 }[m[1]] + (m[2] ? 1 : 0) + (+m[3] + 1) * 12; return 440 * Math.pow(2, (n - 69) / 12); }
-  var M = T.music = { src: '', vol: 0.6, muted: false };
+  var M = T.music = { src: '', vol: 0.6, muted: false, ducked: false };
   var actx = null, gainAll = null, synthTimer = null, audioEl = null;
   function synth(tune) {
     var AC = window.AudioContext || window.webkitAudioContext; if (!AC) return;
     actx = actx || new AC();
     if (actx.state === 'suspended') actx.resume();
-    gainAll = actx.createGain(); gainAll.gain.value = M.muted ? 0 : M.vol; gainAll.connect(actx.destination);
+    gainAll = actx.createGain(); gainAll.gain.value = M.muted ? 0 : M.vol * (M.ducked ? 0.12 : 1); gainAll.connect(actx.destination);
     var seq = tune.notes.split(',').map(function (x) { var p = x.split(' '); return [freq(p[0]), +p[1]]; }), beat = 60 / tune.bpm, i = 0, when = actx.currentTime + 0.15, out = gainAll;
     function ahead() {
       while (when < actx.currentTime + 0.6) {
@@ -660,10 +745,12 @@
     M.stop(); M.src = src;
     if (!src) return;
     if (/^builtin:/.test(src)) { if (TUNES[src.slice(8)]) synth(TUNES[src.slice(8)]); return; }
-    audioEl = new Audio(src); audioEl.loop = true; audioEl.volume = M.muted ? 0 : M.vol;
+    audioEl = new Audio(src); audioEl.loop = true; audioEl.volume = M.muted ? 0 : M.vol * (M.ducked ? 0.12 : 1);
     var p = audioEl.play(); if (p && p.catch) p.catch(function () {});
   };
-  M.volume = function (v) { M.vol = Math.max(0, Math.min(1, v)); if (gainAll) gainAll.gain.value = M.muted ? 0 : M.vol; if (audioEl) audioEl.volume = M.muted ? 0 : M.vol; };
+  M.volume = function (v) { M.vol = Math.max(0, Math.min(1, v)); var g = M.muted ? 0 : M.vol * (M.ducked ? 0.12 : 1); if (gainAll) gainAll.gain.value = g; if (audioEl) audioEl.volume = g; };
+  /* while a video plays with its own sound, the background music steps back */
+  M.duck = function (on) { if (M.ducked === !!on) return; M.ducked = !!on; M.volume(M.vol); };
   M.mute = function (on) { M.muted = on == null ? !M.muted : !!on; M.volume(M.vol); return M.muted; };
   M.defaults = function (m) { m = m || {}; return { album: m.album || '', cake: m.cake == null ? 'builtin:birthday' : m.cake, volume: m.volume == null ? 0.6 : m.volume, tracks: m.tracks || [] }; };
 
@@ -674,30 +761,37 @@
   T.manager = function (root, o) {
     o = o || {};
     T.defs();
-    function blank() { return T.photos.map(function (p) { return { age: p.age, zh: p.zh, en: p.en, src: '', more: [], note: null, moreNotes: [] }; }); }
+    function blank() { return T.photos.map(function (p) { return { age: p.age, zh: p.zh, en: p.en, src: '', video: '', more: [], note: null, moreNotes: [], moreVideos: [] }; }); }
     var photos = blank(), meta = { zh: (o.defaultName && o.defaultName.zh) || '', en: (o.defaultName && o.defaultName.en) || '', avatars: {} };
     var WHO = [['girl', '她', 'Her'], ['dad', '爸爸', 'Dad'], ['mom', '妈妈', 'Mom']], avatarTarget = null;
-    var target = null, moreTarget = null, note = null, music = T.music.defaults(), dlg = null;
+    /* where the next picked photos or videos go: { more: false, i: null } fills empty covers, { more: true, i } adds to a year */
+    var dest = null, note = null, music = T.music.defaults(), dlg = null;
+    /* phones and tablets: offer the camera next to the library */
+    var touch = !!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
     function mini(zh, en, act, cls) { return '<button type="button" class="tu-mini ' + (cls || '') + '" data-act="' + act + '">' + zh + '<small>' + en + '</small></button>'; }
+    function capBtn(act, icon, zh, en) { return '<button type="button" class="tu-cap" data-act="' + act + '">' + T.icon(icon) + T.bi(zh, en) + '</button>'; }
 
     root.innerHTML = '<div class="tu-mgr"><div class="tu-mgr__head"><div class="tu-mgr__title">' +
-      T.bi('照片管理', 'Photo manager', 'tu-title') + T.bi('每个年龄一张封面，还可以再加这一年的更多照片', 'One cover photo per age, plus more photos from that year', 'tu-body') +
+      T.bi('照片管理', 'Photo manager', 'tu-title') + T.bi('每个年龄一张封面，照片或视频都可以；还可以再加这一年的更多照片和视频', 'One cover per age, a photo or a video, plus more photos and videos from that year', 'tu-body') +
       '</div><div class="tu-mgr__status" role="status"></div></div>' +
       '<div class="tu-mgr__names"><label><span>孩子的名字或小名 · Her name (Chinese)</span><input class="tu-field" data-n="zh" maxlength="6" lang="zh-Hans"></label>' +
       '<label><span>英文名 · Her name (English)</span><input class="tu-field" data-n="en" maxlength="14" lang="en"></label>' +
       '<div class="tu-avatars"><span>头像（年龄那一页用）· Portraits for the ages page</span><div class="tu-avatars__row"></div></div></div>' +
       '<div class="tu-musicbox"></div>' +
-      '<label class="tu-drop">' + T.icon('upload') + T.bi('把封面照片拖到这里，或点一下选择（可多选）', 'Drop cover photos here, or tap to choose — several at once is fine') +
-      '<input type="file" data-f="cover" accept="image/*" multiple></label><div class="tu-slots"></div>' +
+      '<label class="tu-drop">' + T.icon('upload') + T.bi('把封面照片或视频拖到这里，或点一下选择（可多选）', 'Drop cover photos or videos here, or tap to choose — several at once is fine') +
+      '<input type="file" data-f="cover" accept="image/*,video/*" multiple></label>' +
+      '<div class="tu-capbar">' + capBtn('shoot', 'camera', '拍照', 'Take a photo') + capBtn('film', 'video', '录视频', 'Record a video') + capBtn('library', 'images', '从相册选', 'Photos & videos') + '</div>' +
+      '<div class="tu-slots"></div>' +
       '<div class="tu-mgr__tools">' + (o.playHref ? '<a class="tu-mini tu-mini--go" href="' + esc(o.playHref) + '">去播放<small>Play the album</small></a>' : '') +
       mini('导出相册包', 'Export album file', 'export') + mini('导入相册包', 'Import album file', 'import') + mini('全部清空', 'Clear everything', 'clear', 'tu-mini--danger') +
-      '<input type="file" data-f="more" accept="image/*" multiple><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="noteimg" accept="image/*"><input type="file" data-f="audio" accept="audio/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
-      '<div class="tu-mgr__help">' + T.bi('照片只保存在这台设备的这个浏览器里，不会上传。要在另一台设备上播放：导出相册包，把下载到的 album.js 放进网站的 album 文件夹。',
-        'Photos stay in this browser on this device and are never uploaded. To play on another device, export the album file and put album.js into the site’s album folder.', 'tu-body') + '</div></div>';
+      '<input type="file" data-f="more" accept="image/*,video/*" multiple><input type="file" data-f="shoot" accept="image/*" capture="environment"><input type="file" data-f="film" accept="video/*" capture="environment"><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="noteimg" accept="image/*"><input type="file" data-f="audio" accept="audio/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
+      '<div class="tu-mgr__help">' + T.bi('照片只保存在这台设备的这个浏览器里，不会上传；视频每段不超过 ' + T.LOCAL_VIDEO_MB + ' MB。要在另一台设备上播放：导出相册包，把下载到的 album.js 放进网站的 album 文件夹。',
+        'Photos stay in this browser on this device and are never uploaded; each video can be up to ' + T.LOCAL_VIDEO_MB + ' MB. To play on another device, export the album file and put album.js into the site’s album folder.', 'tu-body') + '</div></div>';
+    root.querySelector('.tu-mgr').classList.toggle('is-touch', touch);
 
     function q(sel) { return root.querySelector(sel); }
     var slots = q('.tu-slots'), drop = q('.tu-drop'), status = q('.tu-mgr__status');
-    var musicBox = q('.tu-musicbox'), avRow = q('.tu-avatars__row'), avFile = q('[data-f="avatar"]'), file = q('[data-f="cover"]'), moreFile = q('[data-f="more"]'), pack = q('[data-f="pack"]'), nzh = q('[data-n="zh"]'), nen = q('[data-n="en"]');
+    var musicBox = q('.tu-musicbox'), avRow = q('.tu-avatars__row'), avFile = q('[data-f="avatar"]'), file = q('[data-f="cover"]'), moreFile = q('[data-f="more"]'), shootFile = q('[data-f="shoot"]'), filmFile = q('[data-f="film"]'), pack = q('[data-f="pack"]'), nzh = q('[data-n="zh"]'), nen = q('[data-n="en"]');
 
     function drawStatus() {
       var n = photos.filter(function (p) { return p.src; }).length, m = 0, ok = T.store.persistent;
@@ -718,23 +812,25 @@
       }).join('');
       slots.innerHTML = photos.map(function (p, i) {
         return '<div class="tu-slot" data-i="' + i + '"><span class="tu-slot__age">' + p.age + ' 岁<small>age ' + p.age + '</small></span>' +
-          '<div class="tu-slot__img" data-act="pick" title="选择封面 Choose the cover">' + (p.src ? '<img alt="" src="' + esc(p.src) + '">' : T.placeholder(p)) + '</div>' +
+          '<div class="tu-slot__img" data-act="pick" title="选择封面 Choose the cover">' + (p.src ? '<img alt="" src="' + esc(p.src) + '">' : T.placeholder(p)) + (p.video ? vbadge() : '') + '</div>' +
           '<input class="tu-field" data-k="zh" lang="zh-Hans" aria-label="中文说明 Chinese caption，' + p.age + ' 岁" value="' + esc(p.zh) + '" maxlength="12">' +
           '<input class="tu-field tu-field--en" data-k="en" lang="en" aria-label="English caption 英文说明, age ' + p.age + '" value="' + esc(p.en) + '" maxlength="28">' +
           '<div class="tu-slot__row">' + mini(p.src ? '换封面' : '选封面', p.src ? 'Replace' : 'Choose', 'pick') +
           '<button type="button" class="tu-mini' + (T.hasNote(p.note) ? ' is-set' : '') + '" data-act="note" data-j="-1"' + (p.src ? '' : ' disabled') + '>寄语<small>Note</small></button>' +
           '<button type="button" class="tu-mini tu-mini--danger" data-act="del"' + (p.src ? '' : ' disabled') + '>移除<small>Remove</small></button></div>' +
-          '<div class="tu-more"><span class="tu-more__h"><span lang="zh-Hans">这一年的更多照片 ' + p.more.length + ' / ' + T.MAX_MORE + '</span><span lang="en">More from this year</span></span><div class="tu-more__list">' +
+          '<div class="tu-more"><span class="tu-more__h"><span lang="zh-Hans">这一年的更多照片和视频 ' + p.more.length + ' / ' + T.MAX_MORE + '</span><span lang="en">More photos and videos from this year</span></span><div class="tu-more__list">' +
           p.more.map(function (src, j) {
-            return '<span class="tu-more__it' + (T.hasNote(p.moreNotes[j]) ? ' is-set' : '') + '"><button type="button" class="tu-more__pic" data-act="note" data-j="' + j + '" aria-label="给这张写寄语 Add a note to this photo"><img alt="" src="' + esc(src) + '"></button><button type="button" class="tu-more__x" data-act="delmore" data-j="' + j + '" aria-label="移除这张 Remove this photo">×</button></span>';
+            var isV = !!(p.moreVideos || [])[j];
+            return '<span class="tu-more__it' + (T.hasNote(p.moreNotes[j]) ? ' is-set' : '') + (isV ? ' is-video' : '') + '"><button type="button" class="tu-more__pic" data-act="note" data-j="' + j + '" aria-label="' + (isV ? '给这段视频写寄语 Add a note to this video' : '给这张写寄语 Add a note to this photo') + '"><img alt="" src="' + esc(src) + '">' + (isV ? '<span class="tu-more__v" aria-hidden="true">' + T.icon('play') + '</span>' : '') + '</button><button type="button" class="tu-more__x" data-act="delmore" data-j="' + j + '" aria-label="移除这张 Remove this photo">×</button></span>';
           }).join('') +
-          (p.more.length < T.MAX_MORE ? '<button type="button" class="tu-more__add" data-act="more" aria-label="添加更多照片 Add more photos, age ' + p.age + '">+</button>' : '') +
+          (p.more.length < T.MAX_MORE ? '<button type="button" class="tu-more__add" data-act="more" aria-label="添加更多照片或视频 Add more photos or videos, age ' + p.age + '">+</button>' : '') +
           '</div></div></div>';
       }).join('');
       drawMusic();
       drawStatus();
       if (!dlg) T.tag('M01', '照片管理', 'Photo manager');
     }
+    function vbadge() { return '<span class="tu-vbadge">' + T.icon('play') + '<span lang="zh-Hans">视频</span><span lang="en">Video</span></span>'; }
     function save() { return Promise.all([T.store.set('photos', photos), T.store.set('meta', meta), T.store.set('music', music)]).then(drawStatus); }
 
     /* ----- background music ----- */
@@ -794,47 +890,86 @@
       if (dlg.j < 0) photos[dlg.i].note = v; else photos[dlg.i].moreNotes[dlg.j] = v;
       dlg = null; drawDlg(); note = null; draw(); save();
     }
-    function images(files) { return [].slice.call(files).filter(function (f) { return /^image\//.test(f.type); }); }
+    function media(files) { return [].slice.call(files || []).filter(T.isMedia); }
+    /* photos are shrunk here; a video keeps its own file and gets a still picture for the slot and for the moment before it plays */
     function readAll(list, max, each) {
-      var failed = 0;
+      var r = { failed: 0, big: 0, odd: 0 }, lim = T.videoLimitMB(), vids = list.filter(T.isVideo).length, vn = 0;
       return list.reduce(function (chain, f, k) {
-        return chain.then(function () { return T.readImage(f, max).then(function (src) { each(src, k); }, function () { failed++; }); });
-      }, Promise.resolve()).then(function () { return failed; });
+        return chain.then(function () {
+          if (!T.isVideo(f)) return T.readImage(f, max).then(function (src) { each({ src: src, video: '' }, k); }, function () { r.failed++; });
+          if (f.size > lim * 1048576) { r.big++; return; }
+          vn++; busy(list.length, vn, vids, 0);
+          return T.videoPoster(f, max).then(function (pv) {
+            if (!pv.playable) r.odd++;
+            return T.keepVideo(f, function (x) { busy(list.length, vn, vids, x); }).then(function (url) { each({ src: pv.poster, video: url }, k); });
+          }).catch(function (e) { r.failed++; r.why = e && e.message; });
+        });
+      }, Promise.resolve()).then(function () { return r; });
     }
-    function busy(n) { note = ['正在处理 ' + n + ' 张…', 'Reading ' + n + ' photo(s)…']; drawStatus(); }
-    function done(failed, extra, fullZh, fullEn) {
-      note = failed ? [failed + ' 张读不出来，换一张试试', failed + ' could not be read — try another'] : extra > 0 ? [fullZh.replace('#', extra), fullEn.replace('#', extra)] : null;
+    function busy(n, vn, vids, x) {
+      note = vn ? [(T.cloud.on ? '正在上传视频 ' : '正在处理视频 ') + vn + ' / ' + vids + (T.cloud.on ? ' · ' + Math.round(x * 100) + '%' : '') + '，请不要关闭页面',
+                   (T.cloud.on ? 'Uploading video ' : 'Reading video ') + vn + ' of ' + vids + (T.cloud.on ? ' · ' + Math.round(x * 100) + '%' : '') + ' — please keep this page open']
+                : ['正在处理 ' + n + ' 个…', 'Reading ' + n + ' item(s)…'];
+      drawStatus();
+    }
+    function done(r, extra, fullZh, fullEn) {
+      var lim = T.videoLimitMB();
+      note = r.failed ? [r.failed + ' 个读不出来或没传上去，换一个试试', r.failed + ' could not be read or uploaded — try another']
+        : r.big ? [r.big + ' 段视频超过 ' + lim + ' MB，没有导入。可以在手机上剪短一点再传', r.big + ' video(s) are over ' + lim + ' MB and were not added — trim them on the phone and try again']
+        : extra > 0 ? [fullZh.replace('#', extra), fullEn.replace('#', extra)]
+        : r.odd ? ['视频已加入。这台设备的浏览器放不了这种格式，电视或别的设备上通常可以', 'Video added. This browser cannot play its format; the TV or another device usually can']
+        : null;
       draw(); save();
     }
+    function none() { note = ['没有找到照片或视频', 'No photos or videos found']; drawStatus(); }
     function addCovers(files, at) {
-      var list = images(files), order = [];
-      if (!list.length) { note = ['没有找到图片文件', 'No image files found']; drawStatus(); return; }
+      var list = media(files), order = [];
+      if (!list.length) return none();
       if (at != null) order.push(at);
       photos.forEach(function (p, i) { if (!p.src && i !== at) order.push(i); });
       busy(list.length);
-      readAll(list.slice(0, order.length), 1600, function (src, k) { photos[order[k]].src = src; }).then(function (failed) {
-        done(failed, list.length - order.length, '封面位满了，多出 # 张没有导入', 'All cover slots are full — # photo(s) were not imported');
+      readAll(list.slice(0, order.length), 1600, function (m, k) { var p = photos[order[k]]; p.src = m.src; p.video = m.video; }).then(function (r) {
+        done(r, list.length - order.length, '封面位满了，多出 # 个没有导入', 'All cover slots are full — # item(s) were not imported');
       });
     }
     function addMore(files, i) {
-      var list = images(files), room = T.MAX_MORE - photos[i].more.length;
-      if (!list.length) { note = ['没有找到图片文件', 'No image files found']; drawStatus(); return; }
+      var list = media(files), room = T.MAX_MORE - photos[i].more.length;
+      if (!list.length) return none();
       busy(list.length);
-      readAll(list.slice(0, room), 1280, function (src) { photos[i].more.push(src); }).then(function (failed) {
-        done(failed, list.length - room, '这一年最多 ' + T.MAX_MORE + ' 张，多出 # 张没有导入', 'A year holds ' + T.MAX_MORE + ' — # photo(s) were not imported');
+      readAll(list.slice(0, room), 1280, function (m) {
+        var p = photos[i], j = p.more.length;
+        p.more.push(m.src); p.moreVideos = p.moreVideos || []; p.moreVideos[j] = m.video; p.moreNotes[j] = p.moreNotes[j] || null;
+      }).then(function (r) {
+        done(r, list.length - room, '这一年最多 ' + T.MAX_MORE + ' 个，多出 # 个没有导入', 'A year holds ' + T.MAX_MORE + ' — # item(s) were not imported');
       });
     }
+    /* ----- M04: on a phone or tablet, choose camera or library ----- */
+    function sheet(open) {
+      var old = root.querySelector('.tu-sheet'); if (old) old.parentNode.removeChild(old);
+      if (!open) { if (!dlg) T.tag('M01', '照片管理', 'Photo manager'); return; }
+      var el = document.createElement('div'), p = dest && dest.i != null ? photos[dest.i] : null;
+      el.className = 'tu-sheet';
+      el.innerHTML = '<div class="tu-sheet__box" role="dialog" aria-modal="true" aria-label="添加照片或视频 Add a photo or video">' +
+        T.bi(p ? (dest.more ? p.age + ' 岁 · 再加一个' : p.age + ' 岁 · 封面') : '添加照片或视频', p ? (dest.more ? 'Age ' + p.age + ' · add one more' : 'Age ' + p.age + ' · the cover') : 'Add a photo or video', 'tu-title') +
+        '<div class="tu-sheet__opts">' + capBtn('shoot', 'camera', '拍照', 'Take a photo') + capBtn('film', 'video', '录视频', 'Record a video') + capBtn('library', 'images', '从相册选', 'Photos & videos') + '</div>' +
+        mini('取消', 'Cancel', 'sheetno') + '</div>';
+      root.appendChild(el);
+      T.tag('M04', '拍照或选择', 'Camera or library');
+    }
+    function choose(d) { dest = d; if (touch) sheet(true); else (d.more ? moreFile : file).click(); }
+    function deliver(files) { var d = dest || { more: false, i: null }; dest = null; if (d.more) addMore(files, d.i); else addCovers(files, d.i); }
     function fromData(data) {
       /* a picture is either held in the page (data:) or kept on the family server (api/file/<id>); anything else is dropped */
       function img(v) { return /^(data:image\/|api\/file\/[0-9a-f]{32}$)/.test(v || '') ? v : ''; }
+      function vid(v) { return /^(data:video\/|api\/file\/[0-9a-f]{32}$)/.test(v || '') ? v : ''; }
       var av = data.avatars || meta.avatars || {};
       meta = { zh: (data.name && data.name.zh) || meta.zh, en: (data.name && data.name.en) || meta.en, avatars: { girl: img(av.girl), dad: img(av.dad), mom: img(av.mom) } };
       photos = T.photos.map(function (p) {
         var x = (data.photos || []).filter(function (r) { return r.age === p.age; })[0] || {};
         function clean(n) { return T.hasNote(n) ? { text: String(n.text || '').slice(0, 40), strokes: (n.strokes || []).slice(0, 60), image: img(n.image) } : null; }
-        var more = [], notes = [];
-        (x.more || []).forEach(function (v, k) { if (img(v) && more.length < T.MAX_MORE) { more.push(v); notes.push(clean((x.moreNotes || [])[k])); } });
-        return { age: p.age, zh: x.zh || p.zh, en: x.en || p.en, src: img(x.src), more: more, note: clean(x.note), moreNotes: notes };
+        var more = [], notes = [], vids = [];
+        (x.more || []).forEach(function (v, k) { if (img(v) && more.length < T.MAX_MORE) { more.push(v); notes.push(clean((x.moreNotes || [])[k])); vids.push(vid((x.moreVideos || [])[k])); } });
+        return { age: p.age, zh: x.zh || p.zh, en: x.en || p.en, src: img(x.src), video: img(x.src) ? vid(x.video) : '', more: more, note: clean(x.note), moreNotes: notes, moreVideos: vids };
       });
     }
     function exportPack() {
@@ -860,10 +995,17 @@
     root.addEventListener('click', function (e) {
       var a = e.target.closest('[data-act]'); if (!a) return;
       var act = a.getAttribute('data-act'), sl = e.target.closest('.tu-slot'), i = sl ? +sl.getAttribute('data-i') : -1;
-      if (act === 'pick' && sl) { target = i; file.click(); }
-      else if (act === 'del' && sl) { photos[i].src = ''; note = null; draw(); save(); }
-      else if (act === 'more' && sl) { moreTarget = i; moreFile.click(); }
-      else if (act === 'delmore' && sl) { photos[i].more.splice(+a.getAttribute('data-j'), 1); photos[i].moreNotes.splice(+a.getAttribute('data-j'), 1); note = null; draw(); save(); }
+      if (act === 'pick' && sl) choose({ more: false, i: i });
+      else if (act === 'del' && sl) { photos[i].src = ''; photos[i].video = ''; note = null; draw(); save(); }
+      else if (act === 'more' && sl) choose({ more: true, i: i });
+      else if (act === 'delmore' && sl) { var dj = +a.getAttribute('data-j'); photos[i].more.splice(dj, 1); photos[i].moreNotes.splice(dj, 1); (photos[i].moreVideos || []).splice(dj, 1); note = null; draw(); save(); }
+      else if (act === 'shoot' || act === 'film' || act === 'library') {
+        /* the camera opens straight away on iPhone, iPad and Android: capture="environment" asks for the back camera */
+        if (!a.closest('.tu-sheet')) dest = { more: false, i: null };
+        sheet(false);
+        (act === 'shoot' ? shootFile : act === 'film' ? filmFile : dest && dest.more ? moreFile : file).click();
+      }
+      else if (act === 'sheetno') { dest = null; sheet(false); }
       else if (act === 'note' && sl) openNote(i, +a.getAttribute('data-j'));
       else if (act === 'undo') { dlg.strokes.pop(); drawDlg(); }
       else if (act === 'wipe') { dlg.strokes = []; drawDlg(); }
@@ -888,8 +1030,7 @@
       var t = e.target, sl = t.closest('.tu-slot'), k = t.getAttribute('data-k'), f = t.getAttribute('data-f'), n = t.getAttribute('data-n');
       if (sl && k) { var i = +sl.getAttribute('data-i'); photos[i][k] = t.value.trim() || T.photos[i][k]; t.value = photos[i][k]; note = null; save(); }
       else if (n) { meta[n] = t.value.trim(); note = null; save(); }
-      else if (f === 'cover') { addCovers(t.files, target); target = null; t.value = ''; }
-      else if (f === 'more') { if (moreTarget != null) addMore(t.files, moreTarget); moreTarget = null; t.value = ''; }
+      else if (f === 'cover' || f === 'more' || f === 'shoot' || f === 'film') { deliver(t.files); t.value = ''; }
       else if (f === 'noteimg') { var nf = t.files[0]; t.value = ''; if (nf && dlg) T.readImage(nf, 900).then(function (src) { dlg.image = src; drawDlg(); }, function () {}); }
       else if (f === 'audio') { addAudio(t.files[0]); t.value = ''; }
       else if (t.getAttribute('data-m')) {
@@ -903,7 +1044,8 @@
       }
       else if (f === 'pack') { if (t.files[0]) importPack(t.files[0]); t.value = ''; }
     });
-    drop.addEventListener('click', function () { target = null; });
+    /* a tap on the drop box fills empty covers; a click the page itself sends to the input (for one slot) also passes through here and must keep its slot */
+    drop.addEventListener('click', function (e) { if (e.target !== file) dest = { more: false, i: null }; });
     function mark(e) {
       var more = e && e.target.closest ? e.target.closest('.tu-more') : null, sl = e && e.target.closest ? e.target.closest('.tu-slot') : null;
       [].forEach.call(root.querySelectorAll('.is-over'), function (c) { c.classList.remove('is-over'); });
