@@ -273,9 +273,10 @@
         (nz ? T.bi(nz, ne, 'tu-body tu-together__note') : '') + '</div></div>';
     }
     return '<div class="tu-together">' +
-      row('0 – 10 岁', 'Ages 0–10', 100, '三千六百多天，天天在一起', 'More than 3,600 days, together every day') +
-      row('10 – 20 岁', 'Ages 10–20', 50, '大约五年', 'About five years', '你会去上学，也会交到好多好朋友', 'You will be at school, making lots of good friends') +
-      row('上大学、工作以后', 'University, then work', 34, '', '', '你会越飞越远，就像爸爸妈妈离开爷爷奶奶、外公外婆', 'You will fly farther — as Mom and Dad did from your grandparents') + '</div>';
+      /* Mom and Dad talking to her: how much time together, told by when we see each other, not by numbers */
+      row('现在', 'Now · ages 0–10', 100, '每天的早饭、晚饭，还有睡前故事', 'Every breakfast, every dinner, every bedtime story') +
+      row('长大一点', 'A bit bigger · 10–20', 50, '放学后和周末', 'After school, weekends', '你要上学，还会有好多好朋友', 'School, and lots of good friends of your own') +
+      row('再长大以后', 'Grown up · college, work', 34, '', '', '放假才回家，就像爸爸妈妈去看外公外婆、爷爷奶奶', 'Home for holidays, like Mom and Dad visiting your grandparents') + '</div>';
   };
   T.cake = function (out, n) {
     var c = '';

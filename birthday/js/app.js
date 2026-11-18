@@ -98,9 +98,9 @@
         '<div class="x x-center x-fade" style="top:240px">' + T.ages(10, avatars) + '</div>' + cueRow() + hint([NEXT]);
     },
     together: function () {
-      return '<div class="x x-fade" style="left:210px;top:60px">' + T.bi('这十年，每一天都有你', 'For ten years, every single day had you in it', 'tu-title') + '</div>' +
+      return '<div class="x x-fade" style="left:210px;top:60px">' + T.bi('这十年，我们天天都在一起', 'For ten years, we have been together every single day', 'tu-title') + '</div>' +
         '<div class="x" style="left:210px;top:270px">' + T.together() + '</div>' +
-        '<div class="x x-fade x-close" style="left:210px;top:690px;animation-delay:1.4s">' + T.bi('所以，每一天我们都想好好陪你', 'So we want to be right here with you, every day', 'tu-hero') + '</div>' +
+        '<div class="x x-fade x-close" style="left:210px;top:690px;animation-delay:1.4s">' + T.bi('所以现在的每一天，都好珍贵', 'So every day we have right now is precious', 'tu-hero') + T.bi('多抱抱我们，多讲讲你的新鲜事吧', 'Hug us lots, and tell us all your news', 'tu-body x-closeline') + '</div>' +
         cueRow() + hint([['OK', '去许愿', 'Make a wish']]);
     },
     cake: function () {
