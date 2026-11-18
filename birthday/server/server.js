@@ -602,7 +602,7 @@ function serveFile(req, res, id) {
 /* ------------------------------------------------------------------ the site itself: nothing but the login page without a session */
 const OPEN_API = new Set(['GET /api/state', 'POST /api/setup/start', 'POST /api/setup/finish', 'POST /api/login', 'POST /api/sms/send', 'POST /api/sms/verify']);
 const PUBLIC = [/^\/login\.html$/, /^\/css\/(fonts|tokens|tenup|login)\.css$/, /^\/js\/(tenup|login)\.js$/, /^\/fonts\/[\w.-]+\.woff2$/, /^\/manifest\.webmanifest$/, /^\/icons\/[\w.-]+\.png$/];
-const SERVED = /^\/(index\.html|manage\.html|login\.html|admin\.html|sw\.js|manifest\.webmanifest|(css|js|fonts|album|vendor|icons|docs)\/[\w./-]+)$/;
+const SERVED = /^\/(index\.html|manage\.html|print\.html|login\.html|admin\.html|sw\.js|manifest\.webmanifest|(css|js|fonts|album|vendor|icons|docs)\/[\w./-]+)$/;
 const MIME = { html: 'text/html; charset=utf-8', css: 'text/css; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', json: 'application/json', webmanifest: 'application/manifest+json',
   woff2: 'font/woff2', png: 'image/png', jpg: 'image/jpeg', svg: 'image/svg+xml', wasm: 'application/wasm', task: 'application/octet-stream', docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', md: 'text/markdown; charset=utf-8' };
 function serveSite(req, res, pathname, authed) {

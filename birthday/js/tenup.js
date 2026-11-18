@@ -833,6 +833,7 @@
       '<div class="tu-capbar">' + capBtn('shoot', 'camera', '拍照', 'Take a photo') + capBtn('film', 'video', '录视频', 'Record a video') + capBtn('library', 'images', '从相册选', 'Photos & videos') + '</div>' +
       '<div class="tu-slots"></div>' +
       '<div class="tu-mgr__tools">' + (o.playHref ? '<a class="tu-mini tu-mini--go" href="' + esc(o.playHref) + '">去播放<small>Play the album</small></a>' : '') +
+      '<a class="tu-mini tu-mini--go" href="print.html">打印与导出<small>Print, PDF, download all</small></a>' +
       mini('导出相册包', 'Export album file', 'export') + mini('导入相册包', 'Import album file', 'import') + mini('全部清空', 'Clear everything', 'clear', 'tu-mini--danger') +
       '<input type="file" data-f="more" accept="image/*,video/*" multiple><input type="file" data-f="shoot" accept="image/*" capture="environment"><input type="file" data-f="film" accept="video/*" capture="environment"><input type="file" data-f="avatar" accept="image/*"><input type="file" data-f="noteimg" accept="image/*"><input type="file" data-f="audio" accept="audio/*"><input type="file" data-f="pack" accept=".js,.json,application/json,text/javascript"></div>' +
       '<div class="tu-mgr__help">' + T.bi('照片只保存在这台设备的这个浏览器里，不会上传；视频每段不超过 ' + T.LOCAL_VIDEO_MB + ' MB。要在另一台设备上播放：导出相册包，把下载到的 album.js 放进网站的 album 文件夹。',
@@ -1129,6 +1130,97 @@
       }
       return reload();
     });
+  };
+
+  /* ---------- export: every photo and video as one ZIP, in a folder per age ----------
+     No compression (photos and videos are compressed already), names in UTF-8 so Chinese folder names show
+     correctly on Windows, macOS, iPhone and Android. T.zip(entries) → Blob; entries = [{ name, data: Uint8Array }]. */
+  var CRCT = null;
+  function crc32(u8) {
+    if (!CRCT) { CRCT = new Uint32Array(256); for (var n = 0; n < 256; n++) { var c = n; for (var k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; CRCT[n] = c >>> 0; } }
+    var x = 0xFFFFFFFF;
+    for (var i = 0; i < u8.length; i++) x = CRCT[(x ^ u8[i]) & 255] ^ (x >>> 8);
+    return (x ^ 0xFFFFFFFF) >>> 0;
+  }
+  T.zip = function (entries) {
+    var parts = [], central = [], offset = 0, d = new Date(), enc = new TextEncoder();
+    var time = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), date = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+    entries.forEach(function (e) {
+      var name = enc.encode(e.name), data = e.data, crc = crc32(data), h = new DataView(new ArrayBuffer(30));
+      h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+      h.setUint16(10, time, true); h.setUint16(12, date, true); h.setUint32(14, crc, true); h.setUint32(18, data.length, true); h.setUint32(22, data.length, true);
+      h.setUint16(26, name.length, true); h.setUint16(28, 0, true);
+      parts.push(h.buffer, name, data);
+      var c = new DataView(new ArrayBuffer(46));
+      c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+      c.setUint16(12, time, true); c.setUint16(14, date, true); c.setUint32(16, crc, true); c.setUint32(20, data.length, true); c.setUint32(24, data.length, true);
+      c.setUint16(28, name.length, true); c.setUint32(42, offset, true);
+      central.push(c.buffer, name);
+      offset += 30 + name.length + data.length;
+    });
+    var size = central.reduce(function (n, b) { return n + b.byteLength; }, 0), end = new DataView(new ArrayBuffer(22));
+    end.setUint32(0, 0x06054b50, true); end.setUint16(8, entries.length, true); end.setUint16(10, entries.length, true); end.setUint32(12, size, true); end.setUint32(16, offset, true);
+    return new Blob(parts.concat(central, [end.buffer]), { type: 'application/zip' });
+  };
+  var EXT = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/quicktime': 'mov', 'video/webm': 'webm', 'video/x-m4v': 'm4v', 'video/3gpp': '3gp',
+    'audio/mpeg': 'mp3', 'audio/mp3': 'mp3', 'audio/mp4': 'm4a', 'audio/x-m4a': 'm4a', 'audio/aac': 'aac', 'audio/ogg': 'ogg', 'audio/wav': 'wav', 'audio/x-wav': 'wav', 'audio/webm': 'weba' };
+  function bytesOf(url) {
+    return fetch(url, { credentials: 'same-origin' }).then(function (r) {
+      if (!r.ok) throw new Error('cannot read ' + url);
+      return r.blob();
+    }).then(function (b) { return b.arrayBuffer().then(function (a) { return { data: new Uint8Array(a), type: (b.type || '').split(';')[0] }; }); });
+  }
+  /* handwriting as its own picture, so it opens anywhere */
+  T.strokesFile = function (strokes) {
+    return '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500"><rect width="1000" height="500" fill="#fffaf4"/>' +
+      '<g fill="none" stroke="#4a3830" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">' + T.strokesSvg(strokes).replace(/^<svg[^>]*>|<\/svg>$/g, '').replace(/ pathLength="1"/g, '') + '</g></svg>\n';
+  };
+  /* album = { name: { zh, en }, avatars, music, photos } → Promise<Blob>; onProgress(done, total) */
+  T.exportZip = function (album, onProgress) {
+    var nm = (album.name && album.name.zh) || '小寿星', root = nm + '的成长相册 ' + ((album.name && album.name.en) || 'Growing-up album') + '/', jobs = [], text = [], enc = new TextEncoder(), entries = [];
+    function two(n) { return (n < 10 ? '0' : '') + n; }
+    function noteText(n, label) {
+      if (!T.hasNote(n)) return;
+      if (n.text) text.push('  ' + label + ' 寄语 Note：' + n.text);
+      if (n.strokes && n.strokes.length) text.push('  ' + label + ' 手写寄语 Handwriting：见 ' + label + '-手写寄语.svg');
+      if (n.image) text.push('  ' + label + ' 配图 Picture：见 ' + label + '-配图');
+    }
+    function add(url, path) { if (url) jobs.push({ url: url, path: path }); }
+    function addNote(n, dir, label) {
+      if (!T.hasNote(n)) return;
+      if (n.strokes && n.strokes.length) entries.push({ name: dir + label + '-手写寄语.svg', data: enc.encode(T.strokesFile(n.strokes)) });
+      add(n.image, dir + label + '-配图');
+    }
+    text.push(nm + ' · ' + ((album.name && album.name.en) || '') + '　成长相册 Growing-up album', '导出时间 Exported: ' + new Date().toLocaleString(), '');
+    (album.photos || []).forEach(function (p) {
+      var dir = root + two(p.age) + '岁 age ' + p.age + ' · ' + p.zh + '/';
+      text.push(p.age + ' 岁 · age ' + p.age + '　' + p.zh + ' · ' + p.en, '  这一年：你 ' + p.age + ' 岁 · 爸爸 ' + p.age + ' 岁 · 妈妈 ' + (p.age + 1) + ' 岁');
+      if (p.src) { add(p.video || p.src, dir + '1 封面' + (p.video ? '（视频）' : '')); if (p.video) add(p.src, dir + '1 封面（视频截图）'); noteText(p.note, '1 封面'); addNote(p.note, dir, '1 封面'); }
+      (p.more || []).forEach(function (src, j) {
+        var v = (p.moreVideos || [])[j], label = (j + 2) + (v ? '（视频）' : '');
+        add(v || src, dir + label); noteText((p.moreNotes || [])[j], label); addNote((p.moreNotes || [])[j], dir, label);
+      });
+      if (!p.src && !(p.more || []).length) text.push('  （还没有照片 No photos yet）');
+      text.push('');
+    });
+    var av = album.avatars || {};
+    [['girl', '她 Her'], ['dad', '爸爸 Dad'], ['mom', '妈妈 Mom']].forEach(function (w) { add(av[w[0]], root + '头像 Portraits/' + w[1]); });
+    ((album.music && album.music.tracks) || []).forEach(function (t) { add(t.src, root + '音乐 Music/' + String(t.name || 'song').replace(/[\\/:*?"<>|]/g, '_')); });
+    entries.unshift({ name: root + '相册说明 About this album.txt', data: enc.encode('﻿' + text.join('\r\n')) });
+    var done = 0, total = jobs.length;
+    if (onProgress) onProgress(0, total);
+    return jobs.reduce(function (chain, j) {
+      return chain.then(function () {
+        return bytesOf(j.url).then(function (f) { entries.push({ name: j.path + '.' + (EXT[f.type] || 'bin'), data: f.data }); }, function () {})
+          .then(function () { done++; if (onProgress) onProgress(done, total); });
+      });
+    }, Promise.resolve()).then(function () { return T.zip(entries); });
+  };
+  /* hand a file to the person: a download in browsers; the iPad app shows its share sheet */
+  T.saveFile = function (blob, name) {
+    var a = document.createElement('a'), url = URL.createObjectURL(blob);
+    a.href = url; a.download = name; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
   };
 
   /* ---------- account panel (cloud only): trusted devices, the two phone numbers, log out ---------- */

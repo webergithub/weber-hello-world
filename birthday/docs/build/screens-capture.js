@@ -52,7 +52,14 @@ async function grab(pg, code, list, opt) {
   await grab(pg, 'M01', [['.tu-mgr__title', '标题', 'Title'], ['.tu-mgr__status', '保存状态', 'Save status'], ['.tu-mgr__names > label:nth-child(1)', '中文名字', 'Her name in Chinese'], ['.tu-mgr__names > label:nth-child(2)', '英文名字', 'Her name in English'], ['.tu-avatars', '三个人的头像', 'Portraits'],
     ['.tu-musicbox', '背景音乐', 'Background music'], ['.tu-drop', '封面拖放区', 'Drop zone for covers'], ['.tu-slot[data-i="1"] .tu-slot__age', '年龄标签', 'Age label'], ['.tu-slot[data-i="1"] .tu-slot__img', '封面照片', 'Cover photo'],
     ['.tu-slot[data-i="1"] [data-k=zh]', '中文说明', 'Chinese caption'], ['.tu-slot[data-i="1"] [data-k=en]', '英文说明', 'English caption'], ['.tu-slot[data-i="1"] .tu-slot__row', '换封面 / 寄语 / 移除', 'Replace / note / remove'],
-    ['.tu-slot[data-i="1"] .tu-more', '这一年的更多照片', 'More from this year'], ['.tu-slot[data-i="2"]', '一个年龄格（共 11 格）', 'One age slot (11 in all)'], ['.tu-slot[data-i="2"] .tu-vbadge', '视频封面的标记', 'A video cover'], ['.tu-mgr__tools', '去播放 / 导出 / 导入 / 清空', 'Play / export / import / clear'], ['.tu-mgr__help', '保存说明', 'Where photos are kept']], { full: true });
+    ['.tu-slot[data-i="1"] .tu-more', '这一年的更多照片', 'More from this year'], ['.tu-slot[data-i="2"]', '一个年龄格（共 11 格）', 'One age slot (11 in all)'], ['.tu-slot[data-i="2"] .tu-vbadge', '视频封面的标记', 'A video cover'], ['.tu-mgr__tools', '去播放 / 打印与导出 / 导出导入相册包 / 清空', 'Play / print and export / album file / clear'], ['.tu-mgr__help', '保存说明', 'Where photos are kept']], { full: true });
+
+  /* M05: print and export, with the same sample album; also a sample PDF of it */
+  await pg.goto(SITE + '/print.html'); await pg.waitForSelector('.pg--end'); await pg.waitForTimeout(1500);
+  await grab(pg, 'M05', [['.pr-bar__h', '标题与页数', 'Title and page count'], ['label:has([data-o=paper])', '纸张：A4 / Letter', 'Paper'], ['label:has([data-o=portrait])', '方向：横向 / 纵向', 'Orientation'],
+    ['label:has([data-o=more])', '是否打印这一年的更多照片', 'More photos from each year'], ['label:has([data-o=notes])', '是否打印寄语', 'Notes'], ['label:has([data-o=skipEmpty])', '跳过还没有照片的年龄', 'Skip empty ages'],
+    ['[data-a=print]', '打印或存成 PDF', 'Print, or save as PDF'], ['[data-a=zip]', '下载全部照片和视频（ZIP）', 'Download everything as a ZIP'], ['.pr-msg', '提示与进度', 'Tips and progress'], ['.pg--cover', '封面页', 'Cover page'], ['.pg--age', '每岁一页', 'One page per age']]);
+  await pg.emulateMedia({ media: 'print' }); await pg.pdf({ path: path.join(OUT, 'album-sample.pdf'), preferCSSPageSize: true, printBackground: true }); await pg.emulateMedia({ media: 'screen' });
 
   /* the player, at TV size */
   await pg.setViewportSize({ width: 1920, height: 1080 });

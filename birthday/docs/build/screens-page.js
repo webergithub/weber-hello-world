@@ -27,7 +27,8 @@ const GROUPS = [
     { code: 'M01', zh: '照片管理', en: 'Photo manager', shots: ['M01', 'M01B'], states: ['电脑', '手机和平板：多了拍照、录视频按钮'], reach: 'manage.html。', job: '导入封面和每年的更多照片或视频，写说明和寄语，选背景音乐，填名字和头像。手机和平板上可以直接拍照、录视频。', tall: true },
     { code: 'M02', zh: '寄语对话框', en: 'Note dialog', shots: ['M02'], reach: '在 M01 点封面下的"寄语"，或点"这一年的更多照片"里的缩略图。', job: '给一张照片写一句话、手写一段、配一张小图。' },
     { code: 'M03', zh: '账户与设备', en: 'Account and devices', shots: ['M03'], reach: '连接相册服务器时，M01 页面的最下方。', job: '看和移除可信设备，更换手机号，退出这台设备。' },
-    { code: 'M04', zh: '拍照或选择', en: 'Camera or library', shots: ['M04'], reach: '手机和平板上，在 M01 点某一格的封面或"＋"。电脑上不出现，直接打开选择文件。', job: '选拍照、录视频，或从相册选照片和视频。拍照和录视频直接打开后置相机（iPhone、iPad、安卓都一样）。' }
+    { code: 'M04', zh: '拍照或选择', en: 'Camera or library', shots: ['M04'], reach: '手机和平板上，在 M01 点某一格的封面或"＋"。电脑上不出现，直接打开选择文件。', job: '选拍照、录视频，或从相册选照片和视频。拍照和录视频直接打开后置相机（iPhone、iPad、安卓都一样）。' },
+    { code: 'M05', zh: '打印与导出', en: 'Print and export', shots: ['M05'], reach: 'print.html；或在 M01 底部点"打印与导出"。', job: '把相册排成一本书：封面、每岁一页（照片、说明、三个人的年龄、寄语）、这一年的更多照片、结尾页。可以打印，也可以在打印窗口里存成 PDF；还能把全部照片和视频按年龄打包成 ZIP 下载。' }
   ] },
   { id: 'L', zh: '登录（连接相册服务器时）', en: 'Signing in', note: '只有由相册服务器提供网页时才会出现。', screens: [
     { code: 'L01', zh: '首次设置', en: 'First-time setup', shots: ['L01'], reach: '服务器第一次使用时，打开任何页面都会到这里。', job: '填设置口令、你的邮箱、密码和两个手机号。这个邮箱就是第一个登录账号。' },

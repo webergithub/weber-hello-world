@@ -3,6 +3,6 @@
 set -e
 cd "$(dirname "$0")"
 rm -rf web && mkdir web
-for f in index.html manage.html login.html manifest.webmanifest css js fonts album icons; do cp -R "../$f" web/; done
+for f in index.html manage.html print.html login.html manifest.webmanifest css js fonts album icons; do cp -R "../$f" web/; done
 [ -d ../vendor ] && cp -R ../vendor web/ || true
 echo "web/ ready"
