@@ -60,8 +60,8 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   r = await a.call('POST', '/api/setup/start', { email: 'Mom@Example.com', token: 'tok123', password: PW, phones: ['13800000003', '13800000004'] }); ok('setup cannot be run a second time', r.status === 409);
 
   r = await a.call('GET', '/api/album'); ok('album starts empty at version 0', r.json.version === 0 && r.json.album === null);
-  r = await a.call('PUT', '/api/album', { base: 0, album: { meta: { zh: '朵朵' }, photos: [] } }); ok('album saves', r.json.version === 1);
-  r = await a.call('PUT', '/api/album', { base: 0, album: { meta: { zh: 'old' } } }); ok('a stale save is refused with the latest album', r.status === 409 && r.json.version === 1 && r.json.album.meta.zh === '朵朵');
+  r = await a.call('PUT', '/api/album', { base: 0, album: { meta: { zh: '糖糖' }, photos: [] } }); ok('album saves', r.json.version === 1);
+  r = await a.call('PUT', '/api/album', { base: 0, album: { meta: { zh: 'old' } } }); ok('a stale save is refused with the latest album', r.status === 409 && r.json.version === 1 && r.json.album.meta.zh === '糖糖');
   r = await a.call('GET', '/api/album?v=1'); ok('polling with the current version answers "same"', r.json.same === true);
   r = await a.call('PUT', '/api/album', { base: 1, album: { x: 1 } }, { noHeader: true }); ok('a write without the app header is refused', r.status === 403);
   const pic = Buffer.concat([Buffer.from('PLAINTEXT-MARKER-'), crypto.randomBytes(5000)]);
@@ -70,7 +70,7 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   r = await a.call('GET', '/api/file/' + id, null, { headers: { Range: 'bytes=10-19' } }); ok('byte ranges work (needed for audio)', r.status === 206 && r.buf.equals(pic.slice(10, 20)));
   r = await a.call('POST', '/api/file', Buffer.from('<script>'), { type: 'text/html' }); ok('other file types are refused', r.status === 415);
   const disk = fs.readdirSync(path.join(dir, 'data', 'files')).map(f => fs.readFileSync(path.join(dir, 'data', 'files', f)));
-  ok('the stored picture is not readable on disk', disk.length === 1 && !disk[0].includes('PLAINTEXT-MARKER') && !fs.readFileSync(path.join(dir, 'data', 'album.enc')).includes('朵朵'));
+  ok('the stored picture is not readable on disk', disk.length === 1 && !disk[0].includes('PLAINTEXT-MARKER') && !fs.readFileSync(path.join(dir, 'data', 'album.enc')).includes('糖糖'));
   ok('the account file does not show phone numbers', !fs.readFileSync(path.join(dir, 'data', 'account.enc')).includes('13800000001'));
 
   /* videos: stored in sealed 1 MiB parts and played with byte ranges */
@@ -144,7 +144,7 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   const d = client('8.8.8.8');
   r = await d.call('POST', '/api/login', { email: 'dad@example.com', password: 'dad password 1' }); ok('the new account logs in (new device → text message)', r.json.need === 'sms', r.json);
   n0 = codes().length; await d.call('POST', '/api/sms/send', { which: 0 }); r = await d.call('POST', '/api/sms/verify', { code: codes()[n0] });
-  r = await d.call('GET', '/api/album'); ok('…and reads the same album, unlocked by its own password', r.status === 200 && r.json.album && r.json.album.meta.zh === '朵朵');
+  r = await d.call('GET', '/api/album'); ok('…and reads the same album, unlocked by its own password', r.status === 200 && r.json.album && r.json.album.meta.zh === '糖糖');
   r = await d.call('GET', '/api/admin/settings'); ok('a member without the admin check cannot open admin settings', r.status === 403);
   r = await d.call('POST', '/api/admin/policy', { smsPolicy: 'off' }); ok('…nor change the SMS policy', r.status === 403);
   r = await d.call('POST', '/api/admin/start', { password: APW, totp: totp(secret, 1) }); ok('admin password + authenticator still need a text message', r.json.need === 'sms', r.json);
@@ -180,7 +180,7 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   r = await a.call('POST', '/api/login', { email: EMAIL, password: PW }); ok('the password unlocks it, no text message', r.json.ok === true);
   r = await a.call('GET', '/api/file/' + id); ok('…and the picture is back', r.status === 200 && r.buf.equals(pic));
   r = await a.call('GET', '/api/file/' + vidId, null, { headers: { Range: 'bytes=1000000-1100000' } }); ok('…and so is the video', r.status === 206 && r.buf.equals(vid.slice(1000000, 1100001)));
-  r = await a.call('GET', '/api/album'); ok('…with the album as saved', r.json.version === 1 && r.json.album.meta.zh === '朵朵');
+  r = await a.call('GET', '/api/album'); ok('…with the album as saved', r.json.version === 1 && r.json.album.meta.zh === '糖糖');
 
   const x = client('9.9.9.9');
   for (let i = 0; i < 5; i++) r = await x.call('POST', '/api/login', { email: EMAIL, password: 'bad guess ' + i });

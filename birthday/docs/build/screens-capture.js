@@ -37,7 +37,7 @@ async function grab(pg, code, list, opt) {
   fc = pg.waitForEvent('filechooser'); await pg.click('.tu-slot[data-i="2"] .tu-slot__img'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'clip.webm'); await pg.waitForSelector('.tu-slot[data-i="2"] .tu-vbadge'); await pg.waitForTimeout(800);
   fc = pg.waitForEvent('filechooser'); await pg.click('[data-act=avatar][data-who=dad]'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'p5.jpg'); await pg.waitForTimeout(700);
   fc = pg.waitForEvent('filechooser'); await pg.click('[data-act=avatar][data-who=mom]'); (await fc).setFiles(path.join(__dirname, 'samples/') + 'p3.jpg'); await pg.waitForTimeout(700);
-  await pg.fill('[data-n=zh]', '朵朵'); await pg.press('[data-n=zh]', 'Tab'); await pg.fill('[data-n=en]', 'Dora'); await pg.press('[data-n=en]', 'Tab');
+  await pg.fill('[data-n=zh]', '糖糖'); await pg.press('[data-n=zh]', 'Tab'); await pg.fill('[data-n=en]', 'Tina'); await pg.press('[data-n=en]', 'Tab');
   await pg.click('.tu-slot[data-i="1"] [data-act=note][data-j="-1"]'); await pg.waitForSelector('.tu-dlg');
   await pg.fill('[data-d=text]', '第一次自己走到妈妈怀里');
   const pad = await pg.$('.tu-pad'), r = await pad.boundingBox();

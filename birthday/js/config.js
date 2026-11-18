@@ -1,7 +1,7 @@
 /* 十岁啦 · 设置 Settings — 改这里不需要懂代码，改完刷新网页即可。 */
 window.TENUP_CONFIG = {
   /* 没在照片管理页填名字时用的称呼 */
-  name: { zh: '小寿星', en: 'Birthday Girl' },
+  name: { zh: '糖糖', en: 'Tina' },
 
   /* 观看模式的节奏（毫秒） */
   watch: { photoMs: 4500, chapterMs: 12000 },
