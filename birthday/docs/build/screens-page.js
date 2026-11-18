@@ -21,7 +21,7 @@ const GROUPS = [
     { code: 'P06', zh: '陪伴', en: 'Time together', shots: ['P06'], reach: '在 P05 按 OK 或挥手。', job: '核心信息三：三条越来越短的陪伴时间。' },
     { code: 'P07', zh: '许愿', en: 'Make a wish', shots: ['P07'], reach: '在 P06 按 OK 或挥手。', job: '十根蜡烛的蛋糕，等她吹。' },
     { code: 'P08', zh: '生日快乐', en: 'Happy birthday', shots: ['P08'], reach: '在 P07 吹蜡烛（按 OK 或对镜头吹气）。', job: '蜡烛吹灭，放烟花，爸爸妈妈说一句话。' },
-    { code: 'P09', zh: '年岁的名字', en: 'Names of the ages', shots: ['P09', 'P09-20'], states: ['第一个：幼学（你在这里）', '换到 20 岁：桃李年华'], reach: '在 P08 按 OK。← → 或挥手换一个，OK 回到开场。', job: '从十岁起，中国传统里每个年岁的叫法。下面附全部十二个名字。', names: true }
+    { code: 'P09', zh: '年岁的名字', en: 'Names of the ages', shots: ['P09', 'P09-20'], states: ['十岁：幼学（你在这里）', '20 岁：桃李年华，下方附男孩的叫法'], reach: '在 P08 按 OK。从第一个（出生第三天）开始；← → 或挥手换一个，OK 回到开场。', job: '从出生第三天到一百岁，中国传统里每个年岁的叫法，共二十个，每一条都对照原典或两个以上来源核对过。女孩和男孩叫法不同时用女孩的，卡片下方附男孩的叫法。下面附全部二十个名字。', names: true }
   ] },
   { id: 'M', zh: '照片管理（电脑或手机）', en: 'Managing photos', note: '打开 manage.html，或点 P01 右上角的"整理照片"。', screens: [
     { code: 'M01', zh: '照片管理', en: 'Photo manager', shots: ['M01', 'M01B'], states: ['电脑', '手机和平板：多了拍照、录视频按钮'], reach: 'manage.html。', job: '导入封面和每年的更多照片或视频，写说明和寄语，选背景音乐，填名字和头像。手机和平板上可以直接拍照、录视频。', tall: true },
@@ -70,8 +70,8 @@ function screenBlock(s) {
     (marks[shot] ? marks[shot].items : []).forEach(it => all.push([n++, it]));
   });
   let extra = '';
-  if (s.names) extra = '<div class="tw"><table class="names"><thead><tr><th>年龄</th><th>名字</th><th>拼音 · 英文</th><th>含义</th><th>适用</th></tr></thead><tbody>' +
-    NAMES.map(x => '<tr><td class="age">' + x.age + '</td><td class="nm">' + esc(x.zh) + '</td><td>' + esc(x.py) + '<br><small>' + esc(x.en) + '</small></td><td>' + esc(x.mz) + '</td><td>' + (x.who ? esc(x.who[0]) : '都可以') + '</td></tr>').join('') + '</tbody></table></div>';
+  if (s.names) extra = '<div class="tw"><table class="names"><thead><tr><th>年龄</th><th>名字</th><th>拼音 · 英文</th><th>含义</th><th>出处</th><th>适用</th></tr></thead><tbody>' +
+    NAMES.map(x => '<tr><td class="age">' + esc(x.at ? x.at[0] + (x.at[1] ? ' ' + x.at[1] : '') : x.age + ' 岁') + '</td><td class="nm">' + esc(x.zh) + '</td><td>' + esc(x.py) + '<br><small>' + esc(x.en) + '</small></td><td>' + esc(x.mz) + '</td><td>' + esc(x.fz) + '</td><td>' + (x.who ? esc(x.who[0]) : '都可以') + (x.boy ? '<br><small>男孩叫：' + esc(x.boy[0]) + '</small>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
   return '<section class="screen' + (s.tall ? ' tall' : '') + '" id="' + s.code + '"><header class="sh"><span class="code">' + s.code + '</span><h3>' + esc(s.zh) + '<small>' + esc(s.en) + '</small></h3></header>' +
     '<dl class="facts"><div><dt>作用</dt><dd>' + esc(s.job) + '</dd></div><div><dt>怎么到这里</dt><dd>' + esc(s.reach) + '</dd></div></dl>' +
     '<div class="body"><div class="figs">' + figs + '</div>' + legend(s.code, all) + '</div>' + extra + '</section>';

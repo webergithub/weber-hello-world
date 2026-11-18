@@ -106,13 +106,13 @@
     cake: function () {
       return '<div class="x x-col x-fade">' + (blown ? T.bi('生日快乐！', 'Happy Birthday!', 'tu-hero') + T.bi('不管你长多大，\n爸爸妈妈永远爱你', 'However big you grow,\nMom and Dad will always love you', 'tu-title')
                                                   : T.bi('许个愿，吹蜡烛！', 'Make a wish, then blow!', 'tu-hero x-big') + T.bi('十根蜡烛，都是为你点亮的', 'Ten candles, all lit just for you', 'tu-body')) +
-        T.button(blown ? '看看以后的你' : '呼——吹！', blown ? 'A peek at the years ahead' : 'Blow!', { primary: true, icon: blown ? 'play' : 'blow', cls: 'is-focus', act: 'ok' }) + '</div>' +
+        T.button(blown ? '你的每一个年岁' : '呼——吹！', blown ? 'Every age of your life' : 'Blow!', { primary: true, icon: blown ? 'play' : 'blow', cls: 'is-focus', act: 'ok' }) + '</div>' +
         '<div class="x x-mood x-cakepal">' + T.mascot('plush', blown ? 'wow' : 'happy', 'tu-mascot--bob') + '</div>' +
         '<div class="x x-cakebox">' + T.cake(blown) + '</div>' + cueRow();
     },
     names: function () {
       return '<div class="x x-head x-fade">' + T.bi('每一个年岁，都有一个好听的名字', 'Every age has a beautiful name of its own', 'tu-title') +
-        T.bi('今天你十岁，古人把它叫作“幼学”。往后的每一岁，我们都陪你慢慢走', 'Today you are ten — the ancients called it Youxue. We will walk every year ahead with you', 'tu-body') + '</div>' +
+        T.bi('从出生第三天到一百岁，每个年岁都有名字。今天你十岁，叫“幼学”', 'From your third day to a hundred, every age has a name. Today you are ten — Youxue', 'tu-body') + '</div>' +
         '<div class="x x-center" style="top:256px" id="namecard"></div>' +
         '<div class="x x-rail x-rail--names" id="rail"></div>' + cueRow() +
         hint([['← →', '换一个', 'Browse'], ['OK', '再看一遍', 'Play it again']]);
@@ -173,8 +173,8 @@
   }
   function drawName() {
     var c = document.getElementById('namecard'), r = document.getElementById('rail');
-    if (c) c.innerHTML = '<div class="x-fade">' + T.nameCard(nameAt, nameAt === 0) + '</div>';
-    if (r) r.innerHTML = T.rail(nameAt, T.ageNames.map(function (n) { return n.age; }));
+    if (c) c.innerHTML = '<div class="x-fade">' + T.nameCard(nameAt) + '</div>';
+    if (r) r.innerHTML = T.rail(nameAt, T.ageNames.map(function (n) { return n.tag || n.age; }));
   }
   function stepName(d) { var n = T.ageNames.length; nameAt = (nameAt + d + n) % n; drawName(); schedule(); }
 

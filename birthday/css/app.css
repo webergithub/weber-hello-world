@@ -23,7 +23,10 @@ html,body{margin:0;height:100%;overflow:hidden;background:var(--ground);color:va
 .has-cam .x-corner{right:300px}
 .x-rail{left:0;right:0;bottom:186px;display:flex;justify-content:center}
 .x-rail--names{bottom:172px}
-.x-rail--names .tu-rail__dot{width:66px;height:66px;font-size:24px}
+.x-rail--names .tu-rail__dot{width:60px;height:60px;font-size:20px;letter-spacing:-.5px}
+.x-rail--names .tu-rail__dot+.tu-rail__dot{margin-left:14px}
+.x-rail--names .tu-rail__dot+.tu-rail__dot::before{width:14px}
+.x-rail--names .tu-rail__dot.is-current::before{width:9px}
 .x-cues{left:96px;bottom:54px;display:flex}
 .x-cues>*+*{margin-left:18px}
 .x-center{left:0;right:0;display:flex;justify-content:center}

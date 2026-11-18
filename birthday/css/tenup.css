@@ -211,6 +211,11 @@
 .tu-namecard__name.tu-hero>.en{font-family:var(--font-body);font-weight:800;font-size:38px;margin-top:10px;text-shadow:none}
 .tu-namecard__mean.tu-label{font-size:38px;line-height:1.25}
 .tu-namecard__mean.tu-label>.en{font-size:26px;line-height:1.3}
+.tu-age--word b{font-size:40px;margin-right:0}
+.tu-namecard__boy{padding-top:12px;border-top:3px dashed var(--outline);color:var(--ink-muted)}
+.tu-namecard__boy .tu-body{font-size:26px}.tu-namecard__boy .tu-body>.en{font-size:19px}
+.tu-namecard--long .tu-namecard__txt>*+*{margin-top:10px}.tu-namecard--long .tu-namecard__name.tu-hero{font-size:100px}.tu-namecard--long .tu-namecard__mean.tu-label{font-size:34px}
+.tu-namecard__boy .tu-body{color:inherit}
 
 /* ---------- candle cake (finale) ---------- */
 .tu-cake{position:relative;width:640px;height:520px}

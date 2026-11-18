@@ -57,6 +57,14 @@
     cycle: '<circle cx="24" cy="24" r="19"/><circle cx="24" cy="24" r="5"/><path d="M24 5v6M24 37v6M5 24h6M37 24h6M10.5 10.5l4 4M33.5 33.5l4 4M37.5 10.5l-4 4M14.5 33.5l-4 4"/>',
     pine: '<path d="M24 4L13 18h6L9 30h9L8 40h32L30 30h9L29 18h6z"/><path d="M24 40v5"/>',
     blossom: '<circle cx="24" cy="22" r="4.5"/><path d="M24 17.5c-3-7 3-12 6-8c2 3 0 6-6 8zM28.3 20.6c5-5 12-2 10 3c-1.5 3-5 3-10-3zM26.6 25.7c6 3 6 10 1 10c-3 0-4-4-1-10zM21.4 25.7c-6 3-6 10-1 10c3 0 4-4 1-10zM19.7 20.6c-5-5-12-2-10 3c1.5 3 5 3 10-3z"/><path d="M24 36v8M24 41c-4 0-7-2-8-5"/>',
+    bowl: '<path d="M6 24h36c0 10-8 16-18 16S6 34 6 24z"/><path d="M15 40h18"/><path d="M17 7c-2 3 2 5 0 9M24 5c-2 3 2 5 0 9M31 7c-2 3 2 5 0 9"/>',
+    swaddle: '<circle cx="24" cy="15" r="7"/><path d="M15 17c-5 8-4 21 9 27c13-6 14-19 9-27"/><path d="M15 29l18-7M16 37l16-6"/>',
+    carry: '<circle cx="24" cy="12" r="6"/><path d="M17 31c0-7 3-11 7-11s7 4 7 11z"/><path d="M5 28c5 0 9 3 12 3M43 28c-5 0-9 3-12 3"/><path d="M20 31v9M28 31v9"/>',
+    buns: '<circle cx="24" cy="26" r="11"/><path d="M17 16c-5-1-8-6-5-9c3-2 6 1 6 5M31 16c5-1 8-6 5-9c-3-2-6 1-6 5"/><path d="M13.5 24c-3 6-3 13-1 19M34.5 24c3 6 3 13 1 19"/><path d="M20 30c2 2 6 2 8 0"/><path d="M19.5 24.5h.5M28 24.5h.5"/>',
+    tooth: '<path d="M14 7c4-2 7 1 10 1s6-3 10-1c6 3 5 12 2 18c-2 5-2 15-6 15c-3 0-3-10-6-10s-3 10-6 10c-4 0-4-10-6-15C9 19 8 10 14 7z"/>',
+    goldpin: '<circle cx="24" cy="10" r="5"/><path d="M19 10h-4M33 10h-4"/><path d="M24 15v4M19 19h10M21 19l-3 25M27 19l3 25"/>',
+    jade: '<circle cx="24" cy="28" r="15"/><circle cx="24" cy="28" r="5"/><path d="M24 13V5M19 5h10"/>',
+    flowerwind: '<circle cx="31" cy="19" r="4"/><path d="M31 11c3-5 9-2 6 3M39 19c5 2 3 8-2 6M31 27c-1 5-7 4-6-1M23 19c-5-2-3-8 2-6"/><path d="M31 27v17"/><path d="M4 14h12M2 22h10M4 30h12"/>',
     cane: '<path d="M14 13c0-5 4-9 9-9s9 4 9 9"/><path d="M32 13v30"/><path d="M27 43h10"/><path d="M14 13v3"/>',
     fish: '<path d="M5 25c6-11 21-13 31-4l8-6v20l-8-6c-10 9-25 7-31-4z"/><circle cx="13" cy="23" r="1.6" fill="currentColor"/><path d="M19 17.5h.5M24.5 16h.5M30 17.5h.5M22 21h.5M27.5 20.5h.5"/>',
     peach: '<path d="M24 43C9 39 6 23 16 15c3-2 6-2 8 0c2-2 5-2 8 0c10 8 7 24-8 28z"/><path d="M24 15c0-5 3-9 9-10c0 5-3 9-9 10zM24 15v14"/>',
@@ -283,16 +291,47 @@
 
 
   /* ---------- the names of the ages 年岁的名字 ----------
-     Traditional Chinese names for the stages of life, from ten onwards. `who` marks a name used for girls or for boys. */
+     Traditional Chinese names for the stages of life, from a baby's third day to a hundred.
+     `who` marks a name used only for girls; `boy` gives the boys' name for the same age, for comparison;
+     `at` is the age on the badge when it is not a plain number of years; `tag` is the label on the rail;
+     `here` is the age she is now. */
   T.ageNames = [
-    { age: 10, zh: '幼学', py: 'Yòuxué', en: 'The age to begin learning', icon: 'book',
-      mz: '十岁，开始上学读书的年纪', me: 'Ten: the age to start school and study', fz: '出自《礼记》：人生十年曰幼，学', fe: 'From the Book of Rites' },
-    { age: 13, zh: '豆蔻', py: 'Dòukòu', en: 'The cardamom bud', icon: 'bud', who: ['女孩', 'Girls'],
-      mz: '十三岁的女孩，像枝头刚冒出的花苞', me: 'A girl of thirteen, like a bud just showing on the branch', fz: '出自唐代杜牧的诗', fe: 'From a Tang poem by Du Mu' },
-    { age: 15, zh: '及笄', py: 'Jíjī', en: 'The hairpin age', icon: 'hairpin', who: ['女孩', 'Girls'],
-      mz: '十五岁的女孩把头发盘起，插上发簪，表示长大了', me: 'At fifteen a girl pins up her hair — a sign of growing up', fz: '出自《礼记》：十有五年而笄', fe: 'From the Book of Rites' },
-    { age: 20, zh: '桃李年华', py: 'Táolǐ niánhuá', en: 'The peach-and-plum years', icon: 'blossom', who: ['女孩', 'Girls'],
-      mz: '二十岁的女孩，像春天里开满枝头的桃花和李花', me: 'A young woman of twenty, like peach and plum trees in full spring bloom', fz: '旧时对女子二十岁的美称', fe: 'A traditional name for a young woman of twenty' },
+    { age: 0, tag: '3天', at: ['3', '天', 'days'], zh: '汤饼之期', py: 'Tāngbǐng zhī qī', en: 'The noodle-feast day', icon: 'bowl',
+      mz: '你出生的第三天，家里煮汤饼请客，为你庆贺', me: 'On your third day, the family made noodle soup for everyone to celebrate you',
+      fz: '旧时婴儿出生三日，家中设汤饼宴庆贺，这一天叫汤饼之期', fe: 'An old custom: a noodle-soup feast on a baby’s third day' },
+    { age: 0, tag: '0–1', at: ['0–1', '岁', 'yr'], zh: '襁褓', py: 'Qiǎngbǎo', en: 'In swaddling clothes', icon: 'swaddle',
+      mz: '小小的你被包在软软的小被子里，抱在爸爸妈妈怀里', me: 'Tiny you, wrapped in a soft little blanket, held in Mom and Dad’s arms',
+      fz: '原指包裹婴儿的被带，后来借指婴儿和婴儿时期', fe: 'First the cloth that wraps a baby, then the baby years themselves' },
+    { age: 2, tag: '2–3', at: ['2–3', '岁', 'yrs'], zh: '孩提', py: 'Háití', en: 'Small enough to carry', icon: 'carry',
+      mz: '两三岁，还要大人抱着、牵着的小娃娃', me: 'Two or three: little enough to be carried and led by the hand',
+      fz: '指还可以由大人提抱的孩子；今天说“孩提时代”，也泛指童年', fe: 'A child grown-ups can still pick up; “childhood days” today' },
+    { age: 4, tag: '童年', at: ['童年', '', 'childhood'], zh: '垂髫', py: 'Chuítiáo', en: 'Hair hanging loose', icon: 'buns',
+      mz: '小时候头发自然垂下来；扎成两个小髻，就叫“总角”', me: 'Little ones wore their hair down — or in two small buns, called zongjiao',
+      fz: '都来自儿童的发式。“总角之交”就是小时候认识的好朋友', fe: 'Both come from children’s hairstyles; a “zongjiao friend” is a friend from childhood' },
+    { age: 7, tag: '7–8', at: ['7–8', '岁', 'yrs'], zh: '始龀', py: 'Shǐchèn', en: 'Losing the first teeth', icon: 'tooth',
+      mz: '七八岁，乳牙一颗颗掉了，长出新牙', me: 'Seven or eight: baby teeth fall out one by one and new ones grow',
+      fz: '“龀”就是换乳牙，也叫“龆龀”。《说文》：女孩七岁换牙，男孩八岁', fe: 'Chen means changing baby teeth; girls at seven, boys at eight, says the Shuowen' },
+    { age: 10, here: true, zh: '幼学', py: 'Yòuxué', en: 'The age to begin learning', icon: 'book',
+      mz: '十岁，开始好好上学读书的年纪', me: 'Ten: the age to start school and study in earnest',
+      fz: '出自《礼记》：人生十年曰幼，学。也叫“外傅之年”：十年出就外傅，出门跟老师学习', fe: 'From the Book of Rites; also “the age to go out and study with a teacher”' },
+    { age: 12, zh: '金钗之年', py: 'Jīnchāi zhī nián', en: 'The golden hairpin', icon: 'goldpin', who: ['女孩', 'Girls'],
+      mz: '十二岁的女孩，头上可以插一支漂亮的金钗', me: 'A girl of twelve, old enough for a pretty golden hairpin',
+      fz: '“金钗”出自梁武帝的诗句：头上金钗十二行；后来用作女孩十二岁的代称', fe: 'From a line by Emperor Wu of Liang; later a name for a girl of twelve' },
+    { age: 13, zh: '豆蔻年华', py: 'Dòukòu niánhuá', en: 'The cardamom bud', icon: 'bud', who: ['女孩', 'Girls'], boy: ['舞勺之年', 'Wǔsháo — learning music, poems and the spoon dance'],
+      mz: '十三四岁的女孩，像枝头刚冒出的花苞', me: 'A girl of thirteen or fourteen, like a bud just showing on the branch',
+      fz: '出自唐代杜牧的诗', fe: 'From a Tang poem by Du Mu' },
+    { age: 15, zh: '及笄之年', py: 'Jíjī zhī nián', en: 'The hairpin age', icon: 'hairpin', who: ['女孩', 'Girls'], boy: ['束发之年、志学之年；再大些叫“成童”', 'Shùfà, Zhìxué — hair tied up, a mind set on learning; a little older, chéngtóng'],
+      mz: '十五岁的女孩把头发盘起，插上发簪，表示长大了', me: 'At fifteen a girl pins up her hair — a sign of growing up',
+      fz: '“笄”是簪子。出自《礼记·内则》：十有五年而笄', fe: 'Ji is a hairpin; from the Book of Rites' },
+    { age: 16, zh: '二八年华', py: 'Èrbā niánhuá', en: 'Two times eight', icon: 'jade', who: ['女孩', 'Girls'],
+      mz: '二乘八，正好十六岁；也叫“碧玉年华”，像一块清透的碧玉', me: 'Two times eight is sixteen; also “the jade years”, clear and bright as jade',
+      fz: '旧时诗文里对十六岁少女的称呼，常说“年方二八”', fe: 'How old poems speak of a girl of sixteen — “just two-eight”' },
+    { age: 20, zh: '桃李年华', py: 'Táolǐ niánhuá', en: 'The peach-and-plum years', icon: 'blossom', who: ['女孩', 'Girls'], boy: ['弱冠之年', 'Ruòguàn — the capping ceremony at twenty'],
+      mz: '二十岁的女孩，像春天里开满枝头的桃花和李花', me: 'A young woman of twenty, like peach and plum trees in full spring bloom',
+      fz: '旧时对女子二十岁的美称', fe: 'A traditional name for a young woman of twenty' },
+    { age: 24, zh: '花信年华', py: 'Huāxìn niánhuá', en: 'The flower-wind years', icon: 'flowerwind', who: ['女孩', 'Girls'],
+      mz: '二十四岁，像一年里二十四阵花信风吹开的花，开得正好', me: 'Twenty-four, like the flowers opened by the year’s twenty-four flower winds — in full bloom',
+      fz: '从小寒到谷雨，每五天吹来一阵“花信风”，一共二十四番，从梅花开到楝花', fe: 'From Minor Cold to Grain Rain, a new flower wind every five days — twenty-four in all, plum to chinaberry' },
     { age: 30, zh: '而立', py: 'Érlì', en: 'Standing firm', icon: 'stand',
       mz: '三十岁，能靠自己站稳了', me: 'Thirty: able to stand on your own feet', fz: '出自《论语》：三十而立', fe: 'From the Analects of Confucius' },
     { age: 40, zh: '不惑', py: 'Búhuò', en: 'Free of doubt', icon: 'compass',
@@ -303,21 +342,25 @@
       mz: '六十岁，古人记年份的六十个名字正好转完一圈', me: 'Sixty: the sixty year-names of the old calendar come full circle', fz: '来自干支纪年', fe: 'From the sixty-year calendar cycle' },
     { age: 70, zh: '古稀', py: 'Gǔxī', en: 'Rare since ancient times', icon: 'pine',
       mz: '七十岁，古时候能活到七十的人很少', me: 'Seventy: long ago, few people lived to seventy', fz: '出自唐代杜甫的诗：人生七十古来稀', fe: 'From a Tang poem by Du Fu' },
-    { age: 80, zh: '耄耋', py: 'Màodié', en: 'The silver years', icon: 'cane',
-      mz: '八十岁，头发白了，走路慢了，肚子里的故事却最多', me: 'Eighty: white hair, slower steps, and the most stories to tell', fz: '也泛指八九十岁。八十岁又叫“杖朝之年”，出自《礼记》', fe: 'Also used for the eighties and nineties; eighty is “the age of a cane at court” in the Book of Rites' },
+    { age: 80, zh: '杖朝之年', py: 'Zhàngcháo zhī nián', en: 'A cane at court', icon: 'cane',
+      mz: '八十岁，古时候可以拄着拐杖上朝，人人都尊敬', me: 'Eighty: in old times you could bring your cane even to court, and everyone honoured you',
+      fz: '出自《礼记·王制》：八十杖于朝。八九十岁也合称“耄耋”', fe: 'From the Book of Rites; the eighties and nineties together are called maodie' },
     { age: 90, zh: '鲐背', py: 'Táibèi', en: 'Spots like a globefish', icon: 'fish',
-      mz: '九十岁，背上长出像鲐鱼一样的斑点，是很长寿的样子', me: 'Ninety: spots on the back like a globefish — the look of a very long life', fz: '出自《尔雅》：鲐背，寿也。也叫“鲐背之年”', fe: 'From the Erya, the oldest Chinese dictionary' },
+      mz: '九十岁，背上长出像鲐鱼一样的斑点，是很长寿的样子', me: 'Ninety: spots on the back like a globefish — the look of a very long life', fz: '出自《释名》：九十曰鲐背，背有鲐文也。也叫“鲐背之年”', fe: 'From the Shiming: “ninety is taibei — spots on the back like a globefish”' },
     { age: 100, zh: '期颐', py: 'Qīyí', en: 'A hundred years', icon: 'peach',
       mz: '一百岁，被大家好好照顾的年纪', me: 'One hundred: the age to be lovingly cared for', fz: '出自《礼记》：百年曰期，颐', fe: 'From the Book of Rites' }
   ];
   /* One name as a big card: picture, age, the name with pinyin and English, what it means, where it comes from. */
   T.nameCard = function (i, here) {
     var n = T.ageNames[i], wells = ['sky', 'sun', 'mint', 'grape', 'primary'];
-    return '<div class="tu-namecard"><div class="tu-namecard__pic tu-namecard__pic--' + wells[i % 5] + '">' + T.icon(n.icon) + T.age(n.age) + '</div>' +
+    var badge = n.at ? '<span class="tu-age' + (n.at[1] ? '' : ' tu-age--word') + '"><b>' + n.at[0] + '</b>' + (n.at[1] ? T.bi(n.at[1], n.at[2]) : '') + '</span>' : T.age(n.age);
+    here = here == null ? !!n.here : here;
+    return '<div class="tu-namecard' + (n.boy || n.fz.length > 26 ? ' tu-namecard--long' : '') + '"><div class="tu-namecard__pic tu-namecard__pic--' + wells[i % 5] + '">' + T.icon(n.icon) + badge + '</div>' +
       '<div class="tu-namecard__txt"><div class="tu-namecard__tags">' +
       (here ? '<span class="tu-namecard__tag tu-namecard__tag--here">' + T.bi('你在这里', 'You are here') + '</span>' : '') +
       (n.who ? '<span class="tu-namecard__tag">' + T.bi(n.who[0], n.who[1]) + '</span>' : '') + '</div>' +
-      T.bi(n.zh, n.py + ' · ' + n.en, 'tu-hero tu-namecard__name') + T.bi(n.mz, n.me, 'tu-label tu-namecard__mean') + T.bi(n.fz, n.fe, 'tu-body') + '</div></div>';
+      T.bi(n.zh, n.py + ' · ' + n.en, 'tu-hero tu-namecard__name') + T.bi(n.mz, n.me, 'tu-label tu-namecard__mean') + T.bi(n.fz, n.fe, 'tu-body') +
+      (n.boy ? '<div class="tu-namecard__boy">' + T.bi('同样年纪的男孩叫：' + n.boy[0], 'Boys of this age: ' + n.boy[1], 'tu-body') + '</div>' : '') + '</div></div>';
   };
 
   /* ---------- three-up comparison (component previews) ---------- */

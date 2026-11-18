@@ -6,7 +6,7 @@
 | --- | --- | --- | --- |
 | `Fredoka-latin.woff2`, `Fredoka-latin-ext.woff2` | Fredoka (variable, 300–700) | 标题里的英文和数字 | SIL Open Font License 1.1 — © 2016 The Fredoka Project Authors |
 | `ZCOOLKuaiLe-chinese-simplified.woff2` | 站酷快乐体 ZCOOL KuaiLe | 标题里的中文 | SIL Open Font License 1.1 — © 2018 The ZCOOL KuaiLe Project Authors |
-| `ZCOOLKuaiLe-extra.woff2` | 站酷快乐体 ZCOOL KuaiLe（补字） | 常用字子集里没有的字：鲐 | 同上 |
+| `ZCOOLKuaiLe-extra.woff2` | 站酷快乐体 ZCOOL KuaiLe（补字） | 常用字子集里没有的字：髫、鲐、龀、龆 | 同上 |
 | `Nunito-latin.woff2`, `Nunito-latin-ext.woff2` | Nunito (variable, 200–1000) | 正文里的英文和数字 | SIL Open Font License 1.1 — © 2014 The Nunito Project Authors |
 
 正文里的中文用设备自带的中文字体（苹方、微软雅黑、思源黑体等），没有打包：一套完整的中文正文字体有十几 MB。

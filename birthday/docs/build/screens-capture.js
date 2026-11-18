@@ -81,8 +81,9 @@ async function grab(pg, code, list, opt) {
   await pg.keyboard.press('8'); await pg.waitForTimeout(4200);
   await grab(pg, 'P08', [['.x-col .tu-hero', '生日快乐', 'Happy birthday'], ['.x-col .tu-title', '爸爸妈妈的话', 'Words from Mom and Dad'], ['.x-col .tu-btn', '去看年岁的名字', 'On to the names'], ['.tu-cake', '吹灭的蜡烛', 'Candles out'], ['#cues', '动作提示条', 'Gesture cues']]);
   await pg.keyboard.press('Enter'); await pg.waitForTimeout(1800);
+  for (let i = 0; i < 5; i++) await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(1500);      /* from the third day on to ten: you are here */
   await grab(pg, 'P09', [['.x-head .tu-title', '标题', 'Title'], ['.x-head .tu-body', '说明', 'Line under it'], ['.tu-namecard__pic', '图示与年龄', 'Picture and age'], ['.tu-namecard__tags', '标签', 'Tags'], ['.tu-namecard__name', '名字、拼音、英文名', 'Name, pinyin, English'], ['.tu-namecard__mean', '含义', 'Meaning'], ['.tu-namecard__txt > .tu-body', '出处', 'Source'], ['#rail', '年龄时间轴', 'Age timeline'], ['#cues', '动作提示条', 'Gesture cues'], ['.x-foot', '按键提示', 'Key hints']]);
-  for (let i = 0; i < 3; i++) await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(1500);
+  for (let i = 0; i < 5; i++) await pg.keyboard.press('ArrowRight'); await pg.waitForTimeout(1500);
   await pg.screenshot({ path: path.join(OUT, 'P09-20.png') });
 
   /* on a phone: the camera buttons (M01) and camera-or-library (M04) */
