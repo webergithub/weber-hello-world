@@ -21,7 +21,8 @@ const CFG = {
   setupToken: env.TENUP_SETUP_TOKEN || '',
   smsWaitMs: env.TENUP_SMS_WAIT_MS == null || env.TENUP_SMS_WAIT_MS === '' ? 60000 : +env.TENUP_SMS_WAIT_MS,   /* 同一号码两次短信之间的间隔 */
   maxFile: 25 * 1024 * 1024,
-  maxVideo: (+env.TENUP_MAX_VIDEO_MB || 200) * 1024 * 1024    /* 一段视频最大多少 MB */
+  maxVideo: (+env.TENUP_MAX_VIDEO_MB || 500) * 1024 * 1024,   /* 一段视频最大多少 MB */
+  uploadMinutes: +env.TENUP_UPLOAD_MINUTES || 60               /* 一次上传最多用多久：500 MB 的视频在慢网上要传很久 */
 };
 const DAY = 86400000, OTP_MS = 5 * 60000, PRE_MS = 10 * 60000;
 
@@ -650,6 +651,9 @@ const server = http.createServer(async (req, res) => {
   }
 });
 geo.load(CFG.geoip);
+/* Node 默认 5 分钟就切断一个请求；大视频从手机传上来可能要更久。等待请求头的时间不变，防止空连接占着不放。 */
+server.requestTimeout = CFG.uploadMinutes * 60000;
+server.headersTimeout = 60000;
 server.listen(CFG.port, CFG.host, () => {
   console.log('[tenup] listening on http://' + CFG.host + ':' + CFG.port + '  data: ' + CFG.data + '  sms: ' + sms.name() + '  geoip: ' + (geo.ready() ? 'loaded' : CFG.countryHeader ? 'header ' + CFG.countryHeader : 'none (country checks are off)'));
   if (!ACC) console.log('[tenup] 还没有设置。打开网站完成首次设置，设置口令 Setup token: ' + SETUP_TOKEN);

@@ -85,6 +85,14 @@ const idle = page => page.waitForFunction(() => !/正在|Uploading|Reading/.test
     const about = zip.find(z => /相册说明/.test(z.name));
     ok('相册说明里有每岁的说明和寄语', about && about.data.toString().includes('第一次笑出声') && about.data.toString().includes('2 岁 · age 2'));
     ok('每个文件都没坏（CRC 校验）', zip.every(z => z.crcOk && z.method === 0));
+    /* big albums come in parts: shrink the part size to see it */
+    await pg.evaluate(() => { TenUp.ZIP_PART_MB = 0.06; });
+    const parts = []; pg.on('download', d => parts.push(d));
+    await pg.click('[data-a=zip]'); await pg.waitForFunction(() => /压缩包/.test(document.querySelector('.pr-msg').innerText), null, { timeout: 30000 }); await sleep(1500);
+    const all = []; for (const d of parts) all.push(...readZip(fs.readFileSync(await d.path())));
+    ok('相册大时分成几个压缩包（' + parts.length + ' 个），名字是 part1、part2……', parts.length >= 3 && parts.every((d, i) => d.suggestedFilename().endsWith('-part' + (i + 1) + '.zip')), parts.map(d => d.suggestedFilename()));
+    ok('几个压缩包合起来正好是全部 10 个文件，没有重复', all.length === 10 && new Set(all.map(z => z.name)).size === 10 && all.every(z => z.crcOk));
+    ok('页面上说明分成了几个、怎么解压', /分成 \d+ 个压缩包/.test(await pg.$eval('.pr-msg', e => e.innerText)));
     ok('没有页面错误', errs.length === 0, errs);
     await ctx.close();
 

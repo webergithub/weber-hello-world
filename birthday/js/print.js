@@ -148,13 +148,19 @@
     });
     if (act === 'zip' && !busy) {
       busy = ['正在准备……', 'Getting ready…']; drawBar(pagesBox.children.length);
-      T.exportZip(album, function (d, t) { busy = ['正在打包 ' + d + ' / ' + t + '，请不要关闭页面', 'Packing ' + d + ' of ' + t + ' — please keep this page open']; drawBar(pagesBox.children.length); })
-        .then(function (blob) {
-          /* an English file name: some browsers drop a Chinese one; the folders inside keep their Chinese names */
-          var file = (String(album.name.en || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'TenUp') + '-growing-up-album.zip';
-          T.saveFile(blob, file);
+      /* an English file name: some browsers drop a Chinese one; the folders inside keep their Chinese names */
+      var base = (String(album.name.en || '').replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'TenUp') + '-growing-up-album', held = null, mb = 0;
+      /* a part is saved once the next one starts, so a single part keeps the plain name */
+      function out(b, n, last) { T.saveFile(b, base + (n > 1 || !last ? '-part' + n : '') + '.zip'); mb += b.size / 1048576; }
+      T.exportZip(album, function (d, t) { busy = ['正在打包 ' + d + ' / ' + t + '，请不要关闭页面', 'Packing ' + d + ' of ' + t + ' — please keep this page open']; drawBar(pagesBox.children.length); },
+        function (b, n) { if (held) out(held[0], held[1], false); held = [b, n]; })
+        .then(function (parts) {
+          if (held) out(held[0], held[1], true);
           busy = null; drawBar(pagesBox.children.length);
-          var m = bar.querySelector('.pr-msg'); if (m) m.innerHTML = bi('已下载：' + file + '（' + (blob.size / 1048576).toFixed(1) + ' MB），里面每个年龄一个文件夹', 'Downloaded ' + file + ' (' + (blob.size / 1048576).toFixed(1) + ' MB), a folder for each age');
+          var m = bar.querySelector('.pr-msg');
+          if (m) m.innerHTML = parts > 1
+            ? bi('已分成 ' + parts + ' 个压缩包下载（共 ' + mb.toFixed(1) + ' MB）：' + base + '-part1.zip 到 part' + parts + '.zip。全部解压到同一个文件夹，就是完整的相册。', 'Downloaded in ' + parts + ' parts (' + mb.toFixed(1) + ' MB). Unpack them all into one folder to get the whole album.')
+            : bi('已下载：' + base + '.zip（' + mb.toFixed(1) + ' MB），里面每个年龄一个文件夹', 'Downloaded ' + base + '.zip (' + mb.toFixed(1) + ' MB), a folder for each age');
         }, function () { busy = null; drawBar(pagesBox.children.length); var m = bar.querySelector('.pr-msg'); if (m) m.innerHTML = bi('打包没有成功，请再试一次', 'Packing did not work — please try again'); });
     }
   });

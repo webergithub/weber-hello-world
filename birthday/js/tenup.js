@@ -627,7 +627,7 @@
     return fetch('api/state', { credentials: 'same-origin' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (j) {
       if (!j || j.server !== 'tenup') return false;
       if (j.state !== 'ok') return toLogin();
-      C.on = true; C.version = -1; C.maxVideoMB = j.maxVideoMB || 200;
+      C.on = true; C.version = -1; C.maxVideoMB = j.maxVideoMB || 500;
       return pull().then(function () {
         setInterval(function () { if (document.hidden) return; pull().then(function (changed) { if (changed) tell(true); }).catch(function () { if (!cDirty) setStatus('offline'); }); }, 4000);
         return true;
@@ -718,7 +718,7 @@
   /* the video itself, ready for the album: on the family server it is uploaded now (it is too big to wait for
      the next save), else it is kept in this browser as a data URL */
   T.LOCAL_VIDEO_MB = 30;
-  T.videoLimitMB = function () { return T.cloud.on ? T.cloud.maxVideoMB || 200 : T.LOCAL_VIDEO_MB; };
+  T.videoLimitMB = function () { return T.cloud.on ? T.cloud.maxVideoMB || 500 : T.LOCAL_VIDEO_MB; };
   T.keepVideo = function (file, onProgress) {
     var type = T.videoType(file);
     if (T.cloud.on) return T.cloud.send(file, type, onProgress);
@@ -1175,8 +1175,13 @@
     return '<?xml version="1.0" encoding="UTF-8"?>\n<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 500" width="1000" height="500"><rect width="1000" height="500" fill="#fffaf4"/>' +
       '<g fill="none" stroke="#4a3830" stroke-width="12" stroke-linecap="round" stroke-linejoin="round">' + T.strokesSvg(strokes).replace(/^<svg[^>]*>|<\/svg>$/g, '').replace(/ pathLength="1"/g, '') + '</g></svg>\n';
   };
-  /* album = { name: { zh, en }, avatars, music, photos } → Promise<Blob>; onProgress(done, total) */
-  T.exportZip = function (album, onProgress) {
+  /* album = { name: { zh, en }, avatars, music, photos }; onProgress(done, total).
+     Big albums (videos of up to 500 MB each) are split into parts of about T.ZIP_PART_MB, so no ZIP passes the
+     4 GB limit of the format and a phone never holds more than one part at a time. Each part is handed to
+     onPart(blob, number) as soon as it is ready; the promise resolves with the number of parts. Every part has
+     the same folders, so unpacking them all into one place gives the whole album. */
+  T.ZIP_PART_MB = 1024;
+  T.exportZip = function (album, onProgress, onPart) {
     var nm = (album.name && album.name.zh) || '小寿星', root = nm + '的成长相册 ' + ((album.name && album.name.en) || 'Growing-up album') + '/', jobs = [], text = [], enc = new TextEncoder(), entries = [];
     function two(n) { return (n < 10 ? '0' : '') + n; }
     function noteText(n, label) {
@@ -1207,14 +1212,17 @@
     [['girl', '她 Her'], ['dad', '爸爸 Dad'], ['mom', '妈妈 Mom']].forEach(function (w) { add(av[w[0]], root + '头像 Portraits/' + w[1]); });
     ((album.music && album.music.tracks) || []).forEach(function (t) { add(t.src, root + '音乐 Music/' + String(t.name || 'song').replace(/[\\/:*?"<>|]/g, '_')); });
     entries.unshift({ name: root + '相册说明 About this album.txt', data: enc.encode('﻿' + text.join('\r\n')) });
-    var done = 0, total = jobs.length;
+    var done = 0, total = jobs.length, parts = 0, size = entries.reduce(function (n, e) { return n + e.data.length; }, 0), limit = T.ZIP_PART_MB * 1048576;
+    function flush() { if (!entries.length) return; parts++; var b = T.zip(entries); entries = []; size = 0; onPart(b, parts); }
     if (onProgress) onProgress(0, total);
     return jobs.reduce(function (chain, j) {
       return chain.then(function () {
-        return bytesOf(j.url).then(function (f) { entries.push({ name: j.path + '.' + (EXT[f.type] || 'bin'), data: f.data }); }, function () {})
-          .then(function () { done++; if (onProgress) onProgress(done, total); });
+        return bytesOf(j.url).then(function (f) {
+          if (size && size + f.data.length > limit) flush();
+          entries.push({ name: j.path + '.' + (EXT[f.type] || 'bin'), data: f.data }); size += f.data.length;
+        }, function () {}).then(function () { done++; if (onProgress) onProgress(done, total); });
       });
-    }, Promise.resolve()).then(function () { return T.zip(entries); });
+    }, Promise.resolve()).then(function () { flush(); return parts; });
   };
   /* hand a file to the person: a download in browsers; the iPad app shows its share sheet */
   T.saveFile = function (blob, name) {

@@ -188,6 +188,11 @@ function ok(name, cond, extra) { if (cond) { passed++; console.log('  ok   ' + n
   await stop();
   proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { TENUP_PORT: PORT, TENUP_DATA: path.join(dir, 'data'), TENUP_MASTER_KEY: crypto.randomBytes(32).toString('hex') }) });
   const code = await new Promise(res => proc.on('exit', res)); ok('with the wrong master key the server cannot open the data at all', code !== 0);
+  /* defaults, with nothing set: videos up to 500 MB */
+  proc = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], { env: Object.assign({}, process.env, { TENUP_PORT: PORT, TENUP_DATA: path.join(dir, 'fresh'), TENUP_MASTER_KEY: crypto.randomBytes(32).toString('hex') }) });
+  out = ''; proc.stdout.on('data', d => out += d); for (let i = 0; i < 50 && !/listening/.test(out); i++) await sleep(100);
+  r = await client(US).call('GET', '/api/state'); ok('by default a video can be up to 500 MB', r.json.maxVideoMB === 500, r.json);
+  await stop();
   fs.rmSync(dir, { recursive: true, force: true });
   console.log('\n' + passed + ' passed, ' + failed + ' failed');
   process.exit(failed ? 1 : 0);

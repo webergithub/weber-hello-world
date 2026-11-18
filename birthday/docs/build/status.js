@@ -1,12 +1,13 @@
 /* 文档里随进度变化的部分：版本、各项状态、测试结果、待确认事项、计划、变更记录。 */
 module.exports = {
-  version: 'v2.8',
+  version: 'v2.9',
   date: '2026-11-18',
   stage: 'R1–R29 的代码全部完成并在本地测试通过；真实服务器部署、真实短信、电视和 iPad 真机、真人手势，需要你来验证',
   ipadBuild: '第一次自动编译已成功，安装包在该次运行的 Artifacts 里：https://github.com/webergithub/weber-hello-world/actions/runs/43928864072',
   look: 'done', mode: 'done', camera: 'built', gesture: 'built', manage: 'done', bilingual: 'done', messages: 'done', copy: 'done',
   avatar: 'done', names: 'done', fonts: 'done', notes: 'done', music: 'built', server: 'built', security: 'built', phones: 'built', trust: 'built', ipad: 'built', pwa: 'built', admin: 'built', capture: 'built', video: 'built', print: 'built',
   tests: [
+    ['500 MB 视频：480 MB 一次传完、服务器内存峰值约 99 MB、中间位置按字节读取一致；501 MB 被拒绝；默认上限 500 MB；打包超过上限时分成 part1、part2……，合起来正好是全部文件', '通过'],
     ['打印与导出（新增 22 项浏览器测试，`tools/e2e-print.js`）：页面组成与页数、寄语和手写、视频标记、三个人的年龄；PDF 的页数和纸张（A4 横向、Letter 纵向，无多余空白页）；选项切换并记住；ZIP 里的文件数、中文文件夹名、视频逐字节一致、手写寄语 SVG、相册说明、CRC 校验；服务器模式下未登录打不开、登录后打包服务器上解密的原视频', '全部通过'],
     ['用真的打印机打印、iPad 应用里的打印面板和下载分享', '未测：这里没有打印机和 iPad；iPad 部分已编译通过'],
     ['年岁的名字：二十张卡片逐张检查，文字不压到下方年龄条、二十个年龄标签排得下、标题字体不缺字（全站中文逐字比对字体）', '通过（1920×1080）'],
@@ -62,6 +63,7 @@ module.exports = {
     ['12', '由你来做：部署到服务器并配置 HTTPS、开通短信、放国家库、iPad 签名安装、让孩子试手势', '待你进行']
   ],
   log: [
+    ['v2.9', '2026-11-18', '视频上限改为每段 500 MB；一次上传最长 60 分钟（可调），Nginx 示例配置随之放宽；下载全部照片和视频时，超过 1 GB 自动分成几个压缩包。'],
     ['v2.8', '2026-11-18', '新增 R29：相册打印与导出（新界面 M05，print.html）——排成一本书打印或存成 PDF（A4 / Letter，横向 / 纵向），全部照片和视频按年龄打包成 ZIP 下载；iPad 应用支持打印面板和下载后分享。新增 6.5 节。'],
     ['v2.7', '2026-11-18', '孩子的名字定为“糖糖”，英文 Tina：网站默认称呼（js/config.js）、示例相册和全部截图都已更新。'],
     ['v2.6', '2026-11-18', 'P06 陪伴页改写：去掉“三千六百多天”“大约五年”这类数字和说教口气，改成爸爸妈妈对她说话，用早饭晚饭和睡前故事、放学后和周末、放假回家来表示陪伴变少；结尾加一句“多抱抱我们，多讲讲你的新鲜事吧”。'],
