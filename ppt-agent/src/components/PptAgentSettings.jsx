@@ -124,7 +124,6 @@ export default function PptAgentSettings() {
       <div className="row top"><label>总结提示词</label><textarea className="input grow" rows={3} value={f.prompt} placeholder="留空使用内置提示词（标题 / 一句话概要 / 核心要点 / 各部分摘要 / 关键词）" onChange={(e) => set({ prompt: e.target.value })} /></div>
       <div className="row"><label />
         <button className="btn primary" disabled={!!busy} onClick={save}>{busy === 'save' ? '保存中…' : '💾 保存'}</button>
-        <button className="btn" disabled={!!busy} onClick={test}>{busy === 'test' ? '测试中…' : '🔌 测试'}</button>
         <button className="btn ghost" onClick={() => app.go({ type: 'plugins' })}>🤖 打开 PPT_Agent</button>
       </div>
     </div>

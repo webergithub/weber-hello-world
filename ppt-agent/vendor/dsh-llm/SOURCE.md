@@ -9,5 +9,6 @@
   - `shims/dsh-llm.ts`：代替 `@deepseek-ai/dsh-llm`，只导出拷贝文件用到的符号
   - `retry.ts`：重试默认值来自 `packages/llm/llm/src/retry-policy.ts`，`localDelay` 原样来自 `packages/llm/llm-retry/src/index.ts`
   - `client.ts`：按 `packages/llm/llm-deepseek/src/adapter.ts` 的 `generate()` / `request()` 裁剪出的纯文本客户端（去掉 cordis 插件装配、Files API / 图片、请求扩展、工具调用、账号鉴权；增加整次请求的重试）
+  - `openai.ts`（v3.15）：OpenAI Chat Completions 兼容协议的流式请求，复用上面同一套看门狗 / SSE 分帧 / 错误分类 / 重试；`providers.ts`：常见服务商预设（只用于界面一键填入，不作为默认值）。PPT_Agent 不默认任何服务商，只复用 Harness 的连接框架。
 - 构建：`npm run build:dsh`（`scripts/build-dsh-llm.mjs`，rolldown）→ `electron/core/ppt_agent/dsh-llm.cjs`（已提交，主进程直接 require）。`eventsource-parser`（MIT）一并打包进去。
 - 升级：重新拷贝 `upstream/` 中的文件后运行 `npm run build:dsh` 与 `npm test`。
