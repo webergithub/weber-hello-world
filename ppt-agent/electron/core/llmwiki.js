@@ -587,7 +587,7 @@ class LlmWiki {
     const prev = threadId ? this.db.prepare('SELECT q, answer FROM wiki_queries WHERE thread_id = ? ORDER BY id DESC LIMIT 3').all(threadId).reverse() : [];
     if (!question) throw new Error('请输入问题');
     const qt = terms(question);
-    if (prev.length && qt.size < 4) for (const x of terms(prev[0].q)) qt.add(x);
+    if (prev.length) for (const x of terms(prev[0].q)) qt.add(x); // 追问：沿用会话首个问题的主题
     if (!qt.size) throw new Error('问题中没有可检索的词');
     const cands = [];
     const tk = ticker();
@@ -608,7 +608,12 @@ class LlmWiki {
       let hit = 0; for (const x of qt) if (t.has(x)) hit++;
       if (hit >= Math.max(1, qt.size / 3)) cands.push({ slug: r.slug, title: r.q, type: 'query', score: hit, summary: clip(r.answer, 120), points: [] });
     }
-    const pages = cands.sort((a, b) => b.score - a.score).slice(0, limit);
+    let pages = cands.sort((a, b) => b.score - a.score).slice(0, limit);
+    // 追问没有新的命中时，沿用上一轮引用的页面
+    if (!pages.length && threadId) {
+      const last = this.db.prepare('SELECT pages FROM wiki_queries WHERE thread_id = ? ORDER BY id DESC LIMIT 1').get(threadId);
+      pages = (J(last && last.pages, []) || []).map((p) => { const r = p.type === 'source' ? this.db.prepare('SELECT summary, points FROM wiki_sources WHERE slug = ?').get(p.slug) : null; return { ...p, summary: r ? r.summary : '', points: r ? J(r.points, []) : [] }; });
+    }
     let answer = '', engine = '离线摘录';
     if (pages.length && this.aiOn()) {
       const ctx = pages.map((p) => ({ slug: p.slug, title: p.title, content: this.pageText(p.slug).slice(0, 6000) }));

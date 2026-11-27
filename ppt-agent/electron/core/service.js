@@ -1607,7 +1607,7 @@ class AgentService extends EventEmitter {
   wikiSetConfig(patch) { return this.wiki.setConfig(patch || {}); }
   wikiIngest(opts = {}) {
     if (this.wiki.job) throw new Error('炼丹正在进行中');
-    this.wiki.ingest(opts).then((r) => this.emit('notice', { kind: 'info', cat: 'LLMWiki', label: '查看 LLMWiki', msg: `炼丹完成：新增 / 更新 ${r.ok} 份资料${r.failed ? `，失败 ${r.failed} 份` : ''}${r.removed ? `，移除 ${r.removed} 份` : ''}${r.cancelled ? '（已中止）' : ''}`, link: { type: 'view', view: { type: 'llmwiki' } } }))
+    this.wiki.ingest(opts).then((r) => this.emit('notice', { kind: 'info', cat: 'LLMWiki', label: '查看 LLMWiki', msg: `${r.cancelled ? '炼丹已中止' : '炼丹完成'}：新增 / 更新 ${r.ok} 份资料${r.failed ? `，失败 ${r.failed} 份` : ''}${r.removed ? `，移除 ${r.removed} 份` : ''}`, link: { type: 'view', view: { type: 'llmwiki' } } }))
       .catch((e) => { this.log.warn('[LLMWiki] 炼丹失败', e); this.emit('notice', { kind: 'error', cat: 'LLMWiki', msg: `炼丹失败：${e.message}` }); });
     return this.wiki.state();
   }
