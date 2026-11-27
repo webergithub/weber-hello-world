@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS wiki_sources (
   tags TEXT, category TEXT, kind TEXT, path TEXT, engine TEXT, at INTEGER
 );
 CREATE TABLE IF NOT EXISTS wiki_queries (id INTEGER PRIMARY KEY AUTOINCREMENT, q TEXT, answer TEXT, pages TEXT, engine TEXT, slug TEXT, at INTEGER);
+CREATE TABLE IF NOT EXISTS wiki_meta (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS wiki_log (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER, op TEXT, title TEXT, detail TEXT);
 `;
 
@@ -46,6 +47,40 @@ const DEFAULT_SCHEMA = `# LLM Wiki 规则（schema）
 5. 原始资料从不修改；文档更新后重新炼化对应资料页，并更新相关概念页。
 `;
 
+// v3.16：无意义的重复词语（Office 默认标题、占位提示、模板文字等）在整理时过滤掉；用户可在“规则”中增删过滤词，
+// 另外自动识别在很多文档里都出现的同一页标题（模板 / 页眉页脚文字）
+const RULES_REV = 2;
+const NOISE_PATTERNS = [
+  /^(新建\s*)?(microsoft\s*)?(office\s*)?powerpoint\s*(演示文稿|演示|presentation|幻灯片|slides?)?\s*\d*$/i,
+  /^(演示文稿|幻灯片|presentation|slides?|ppt|pptx|ppt\s*模板|模板)\s*\d*$/i,
+  /^(单击|点击|双击|click)(此处|这里)?(以)?(添加|输入|编辑|to add|to edit)?.{0,12}?(标题|文本|文字|副标题|备注|内容|母版.{0,6}样式|title|text|subtitle|notes)$/i,
+  /^(无标题|未命名|untitled)(\s*\d*)?$/i,
+  /^(标题|副标题|主标题|title|subtitle|text|文本|内容)\s*\d*$/i,
+  /^(office|wps|默认设计|default design)\s*(主题|theme)?$/i,
+  /^(第\s*\d+\s*(页|张)|page\s*\d+|slide\s*\d+|\d+\s*\/\s*\d+)$/i,
+  /^(wps\s*演示|keynote)$/i,
+];
+const DEFAULT_STOP = ['PowerPoint 演示文稿', 'Microsoft PowerPoint 演示文稿', '新建 Microsoft PowerPoint 演示文稿', 'PowerPoint Presentation', 'WPS 演示', '单击此处添加标题', '单击此处添加文本', '单击此处添加副标题', '单击此处编辑母版标题样式', '单击此处编辑母版文本样式', '单击此处编辑母版副标题样式', 'Click to add title', 'Click to add text', '感谢聆听', '谢谢观看', '敬请指正'];
+/** 过滤器：isNoise(整句是否无意义)、clean(去掉句中的过滤词)；boiler = 自动识别的模板标题 */
+function makeFilter(stop = DEFAULT_STOP, boiler = new Set()) {
+  const words = [...new Set(stop.map((x) => String(x || '').trim()).filter(Boolean))].sort((a, b) => b.length - a.length);
+  const lowWords = words.map((w) => w.toLowerCase());
+  const norm = (x) => String(x || '').replace(/\s+/g, ' ').trim();
+  const clean = (x) => {
+    let t = norm(x);
+    for (let i = 0; i < words.length; i++) { const lw = lowWords[i]; let k = t.toLowerCase().indexOf(lw); let g = 0; while (k >= 0 && g++ < 20) { t = t.slice(0, k) + ' ' + t.slice(k + lw.length); k = t.toLowerCase().indexOf(lw); } }
+    return t.replace(/\s+/g, ' ').replace(/^[\s\-—–_:：,，.。|·、/\\]+|[\s\-—–_:：,，|·、/\\]+$/g, '').trim();
+  };
+  const isNoise = (x) => {
+    const t = norm(x);
+    if (!t) return true;
+    if (GENERIC_TITLES.test(t) || NOISE_PATTERNS.some((re) => re.test(t))) return true;
+    if (lowWords.includes(t.toLowerCase()) || boiler.has(t)) return true;
+    const c = clean(t);
+    return c.length < 2 || NOISE_PATTERNS.some((re) => re.test(c)) || GENERIC_TITLES.test(c);
+  };
+  return { isNoise, clean, words, boiler };
+}
 const GENERIC_TITLES = /^(目录|目 录|contents?|agenda|谢谢|thanks?|thank you|q ?& ?a|问答|附录|appendix|封面|结束|the end|\d+)$/i;
 const ATTR_TAG = /^(黑底|白底|含视频|有讲解词|无讲解词|PPT|Word|PDF|文档|\d+页)$/;
 
@@ -79,7 +114,18 @@ class LlmWiki {
 
   get dir() { return path.join(this.svc.dataDir, 'llmwiki'); }
   get db() { return this.svc.store.db; }
-  cfg() { return { useAi: false, scopes: [], ...(this.svc.config.llmwiki || {}) }; }
+  cfg() { return { useAi: false, scopes: [], stopPhrases: DEFAULT_STOP, autoBoiler: true, ...(this.svc.config.llmwiki || {}) }; }
+  /** 过滤规则的指纹：规则或过滤词变化时，已炼化的资料都标记为待重新炼化 */
+  rulesKey() { const c = this.cfg(); return md5(JSON.stringify([RULES_REV, c.stopPhrases, !!c.autoBoiler])).slice(0, 6); }
+  /** 自动识别的模板标题：同一页标题出现在很多文档中（≥ 5 份且 ≥ 20%） */
+  boilerplate() {
+    if (!this.cfg().autoBoiler) return new Set();
+    const n = this.db.prepare("SELECT COUNT(*) n FROM files WHERE status = 'parsed'").get().n;
+    if (n < 10) return new Set();
+    const min = Math.max(5, Math.ceil(n * 0.2));
+    return new Set(this.db.prepare("SELECT s.title t, COUNT(DISTINCT s.file_id) c FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed' AND s.title IS NOT NULL AND s.title != '' GROUP BY s.title HAVING c >= ?").all(min).map((r) => String(r.t).replace(/\s+/g, ' ').trim()));
+  }
+  filterInfo() { const c = this.cfg(); const b = this.boilerplate(); return { stopPhrases: c.stopPhrases, defaults: DEFAULT_STOP, autoBoiler: !!c.autoBoiler, boilerplate: [...b].slice(0, 200), patterns: NOISE_PATTERNS.length }; }
   setConfig(patch = {}) { this.svc.setConfig({ llmwiki: { ...this.cfg(), ...patch } }); return this.state(); }
 
   init() {
@@ -90,6 +136,11 @@ class LlmWiki {
     if (!lc.has('level')) this.db.exec("ALTER TABLE wiki_log ADD COLUMN level TEXT DEFAULT 'info'");
     if (!lc.has('slug')) this.db.exec('ALTER TABLE wiki_log ADD COLUMN slug TEXT');
     if (!lc.has('file_id')) this.db.exec('ALTER TABLE wiki_log ADD COLUMN file_id INTEGER');
+    // v3.16：问答会话（同一会话中的追问 thread_id 相同）与归档
+    const qc = new Set(this.db.prepare('PRAGMA table_info(wiki_queries)').all().map((c) => c.name));
+    if (!qc.has('thread_id')) { this.db.exec('ALTER TABLE wiki_queries ADD COLUMN thread_id INTEGER'); this.db.exec('UPDATE wiki_queries SET thread_id = id'); }
+    if (!qc.has('archived')) { this.db.exec('ALTER TABLE wiki_queries ADD COLUMN archived INTEGER DEFAULT 0'); this.db.exec('UPDATE wiki_queries SET archived = 1 WHERE slug IS NOT NULL'); }
+    if (!qc.has('ms')) this.db.exec('ALTER TABLE wiki_queries ADD COLUMN ms INTEGER');
     for (const d of ['', 'sources', 'concepts', 'tags', 'topics', 'queries']) fs.mkdirSync(path.join(this.dir, d), { recursive: true });
     if (!fs.existsSync(this.schemaFile)) fs.writeFileSync(this.schemaFile, DEFAULT_SCHEMA, 'utf8');
     this.inited = true;
@@ -118,6 +169,7 @@ class LlmWiki {
     const counts = Object.fromEntries(this.db.prepare('SELECT level, COUNT(*) n FROM wiki_log GROUP BY level').all().map((r) => [r.level || 'info', r.n]));
     return { rows, counts };
   }
+  meta(k, v) { if (v === undefined) { const r = this.db.prepare('SELECT v FROM wiki_meta WHERE k = ?').get(k); return r ? r.v : null; } this.db.prepare('INSERT OR REPLACE INTO wiki_meta(k, v) VALUES (?, ?)').run(k, String(v)); return v; }
   slugOf(fileId) { try { this.init(); const r = this.db.prepare('SELECT slug FROM wiki_sources WHERE file_id = ?').get(fileId); return r ? r.slug : null; } catch { return null; } }
 
   emit() { this.svc.emit('wiki', this.state()); }
@@ -130,7 +182,8 @@ class LlmWiki {
       const ph = scopes.map(() => '?').join(',');
       rows = this.db.prepare(`SELECT DISTINCT f.id, f.fingerprint, f.parsed_at FROM files f JOIN task_files tf ON tf.file_id = f.id JOIN tasks t ON t.id = tf.task_id WHERE f.status = 'parsed' AND (t.id IN (${ph}) OR t.parent_id IN (${ph}))`).all(...scopes, ...scopes);
     } else rows = this.db.prepare("SELECT id, fingerprint, parsed_at FROM files WHERE status = 'parsed'").all();
-    return rows.map((r) => ({ id: r.id, fp: `${r.fingerprint || ''}|${r.parsed_at || 0}` }));
+    const key = this.rulesKey();
+    return rows.map((r) => ({ id: r.id, fp: `${r.fingerprint || ''}|${r.parsed_at || 0}|${key}` }));
   }
 
   state() {
@@ -145,7 +198,8 @@ class LlmWiki {
       dir: this.dir, config: c, ai: { ok: !!ai.ok, model: ai.model || '', reason: ai.reason || '' }, aiOn: this.aiOn(),
       counts: { sources: n('SELECT COUNT(*) n FROM wiki_sources'), candidates: cand.length, pending, queries: n('SELECT COUNT(*) n FROM wiki_queries'), concepts: this.countDir('concepts'), tags: this.countDir('tags'), topics: this.countDir('topics'), logs: n('SELECT COUNT(*) n FROM wiki_log') },
       lastIngest: (this.db.prepare("SELECT at FROM wiki_log WHERE op = 'ingest' ORDER BY id DESC LIMIT 1").get() || {}).at || null,
-      job: this.job ? { op: this.job.op, done: this.job.done, total: this.job.total, label: this.job.label, started: this.job.started, eta: this.eta() } : null,
+      job: this.job ? { op: this.job.op, done: this.job.done, total: this.job.total, label: this.job.label, started: this.job.started, eta: this.eta(), cancelling: !!this.job.cancel, current: this.job.current || null } : null,
+      feed: (this.feed || []).slice(-200),
     };
   }
   countDir(d) { try { return fs.readdirSync(path.join(this.dir, d)).filter((n) => n.endsWith('.md')).length; } catch { return 0; } }
@@ -162,7 +216,26 @@ class LlmWiki {
     if (force || Date.now() - (j.lastEmit || 0) > 400) { j.lastEmit = Date.now(); this.emit(); }
   }
   pendingIds() { const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp])); return this.candidates().filter((x) => have.get(x.id) !== x.fp).map((x) => x.id); }
-  cancel() { if (this.job) this.job.cancel = true; return this.state(); }
+  /** 中止：立即结束正在进行的大模型调用，跳过剩余文档与页面更新（已完成的资料保留） */
+  cancel() {
+    if (this.job && !this.job.cancel) {
+      this.job.cancel = true; this.job.label = '正在中止…';
+      try { this.job.abort.abort(); } catch { /* ignore */ }
+      this.step('warn', 'cancel', '收到中止请求：结束当前调用，不再处理后面的文档');
+      this.emit();
+    }
+    return this.state();
+  }
+  /** 炼丹过程（实时）：读取 → 发送给大模型 → 收到答复 / 离线提取 → 写入 → 下一份；同时记入日志（debug 以上） */
+  step(level, kind, text, extra = {}) {
+    if (!this.feed) this.feed = [];
+    this.feedSeq = (this.feedSeq || 0) + 1;
+    this.feed.push({ seq: this.feedSeq, at: Date.now(), level, kind, text, slug: extra.slug || null, file_id: extra.file_id || null, ms: extra.ms || null, detail: extra.detail || '' });
+    if (this.feed.length > 400) this.feed.splice(0, this.feed.length - 400);
+    this.log('ingest', text, extra.detail || '', level, { slug: extra.slug, file_id: extra.file_id });
+    const j = this.job;
+    if (j && Date.now() - (j.lastEmit || 0) > 250) { j.lastEmit = Date.now(); this.emit(); }
+  }
 
   // ---------- 炼丹（ingest） ----------
   /** 吸收新增 / 变化的文档（force = 全部重新炼化；ids = 只炼这些文档） */
@@ -173,12 +246,17 @@ class LlmWiki {
     const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp]));
     const want = ids ? new Set(ids.map(Number)) : null;
     const todo = cand.filter((x) => (want ? want.has(x.id) : force || have.get(x.id) !== x.fp));
-    this.job = { op: 'ingest', done: 0, total: todo.length, label: '吸收资料', started: Date.now() };
-    this.emit();
+    this.job = { op: 'ingest', done: 0, total: todo.length, label: '吸收资料', started: Date.now(), abort: new AbortController() };
+    this.feed = [];
     const useAi = this.aiOn();
     const schema = this.schema();
+    this.filter = makeFilter(this.cfg().stopPhrases, this.boilerplate());
+    this.step('info', 'start', `开始${force ? '全部重新炼化' : '炼丹'}：${todo.length} 份资料，${useAi ? `大模型炼化（${(this.svc.ai.engine() || {}).model || ''}）` : '离线提取'}；过滤词 ${this.filter.words.length} 个${this.filter.boiler.size ? `，自动识别模板标题 ${this.filter.boiler.size} 个` : ''}`);
+    this.emit();
+    const signal = this.job.abort.signal;
     const touched = { concepts: new Set(), tags: new Set(), topics: new Set() };
     let ok = 0, failed = 0, aiUsed = 0;
+    const doneIds = [];
     const tk = ticker();
     const upsert = this.db.prepare('INSERT OR REPLACE INTO wiki_sources(file_id, fp, slug, title, summary, points, concepts, extra, tags, category, kind, path, engine, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try {
@@ -189,26 +267,34 @@ class LlmWiki {
         try {
           const old = this.db.prepare('SELECT concepts, extra, tags, category FROM wiki_sources WHERE file_id = ?').get(x.id);
           if (old) this.markTouched(touched, old);
-          const s = await this.digest(x.id, { useAi, schema });
-          if (!s) { this.log('ingest', `跳过 #${x.id}`, '文档不存在', 'warn', { file_id: x.id }); continue; }
-          if (s.aiError) this.log('ingest', `大模型炼化失败，改用离线提取：${s.title}`, s.aiError, 'warn', { slug: s.slug, file_id: x.id });
-          this.log('ingest', `${old ? '更新' : '吸收'}：${s.title}`, `${s.engine} · ${s.pages} 页 · 要点 ${s.points.length} 条 · 概念 ${s.concepts.length + s.entities.length} 个${s.tags.length ? ` · 标签 ${s.tags.length} 个` : ''}`, 'debug', { slug: s.slug, file_id: x.id });
+          this.job.current = { i: i + 1, file_id: x.id };
+          const s = await this.digest(x.id, { useAi, schema, signal, onStep: (lv, k, t, e) => this.step(lv, k, `[${i + 1}/${todo.length}] ${t}`, e) });
+          if (this.job.cancel) break;
+          if (!s) { this.step('warn', 'skip', `[${i + 1}/${todo.length}] 跳过 #${x.id}：文档不存在`, { file_id: x.id }); continue; }
+          this.job.current = { i: i + 1, file_id: x.id, title: s.title };
           if (s.engine !== '离线提取') aiUsed++;
+          doneIds.push(x.id);
           upsert.run(x.id, x.fp, s.slug, s.title, s.summary, JSON.stringify(s.points), JSON.stringify(s.concepts), JSON.stringify({ entities: s.entities }), JSON.stringify(s.tags), s.category || '', s.kind, s.path, s.engine, Date.now());
           this.markTouched(touched, { concepts: JSON.stringify(s.concepts), extra: JSON.stringify({ entities: s.entities }), tags: JSON.stringify(s.tags), category: s.category });
           ok++;
-        } catch (e) { failed++; this.svc.log.warn(`[LLMWiki] 炼化文档 #${x.id} 失败：${e.message}`); this.log('ingest', `炼化失败 #${x.id}`, e.message, 'error', { file_id: x.id }); }
+          this.step('info', 'write', `[${i + 1}/${todo.length}] ${old ? '更新' : '写入'}资料页《${s.title}》：要点 ${s.points.length} 条，概念 ${s.concepts.length + s.entities.length} 个${s.tags.length ? `，标签 ${s.tags.length} 个` : ''}（${s.engine}）`, { slug: s.slug, file_id: x.id });
+        } catch (e) { if (this.job.cancel) break; failed++; this.svc.log.warn(`[LLMWiki] 炼化文档 #${x.id} 失败：${e.message}`); this.step('error', 'fail', `[${i + 1}/${todo.length}] 炼化失败 #${x.id}：${e.message}`, { file_id: x.id }); }
         this.progress(i + 1, todo.length, '吸收资料');
       }
       // 资料已不在范围内（移出资料库 / 回收站）：删除资料页
       const live = new Set(cand.map((x) => x.id));
       const gone = this.db.prepare('SELECT file_id, slug, concepts, extra, tags, category FROM wiki_sources').all().filter((r) => !live.has(r.file_id));
-      if (!ids) for (const g of gone) { this.removeSource(g, touched); this.log('ingest', `移除：${g.slug}`, '原始资料已不在资料库 / 炼丹范围内', 'debug', { file_id: g.file_id }); }
-      await this.compile({ touched, full: force });
+      if (!ids && !this.job.cancel) for (const g of gone) { this.removeSource(g, touched); this.step('debug', 'remove', `移除资料页 ${g.slug}：原始资料已不在资料库 / 炼丹范围内`, { file_id: g.file_id }); }
       const cancelled = !!this.job.cancel;
+      const needFull = force || this.meta('needsCompile') === '1';
+      // 中止时只写本次已炼化资料的资料页与总目录，概念 / 标签 / 分类页留到下次炼丹时补齐
+      this.step('info', 'compile', cancelled ? '已中止：写入已完成资料的资料页与总目录' : `更新页面：资料页、概念页、标签页、分类页与总目录${needFull ? '（全部）' : ''}`);
+      await this.compile({ touched, full: needFull && !cancelled, quick: cancelled ? doneIds : null });
+      this.meta('needsCompile', cancelled || (this.job && this.job.compileCut) ? '1' : '0');
       const detail = `新增 / 更新 ${ok} 份资料${failed ? `，失败 ${failed} 份` : ''}${!ids && gone.length ? `，移除 ${gone.length} 份已不在资料库的资料` : ''}；更新概念页 ${touched.concepts.size} 个、标签页 ${touched.tags.size} 个、分类页 ${touched.topics.size} 个；${useAi ? `大模型炼化 ${aiUsed} 份` : '离线提取'}${cancelled ? '（已中止）' : ''}`;
       if (ok || failed || gone.length || force) this.log('ingest', force ? '全部重新炼化' : ids ? `炼化 ${ids.length} 份资料` : '增量炼化', detail, failed ? 'warn' : 'info');
       this.svc.log.info(`[LLMWiki] ${detail}（${Date.now() - this.job.started}ms）`);
+      this.step(cancelled || failed ? 'warn' : 'info', 'done', `${cancelled ? '已中止' : '炼丹完成'}：${detail}（用时 ${Math.round((Date.now() - this.job.started) / 1000)} 秒）`);
       return { ok, failed, removed: ids ? 0 : gone.length, cancelled, touched: { concepts: touched.concepts.size, tags: touched.tags.size, topics: touched.topics.size } };
     } finally { this.job = null; this.emit(); }
   }
@@ -227,7 +313,8 @@ class LlmWiki {
   }
 
   /** 读取一个文档，得到资料页的内容（大模型或离线规则） */
-  async digest(fileId, { useAi, schema }) {
+  async digest(fileId, { useAi, schema, signal = null, onStep = null }) {
+    const step = (level, kind, text, extra = {}) => { if (onStep) onStep(level, kind, text, extra); };
     const f = this.svc.store.getFile(fileId);
     if (!f) return null;
     const slides = this.db.prepare('SELECT idx, title, text, notes FROM slides WHERE file_id = ? ORDER BY idx').all(fileId);
@@ -236,48 +323,64 @@ class LlmWiki {
     // 概念：词表命中（出现 ≥ 2 次或出现在页标题中），按出现次数排序
     const inTitle = new Set(glossary.findConcepts(titleText).map((c) => c.concept.id));
     const concepts = glossary.findConcepts(full).filter((c) => c.concept.cat !== '通用办公' && (c.count >= 2 || inTitle.has(c.concept.id))).sort((a, b) => b.count - a.count).slice(0, 15).map((c) => c.concept.id);
-    const tags = (f.tags || []).filter((t) => t && !ATTR_TAG.test(t)).slice(0, 12);
-    const title = clip(f.title || (slides[0] && slides[0].title) || f.name.replace(/\.[^.]+$/, ''), 80);
+    const flt = this.filter || makeFilter();
+    const ok = (x) => !flt.isNoise(x);
+    const cl = (x) => flt.clean(x);
+    const tags = (f.tags || []).filter((t) => t && !ATTR_TAG.test(t) && ok(t)).slice(0, 12);
+    // 标题：文档属性标题 → 第一页标题 → 文件名，跳过“PowerPoint 演示文稿”等无意义的默认标题
+    const title = clip(cl([f.title, slides[0] && slides[0].title, ...slides.slice(1, 4).map((x) => x.title), f.name.replace(/\.[^.]+$/, '')].find((x) => x && ok(x)) || f.name.replace(/\.[^.]+$/, '')), 80);
     let summary = '', points = [], entities = [], engine = '离线提取', aiError = '';
+    const chars = slides.reduce((a, x) => a + (x.title || '').length + (x.text || '').length + (x.notes || '').length, 0);
+    step('debug', 'read', `读取《${title}》：${slides.length} 页，约 ${chars} 字`, { file_id: fileId });
     if (useAi) {
-      const r = await this.svc.ai.run('wikiIngest', { schema, file: { name: f.name, path: f.path }, pages: slides.map((s) => ({ idx: s.idx, title: s.title, text: clip(s.text, 1500), notes: clip(s.notes, 800) })) }, { timeoutMs: 180000 });
+      const pages = slides.map((s) => ({ idx: s.idx, title: ok(s.title) ? cl(s.title) : '', text: clip(cl(s.text), 1500), notes: clip(cl(s.notes), 800) }));
+      const model = (this.svc.ai.engine() || {}).model || '大模型';
+      step('debug', 'send', `发送给大模型（${model}）：${pages.length} 页，约 ${Math.min(40000, pages.reduce((a, x) => a + x.title.length + x.text.length + x.notes.length, 0))} 字`, { file_id: fileId });
+      const r = await this.svc.ai.run('wikiIngest', { schema, file: { name: f.name, path: f.path }, pages }, { timeoutMs: 180000, signal });
+      if (signal && signal.aborted) return null;
       const j = r.ok ? require('./ai').parseJson(r.text) : null;
       if (j && j.summary) {
-        summary = clip(j.summary, 120);
-        points = (Array.isArray(j.points) ? j.points : []).map((p) => clip(p, 80)).filter(Boolean).slice(0, 10);
-        entities = (Array.isArray(j.entities) ? j.entities : Array.isArray(j.concepts) ? j.concepts : []).map((e) => clip(typeof e === 'string' ? e : e && e.name, 30)).filter((e) => e && !glossary.expandTerm(e)).slice(0, 10);
-        engine = r.engine === 'fake' ? '本地测试替身' : (this.svc.ai.engine().model || '大模型');
-      } else aiError = r.ok ? '大模型返回的内容不是要求的 JSON' : (r.error || '调用失败');
+        summary = clip(cl(j.summary), 120);
+        points = (Array.isArray(j.points) ? j.points : []).map((p) => clip(cl(p), 80)).filter((p) => p && ok(p)).slice(0, 10);
+        entities = (Array.isArray(j.entities) ? j.entities : Array.isArray(j.concepts) ? j.concepts : []).map((e) => clip(cl(typeof e === 'string' ? e : e && e.name), 30)).filter((e) => e && ok(e) && !glossary.expandTerm(e)).slice(0, 10);
+        engine = r.engine === 'fake' ? '本地测试替身' : model;
+        step('debug', 'reply', `收到答复（${(r.ms / 1000).toFixed(1)} 秒${r.usage ? `，输入 ${r.usage.inputTokens || 0} / 输出 ${r.usage.outputTokens || 0} tokens` : ''}）：${summary}`, { file_id: fileId, ms: r.ms, detail: [`要点：${points.join('；')}`, entities.length ? `实体：${entities.join('、')}` : ''].filter(Boolean).join('\n') });
+      } else {
+        aiError = r.ok ? '大模型返回的内容不是要求的 JSON' : (r.error || '调用失败');
+        step('warn', 'reply', `大模型没有给出可用的答复（${aiError}），改用离线提取`, { file_id: fileId, ms: r.ms });
+      }
     }
     if (!summary) {
       // 优先用 PPT_Agent 已生成的文档总结，其次摘录
       const ds = this.db.prepare('SELECT summary FROM doc_summaries WHERE file_id = ?').get(fileId);
       const sec = (name) => { const m = ds && ds.summary && ds.summary.match(new RegExp(`##\\s*${name}[^\\n]*\\n([\\s\\S]*?)(?=\\n##\\s|$)`)); return m ? m[1].trim() : ''; };
       if (ds && ds.summary) {
-        summary = clip(sec('一句话概要').split('\n')[0], 120);
-        points = sec('核心要点').split('\n').map((l) => l.replace(/^[-*\d.、\s]+/, '').trim()).filter(Boolean).slice(0, 10).map((p) => clip(p, 80));
+        summary = clip(cl(sec('一句话概要').split('\n')[0]), 120);
+        points = sec('核心要点').split('\n').map((l) => cl(l.replace(/^[-*\d.、\s]+/, ''))).filter((p) => p && ok(p)).slice(0, 10).map((p) => clip(p, 80));
         if (summary) engine = 'PPT_Agent 文档总结';
       }
       if (!summary) {
-        const sentences = slides.flatMap((s) => String(s.text || '').split(/[。！？\n]|[.!?]\s/)).map((x) => x.trim()).filter((x) => x.length >= 12 && x.length <= 120 && !/^\d/.test(x));
+        const sentences = slides.flatMap((s) => String(s.text || '').split(/[。！？\n]|[.!?]\s/)).map((x) => cl(x)).filter((x) => x.length >= 12 && x.length <= 120 && !/^\d/.test(x) && ok(x));
         const cname = concepts.slice(0, 3).map((id) => glossary.concepts[id].zh[0]);
         summary = clip(sentences[0] || (cname.length ? `${title}，涉及${cname.join('、')}` : title), 120);
       }
       if (!points.length) {
         const seen = new Set();
         for (const s of slides) {
-          const t = clip(s.title, 60);
-          if (!t || GENERIC_TITLES.test(t) || seen.has(t) || t === title) continue;
+          const t = clip(cl(s.title), 60);
+          if (!t || !ok(s.title) || !ok(t) || seen.has(t) || t === title) continue;
           seen.add(t); points.push(t);
           if (points.length >= 10) break;
         }
       }
     }
+    if (engine === '离线提取' || engine === 'PPT_Agent 文档总结') step('debug', 'extract', `${engine}：${summary}`, { file_id: fileId, detail: points.length ? `要点：${points.join('；')}` : '' });
     return { slug: `sources/${safeName(f.name.replace(/\.[^.]+$/, ''))}-${fileId}`, title, summary, points, concepts, entities, tags, category: f.category || '', kind: f.kind || 'ppt', path: f.path, md: f.md_path, pages: slides.length, engine, aiError, file: f };
   }
 
   /** 由数据表生成 / 更新页面：资料页（相关资料）、概念页、标签页、分类页、总目录 */
-  async compile({ touched = null, full = false } = {}) {
+  async compile({ touched = null, full = false, quick = null } = {}) {
+    const stop = () => !!(this.job && this.job.cancel && !quick && this.job.op === 'ingest');
     this.init();
     const tk = ticker();
     const rows = this.db.prepare('SELECT * FROM wiki_sources').all().map((r) => ({ ...r, points: J(r.points, []), concepts: J(r.concepts, []), entities: J(r.extra, {}).entities || [], tags: J(r.tags, []) }));
@@ -299,11 +402,13 @@ class LlmWiki {
     const topicSlug = (t) => `topics/${safeName(t)}`;
     const conceptKeys = (r) => [...r.concepts.map((c) => 'c-' + c), ...r.entities.map((e) => 'e-' + md5(e).slice(0, 10))];
     // 资料页：相关资料 = 共享概念最多的资料（每个概念最多看 300 份，避免常见概念两两比较）
-    const sourceIds = full || !touched ? rows.map((r) => r.file_id) : rows.filter((r) => conceptKeys(r).some((k) => touched.concepts.has(k)) || r.tags.some((t) => touched.tags.has(t))).map((r) => r.file_id);
+    const sourceIds = quick ? quick.filter((id) => byId.has(id)) : full || !touched ? rows.map((r) => r.file_id) : rows.filter((r) => conceptKeys(r).some((k) => touched.concepts.has(k)) || r.tags.some((t) => touched.tags.has(t))).map((r) => r.file_id);
     const total = sourceIds.length + post.size + tagOk.size + topicPost.size;
     let done = 0;
+    let cut = false;
     for (const id of sourceIds) {
       const p = tk(); if (p) await p;
+      if (stop()) { cut = true; break; }
       const r = byId.get(id);
       const score = new Map();
       for (const k of conceptKeys(r)) {
@@ -317,21 +422,23 @@ class LlmWiki {
     }
     // 概念页
     const writeAll = full || !touched;
-    for (const [k, lst] of post) {
+    if (quick) cut = true;
+    for (const [k, lst] of cut ? [] : post) {
       const p = tk(); if (p) await p;
+      if (stop()) { cut = true; break; }
       done++;
       if (!writeAll && !touched.concepts.has(k)) continue;
       this.writeConcept(k, lst.map((i) => byId.get(i)), { conceptSlug, conceptTitle, post, byId, conceptKeys });
       if (done % 64 === 0) this.progress(done, total, '更新概念页');
     }
     // 标签页 / 分类页
-    for (const [t, lst] of tagOk) {
+    for (const [t, lst] of cut ? [] : tagOk) {
       const p = tk(); if (p) await p;
       done++;
       if (!writeAll && !touched.tags.has(t)) continue;
       this.writeList(tagSlug(t), 'tag', `标签：${t}`, lst.map((i) => byId.get(i)));
     }
-    for (const [t, lst] of topicPost) {
+    for (const [t, lst] of cut ? [] : topicPost) {
       const p = tk(); if (p) await p;
       done++;
       if (!writeAll && !touched.topics.has(t)) continue;
@@ -339,7 +446,8 @@ class LlmWiki {
     }
     // 删除不再有来源的概念 / 标签 / 分类页
     const keep = new Set([...[...post.keys()].map(conceptSlug), ...[...tagOk.keys()].map(tagSlug), ...[...topicPost.keys()].map(topicSlug)]);
-    for (const d of ['concepts', 'tags', 'topics']) for (const n of this.listDir(d)) if (!keep.has(`${d}/${n.replace(/\.md$/, '')}`)) { fs.rmSync(path.join(this.dir, d, n), { force: true }); this.cache = null; }
+    if (cut && this.job) this.job.compileCut = true;
+    if (!cut) for (const d of ['concepts', 'tags', 'topics']) for (const n of this.listDir(d)) if (!keep.has(`${d}/${n.replace(/\.md$/, '')}`)) { fs.rmSync(path.join(this.dir, d, n), { force: true }); this.cache = null; }
     this.progress(total, total, '更新总目录', true);
     this.writeIndex(rows, { post, tagOk, topicPost, conceptSlug, conceptTitle, tagSlug, topicSlug });
   }
@@ -387,7 +495,7 @@ class LlmWiki {
   }
 
   writeIndex(rows, ctx) {
-    const qs = this.db.prepare('SELECT slug, q, answer FROM wiki_queries WHERE slug IS NOT NULL ORDER BY id DESC').all();
+    const qs = this.db.prepare('SELECT slug, q, answer FROM wiki_queries WHERE slug IS NOT NULL AND id = thread_id ORDER BY id DESC').all();
     const lines = [this.front({ type: 'index', updated: dateStr(), sources: rows.length, concepts: ctx.post.size }), '# 总目录\n', `资料 ${rows.length} 份 · 概念 ${ctx.post.size} 个 · 标签 ${ctx.tagOk.size} 个 · 分类 ${ctx.topicPost.size} 个 · 问答 ${qs.length} 篇 · 规则见 [[schema|schema]] · 日志见 [[log|log]]\n`];
     lines.push('## 分类\n', ...[...ctx.topicPost].sort((a, b) => b[1].length - a[1].length).map(([t, l]) => `- ${link(ctx.topicSlug(t), t)}（${l.length}）`), '');
     lines.push('## 概念\n', ...[...ctx.post].sort((a, b) => b[1].length - a[1].length).map(([k, l]) => `- ${link(ctx.conceptSlug(k), ctx.conceptTitle(k))}（${l.length}）`), '');
@@ -471,11 +579,15 @@ class LlmWiki {
 
   // ---------- 问答（query） ----------
   /** 先读总目录（数据表）挑选相关页面，再基于这些页面作答 */
-  async query(q, { save = false, limit = 8 } = {}) {
+  async query(q, { save = false, limit = 8, threadId = null } = {}) {
     this.init();
+    const t0 = Date.now();
     const question = String(q || '').trim();
+    // 追问：带上同一会话最近 3 轮的问答作为上下文；检索词也加上首个问题的词
+    const prev = threadId ? this.db.prepare('SELECT q, answer FROM wiki_queries WHERE thread_id = ? ORDER BY id DESC LIMIT 3').all(threadId).reverse() : [];
     if (!question) throw new Error('请输入问题');
     const qt = terms(question);
+    if (prev.length && qt.size < 4) for (const x of terms(prev[0].q)) qt.add(x);
     if (!qt.size) throw new Error('问题中没有可检索的词');
     const cands = [];
     const tk = ticker();
@@ -491,7 +603,7 @@ class LlmWiki {
       const slug = `concepts/${safeName(c.zh[0])}-${c.id}`;
       if (fs.existsSync(path.join(this.dir, slug + '.md'))) cands.push({ slug, title: c.label, type: 'concept', score: 99, summary: `${c.cat}：${[...c.zh, ...c.en].join('、')}`, points: [] });
     }
-    for (const r of this.db.prepare('SELECT slug, q, answer FROM wiki_queries WHERE slug IS NOT NULL').all()) {
+    for (const r of this.db.prepare('SELECT slug, q, answer FROM wiki_queries WHERE slug IS NOT NULL AND id = thread_id').all()) {
       const t = terms(r.q);
       let hit = 0; for (const x of qt) if (t.has(x)) hit++;
       if (hit >= Math.max(1, qt.size / 3)) cands.push({ slug: r.slug, title: r.q, type: 'query', score: hit, summary: clip(r.answer, 120), points: [] });
@@ -500,7 +612,7 @@ class LlmWiki {
     let answer = '', engine = '离线摘录';
     if (pages.length && this.aiOn()) {
       const ctx = pages.map((p) => ({ slug: p.slug, title: p.title, content: this.pageText(p.slug).slice(0, 6000) }));
-      const r = await this.svc.ai.run('wikiQuery', { question, schema: this.schema(), pages: ctx }, { timeoutMs: 180000 });
+      const r = await this.svc.ai.run('wikiQuery', { question, history: prev.map((x) => ({ q: x.q, a: clip(x.answer, 1500) })), schema: this.schema(), pages: ctx }, { timeoutMs: 180000 });
       if (r.ok && r.text.trim()) { answer = r.text.trim(); engine = r.engine === 'fake' ? '本地测试替身' : (this.svc.ai.engine().model || '大模型'); }
     }
     if (!answer) {
@@ -516,35 +628,82 @@ class LlmWiki {
         answer = lines.join('\n');
       }
     }
-    const info = this.db.prepare('INSERT INTO wiki_queries(q, answer, pages, engine, at) VALUES (?, ?, ?, ?, ?)').run(question, answer, JSON.stringify(pages.map((p) => ({ slug: p.slug, title: p.title, type: p.type, score: Math.round(p.score * 100) / 100 }))), engine, Date.now());
+    const tid = threadId && this.db.prepare('SELECT 1 FROM wiki_queries WHERE thread_id = ? LIMIT 1').get(threadId) ? threadId : null;
+    const info = this.db.prepare('INSERT INTO wiki_queries(q, answer, pages, engine, at, thread_id, ms, archived) VALUES (?, ?, ?, ?, ?, ?, ?, 0)').run(question, answer, JSON.stringify(pages.map((p) => ({ slug: p.slug, title: p.title, type: p.type, score: Math.round(p.score * 100) / 100 }))), engine, Date.now(), tid, Date.now() - t0);
     const id = Number(info.lastInsertRowid);
+    if (!tid) this.db.prepare('UPDATE wiki_queries SET thread_id = ? WHERE id = ?').run(id, id);
+    if (tid && this.db.prepare('SELECT archived FROM wiki_queries WHERE id = ?').get(tid).archived) await this.archiveThread(tid, true); // 已归档的会话追问后同步更新页面
     this.log('query', question, `引用 ${pages.length} 个页面（${engine}）`);
-    const res = { id, q: question, answer, engine, pages: pages.map((p) => ({ slug: p.slug, title: p.title, type: p.type, score: Math.round(p.score * 100) / 100 })) };
+    const res = { id, thread_id: tid || id, ms: Date.now() - t0, q: question, answer, engine, pages: pages.map((p) => ({ slug: p.slug, title: p.title, type: p.type, score: Math.round(p.score * 100) / 100 })) };
     if (save) res.slug = await this.saveQuery(id);
     return res;
   }
   pageText(slug) { try { return fs.readFileSync(path.join(this.dir, slug + '.md'), 'utf8').replace(/^---\n[\s\S]*?\n---\n/, ''); } catch { return ''; } }
   queries(limit = 200) { this.init(); return this.db.prepare('SELECT * FROM wiki_queries ORDER BY id DESC LIMIT ?').all(limit).map((r) => ({ ...r, pages: J(r.pages, []) })); }
 
-  /** 把一次问答存为 Wiki 页面（queries/），并加入总目录 */
-  async saveQuery(id) {
+  // ---------- 问答会话、历史与归档（v3.16） ----------
+  /** 会话列表：archived = true 只看归档；q = 关键字（问题或答案） */
+  threads({ archived = null, q = '' } = {}) {
     this.init();
-    const r = this.db.prepare('SELECT * FROM wiki_queries WHERE id = ?').get(id);
-    if (!r) throw new Error('问答记录不存在');
-    const slug = r.slug || `queries/${safeName(r.q)}-${id}`;
-    const pages = J(r.pages, []);
-    this.write(slug, [this.front({ type: 'query', question: r.q, engine: r.engine, updated: dateStr(r.at) }), `# ${r.q}\n`, r.answer, '', pages.length ? '## 引用页面\n' : '', ...pages.map((p) => `- ${link(p.slug, p.title)}`), ''].join('\n'));
-    this.db.prepare('UPDATE wiki_queries SET slug = ? WHERE id = ?').run(slug, id);
-    this.log('query', `存为页面：${r.q}`, link(slug, r.q));
+    const rows = this.db.prepare(`SELECT thread_id, COUNT(*) n, MIN(at) started, MAX(at) last, MAX(archived) archived, MAX(slug) slug,
+      (SELECT q FROM wiki_queries x WHERE x.id = w.thread_id) first, (SELECT q FROM wiki_queries x WHERE x.thread_id = w.thread_id ORDER BY id DESC LIMIT 1) latest,
+      (SELECT answer FROM wiki_queries x WHERE x.thread_id = w.thread_id ORDER BY id DESC LIMIT 1) answer
+      FROM wiki_queries w GROUP BY thread_id ORDER BY last DESC LIMIT 1000`).all();
+    const k = String(q || '').trim().toLowerCase();
+    return rows.filter((r) => (archived === null || !!r.archived === !!archived) && (!k || `${r.first} ${r.latest} ${r.answer}`.toLowerCase().includes(k)))
+      .map((r) => ({ id: r.thread_id, title: r.first || r.latest, latest: r.latest, turns: r.n, started: r.started, last: r.last, archived: !!r.archived, slug: r.slug || null, preview: clip(String(r.answer || '').replace(/\[\[([^\]|]+)\|?([^\]]*)\]\]/g, (m, a, b) => b || a).replace(/[#>*]/g, ''), 80) }));
+  }
+  thread(id) {
+    this.init();
+    const turns = this.db.prepare('SELECT * FROM wiki_queries WHERE thread_id = ? ORDER BY id').all(id).map((r) => ({ ...r, pages: J(r.pages, []) }));
+    if (!turns.length) return null;
+    return { id, title: turns[0].q, archived: !!turns.some((t) => t.archived), slug: (turns.find((t) => t.slug) || {}).slug || null, turns };
+  }
+  queries(limit = 200) { this.init(); return this.db.prepare('SELECT * FROM wiki_queries ORDER BY id DESC LIMIT ?').all(limit).map((r) => ({ ...r, pages: J(r.pages, []) })); }
+
+  /** 归档：把整个会话写成 Wiki 问答页（queries/），加入总目录，成为知识的一部分；取消归档删除该页面 */
+  async archiveThread(id, on = true) {
+    this.init();
+    const t = this.thread(id);
+    if (!t) throw new Error('问答记录不存在');
+    if (on) {
+      const slug = t.slug || `queries/${safeName(t.title)}-${id}`;
+      const cited = new Map();
+      for (const x of t.turns) for (const p of x.pages) cited.set(p.slug, p.title);
+      const body = t.turns.length === 1 ? [t.turns[0].answer] : t.turns.flatMap((x, k) => [`## ${k === 0 ? '问' : '追问'}：${x.q}`, '', x.answer, '']);
+      this.write(slug, [this.front({ type: 'query', question: t.title, turns: t.turns.length, engine: t.turns[t.turns.length - 1].engine, updated: dateStr() }), `# ${t.title}\n`, ...body, '', cited.size ? '## 引用页面\n' : '', ...[...cited].map(([sl, ti]) => `- ${link(sl, ti)}`), ''].join('\n'));
+      this.db.prepare('UPDATE wiki_queries SET slug = ?, archived = 1 WHERE thread_id = ?').run(slug, id);
+      this.log('query', `归档：${t.title}`, `${t.turns.length} 轮问答 → ${slug}`, 'info', { slug });
+    } else {
+      if (t.slug) { fs.rmSync(path.join(this.dir, t.slug + '.md'), { force: true }); this.cache = null; }
+      this.db.prepare('UPDATE wiki_queries SET slug = NULL, archived = 0 WHERE thread_id = ?').run(id);
+      this.log('query', `取消归档：${t.title}`, '', 'info');
+    }
     await this.compileIndexOnly();
-    return slug;
+    return this.thread(id);
+  }
+  /** 兼容旧接口：把一次问答所在的会话归档，返回页面 slug */
+  async saveQuery(id) {
+    const r = this.db.prepare('SELECT thread_id FROM wiki_queries WHERE id = ?').get(id);
+    if (!r) throw new Error('问答记录不存在');
+    return (await this.archiveThread(r.thread_id || id, true)).slug;
+  }
+  async deleteThreads(ids = []) {
+    this.init();
+    for (const id of ids) {
+      const t = this.thread(id);
+      if (t && t.slug) { fs.rmSync(path.join(this.dir, t.slug + '.md'), { force: true }); this.cache = null; }
+      this.db.prepare('DELETE FROM wiki_queries WHERE thread_id = ?').run(id);
+    }
+    await this.compileIndexOnly();
+    return { deleted: ids.length };
   }
   deleteQueries(ids = []) {
     this.init();
     for (const id of ids) {
-      const r = this.db.prepare('SELECT slug FROM wiki_queries WHERE id = ?').get(id);
-      if (r && r.slug) { fs.rmSync(path.join(this.dir, r.slug + '.md'), { force: true }); this.cache = null; }
+      const r = this.db.prepare('SELECT slug, thread_id FROM wiki_queries WHERE id = ?').get(id);
       this.db.prepare('DELETE FROM wiki_queries WHERE id = ?').run(id);
+      if (r && r.slug && !this.db.prepare('SELECT 1 FROM wiki_queries WHERE thread_id = ? LIMIT 1').get(r.thread_id)) { fs.rmSync(path.join(this.dir, r.slug + '.md'), { force: true }); this.cache = null; }
     }
     return this.compileIndexOnly();
   }

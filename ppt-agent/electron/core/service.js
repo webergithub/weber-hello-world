@@ -1619,6 +1619,11 @@ class AgentService extends EventEmitter {
   wikiQuery(q, opts) { return this.wiki.query(q, opts); }
   wikiSaveQuery(id) { return this.wiki.saveQuery(id); }
   wikiQueries() { return this.wiki.queries(); }
+  wikiThreads(opts) { return this.wiki.threads(opts || {}); }
+  wikiThread(id) { return this.wiki.thread(id); }
+  wikiArchive(id, on) { return this.wiki.archiveThread(id, on !== false); }
+  wikiDeleteThreads(ids) { return this.wiki.deleteThreads(ids || []); }
+  wikiFilterInfo() { return this.wiki.filterInfo(); }
   wikiDeleteQueries(ids) { return this.wiki.deleteQueries(ids || []); }
   wikiLint() { return this.wiki.lint(); }
   async wikiFix(kinds) { if (this.wiki.job) throw new Error('炼丹正在进行中'); return this.wiki.fix(kinds || []); }

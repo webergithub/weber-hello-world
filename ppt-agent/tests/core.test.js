@@ -1245,7 +1245,10 @@ test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总
     assert.ok(cp.backlinks.length > 0, '概念页有反向链接');
     // 日志等级（v3.14）：逐个文档为调试日志，汇总为信息；调试日志不写 log.md
     const lg = w.logs({ level: 'debug' });
-    assert.ok(lg.rows.length === st0.counts.candidates && lg.counts.info >= 1 && lg.rows[0].slug, JSON.stringify(lg.counts));
+    assert.strictEqual(lg.rows.filter((r) => /读取《/.test(r.title)).length, st0.counts.candidates, JSON.stringify(lg.counts));
+    assert.ok(w.logs({ level: 'info' }).rows.filter((r) => /写入资料页《/.test(r.title) && r.slug).length === st0.counts.candidates, '每份资料写入后有一条信息日志（可点击打开资料页）');
+    const feed = w.state().feed;
+    assert.deepStrictEqual([...new Set(feed.map((x) => x.kind))].filter((k) => ['start', 'read', 'extract', 'write', 'compile', 'done'].includes(k)), ['start', 'read', 'extract', 'write', 'compile', 'done'], '炼丹过程按步骤记录');
     assert.ok(!fs.readFileSync(path.join(w.dir, 'log.md'), 'utf8').includes('吸收：'));
     // 探索：知识地图与推荐问题
     const ex = w.explore();
@@ -1268,6 +1271,43 @@ test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总
     assert.ok(lint.issues.some((i) => i.kind === 'stale' && i.file_id === src.file_id));
     const fx = await w.fix(['stale']);
     assert.ok(!fx.lint.issues.some((i) => i.kind === 'stale'));
+    // 会话与归档（v3.16）：追问进入同一会话；归档写成问答页；取消归档删除页面
+    const q3 = await w.query('航班过站保障有哪些要点');
+    const q4 = await w.query('准点率呢', { threadId: q3.thread_id });
+    assert.strictEqual(q4.thread_id, q3.thread_id);
+    let th = w.thread(q3.thread_id);
+    assert.strictEqual(th.turns.length, 2);
+    th = await w.archiveThread(q3.thread_id, true);
+    assert.ok(th.archived && fs.readFileSync(path.join(w.dir, th.slug + '.md'), 'utf8').includes('追问：准点率呢'));
+    assert.ok(w.threads({ archived: true }).some((t) => t.id === q3.thread_id && t.turns === 2));
+    const slug3 = th.slug;
+    await w.archiveThread(q3.thread_id, false);
+    assert.ok(!fs.existsSync(path.join(w.dir, slug3 + '.md')) && w.threads({ archived: false }).some((t) => t.id === q3.thread_id));
+    await w.deleteThreads([q3.thread_id]);
+    assert.strictEqual(w.thread(q3.thread_id), null);
+    // 无意义词语过滤（v3.16）：标题为“PowerPoint 演示文稿”时改用页标题 / 文件名；过滤词出现在句中时去掉
+    const flt = w.cfg();
+    assert.ok(flt.stopPhrases.includes('PowerPoint 演示文稿'));
+    svc.store.db.prepare("UPDATE files SET title = 'PowerPoint 演示文稿' WHERE id = ?").run(src.file_id);
+    svc.store.db.prepare("UPDATE slides SET text = 'PowerPoint 演示文稿 航班过站保障是机场运营的核心环节之一' || char(10) || text WHERE file_id = ? AND idx = 1").run(src.file_id);
+    await w.ingest({ ids: [src.file_id] });
+    const row = svc.store.db.prepare('SELECT title, summary, points FROM wiki_sources WHERE file_id = ?').get(src.file_id);
+    assert.ok(!/PowerPoint|演示文稿/.test(row.title + row.summary + row.points), JSON.stringify(row));
+    // 修改过滤词后全部资料标记为待重新炼化
+    w.setConfig({ stopPhrases: [...flt.stopPhrases, '测试过滤词'] });
+    assert.strictEqual(w.state().counts.pending, w.state().counts.candidates);
+    w.setConfig({ stopPhrases: flt.stopPhrases });
+    // 中止（v3.16）：大模型调用进行中也能立即中止，已完成的资料保留
+    process.env.PPTA_FAKE_LLM = '1';
+    w.setConfig({ useAi: true });
+    const running = w.ingest({ force: true });
+    await new Promise((r) => setTimeout(r, 60));
+    w.cancel();
+    const rc = await running;
+    assert.ok(rc.cancelled && rc.ok < st0.counts.candidates, JSON.stringify(rc));
+    assert.ok(w.state().feed.some((x) => x.kind === 'cancel') && w.meta('needsCompile') === '1');
+    w.setConfig({ useAi: false });
+    delete process.env.PPTA_FAKE_LLM;
     // 大模型模式（测试替身）
     process.env.PPTA_FAKE_LLM = '1';
     w.setConfig({ useAi: true });

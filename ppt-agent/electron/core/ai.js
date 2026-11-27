@@ -124,7 +124,7 @@ const PROMPTS = {
   generate: { system: '把用户对新 PPT 的描述整理为检索用的 JSON：{"keywords":[中英文关键词],"topic":"主题"}，只输出 JSON。', maxTokens: 800, user: (input) => String(input.description || '') },
   // LLMWiki（v3.13）：炼丹 = 把一份原始资料提炼为资料页；问答 = 只基于选出的 Wiki 页面作答并引用页面
   wikiIngest: { system: '你是 LLM Wiki 的维护者，按下面的 Wiki 规则把一份原始资料提炼为资料页。只依据给定内容，不要编造。只输出 JSON：{"summary":"一句话概要（不超过 60 字）","points":["要点（3~10 条，每条不超过 40 字）"],"entities":["资料中的关键实体 / 概念名称（人名、系统、项目、产品、术语，最多 10 个）"]}', maxTokens: 1500, user: (input) => `# Wiki 规则\n${String(input.schema || '').slice(0, 4000)}\n\n# 原始资料\n${pagesText(input).slice(0, 40000)}` },
-  wikiQuery: { system: '你是 LLM Wiki 的问答助手。只根据给定的 Wiki 页面回答问题，用中文 Markdown；引用页面时用 [[页面路径|标题]] 的格式写出来源；页面中没有的信息要明确说明“Wiki 中没有相关内容”，不要编造；不同页面说法冲突时并列列出。', maxTokens: 3000, user: (input) => `# 问题\n${input.question}\n\n# Wiki 页面\n${(input.pages || []).map((p) => `## [[${p.slug}|${p.title}]]\n${p.content}`).join('\n\n').slice(0, 60000)}` },
+  wikiQuery: { system: '你是 LLM Wiki 的问答助手。只根据给定的 Wiki 页面回答问题，用中文 Markdown；引用页面时用 [[页面路径|标题]] 的格式写出来源；页面中没有的信息要明确说明“Wiki 中没有相关内容”，不要编造；不同页面说法冲突时并列列出。', maxTokens: 3000, user: (input) => `${(input.history || []).length ? `# 之前的问答（追问的上下文）\n${input.history.map((h) => `问：${h.q}\n答：${h.a}`).join('\n\n')}\n\n` : ''}# 问题\n${input.question}\n\n# Wiki 页面\n${(input.pages || []).map((p) => `## [[${p.slug}|${p.title}]]\n${p.content}`).join('\n\n').slice(0, 60000)}` },
 };
 
 function parseJson(text) {
