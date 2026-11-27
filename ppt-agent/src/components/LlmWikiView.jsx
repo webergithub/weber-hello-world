@@ -64,8 +64,12 @@ export default function LlmWikiView() {
   const setTab = (t) => { MEMO.tab = t; setTabState(t); };
   const [st, setSt] = useState(null);
   const [pages, setPages] = useState(null);
-  const refresh = () => { api.wikiState().then(setSt).catch((e) => app.toast(e.message, 'error')); api.wikiPages().then(setPages).catch(() => {}); };
-  useEffect(() => { refresh(); const off = on('wiki', (s) => { setSt(s); if (!s.job) api.wikiPages().then(setPages).catch(() => {}); }); return off; }, []);
+  // 页面清单要读取全部 Wiki 页面文件：只在“浏览”页签读取，炼丹结束后标记为需要刷新（v3.17，避免炼丹时界面卡顿）
+  const pagesStale = React.useRef(true);
+  const refresh = () => { api.wikiState().then(setSt).catch((e) => app.toast(e.message, 'error')); pagesStale.current = true; };
+  const wasJob = React.useRef(false);
+  useEffect(() => { refresh(); const off = on('wiki', (s) => { setSt(s); if (wasJob.current && !s.job) pagesStale.current = true; wasJob.current = !!s.job; }); return off; }, []);
+  useEffect(() => { if (tab === 'browse' && pagesStale.current && !(st && st.job)) { pagesStale.current = false; api.wikiPages().then(setPages).catch(() => {}); } }, [tab, st && st.job]);
   const [slug, setSlug] = useState(MEMO.slug);
   const open = (s, push = true) => { if (push && slug && slug !== s) MEMO.hist = [...MEMO.hist, slug].slice(-50); MEMO.slug = s; setSlug(s); setTab('browse'); };
   const [typeFilter, setTypeFilterState] = useState(MEMO.typeFilter);
@@ -73,6 +77,8 @@ export default function LlmWikiView() {
   // 从文件详情“📖 Wiki”跳转（v3.14）：view.slug
   const sent = app.view && app.view.type === 'llmwiki' ? app.view.slug : null;
   useEffect(() => { if (sent) open(sent); }, [sent]);
+  const sentTab = app.view && app.view.type === 'llmwiki' ? app.view.tab : null;
+  useEffect(() => { if (sentTab) setTab(sentTab); }, [sentTab, app.view]);
   const askNow = (q) => { MEMO.q = q; MEMO.autoAsk = q; setTab('ask'); };
   if (!st) return <div className="view"><div className="empty-tip">加载中…</div></div>;
   const job = st.job;
@@ -149,6 +155,7 @@ function IngestPanel({ st, onBrowse, onOpen, refresh }) {
           </div>
         )}
       </div>
+      <QueuePanel queue={st.queue} job={st.job} refresh={refresh} />
       <IngestFeed feed={st.feed || []} job={st.job} onOpen={onOpen} />
     </div>
   );
@@ -333,6 +340,7 @@ function LogPanel({ onOpen }) {
   const [data, setData] = useState({ rows: [], counts: {} });
   const [level, setLevelState] = useState(LOG_MEMO.level);
   const setLevel = (l) => { LOG_MEMO.level = l; setLevelState(l); };
+  const [detail, setDetail] = useState(null);
   const load = () => api.wikiLogs({ level }).then(setData).catch(() => {});
   useEffect(() => { load(); }, [level]);
   useEffect(() => on('wiki', (s) => { if (!s.job) load(); }), [level]);
@@ -341,8 +349,8 @@ function LogPanel({ onOpen }) {
     { key: 'at', label: '时间', type: 'date', render: (r) => fmtTime(r.at) },
     { key: 'level', label: '等级', className: 'nowrap', sort: (r) => ['error', 'warn', 'info', 'debug'].indexOf(r.level || 'info'), filterValue: (r) => (LEVELS.find(([k]) => k === (r.level || 'info')) || [])[1], render: (r) => <span className={`tag ${LEVEL_TAG[r.level || 'info']}`}>{(LEVELS.find(([k]) => k === (r.level || 'info')) || [])[1]}</span> },
     { key: 'op', label: '操作', className: 'nowrap', filterValue: (r) => OP_LABEL[r.op] || r.op, render: (r) => OP_LABEL[r.op] || r.op },
-    { key: 'title', label: '内容', render: (r) => (r.slug ? <span className="link" onClick={() => onOpen(r.slug)}>{r.title}</span> : r.title) },
-    { key: 'detail', label: '详情', className: 'small' },
+    { key: 'title', label: '内容' },
+    { key: 'detail', label: '详情', className: 'small muted', render: (r) => (r.detail || r.slug || r.file_id ? <span className="wf-more">{r.detail ? `${String(r.detail).split('\n')[0].slice(0, 60)}${String(r.detail).length > 60 ? '…' : ''} ` : ''}详情 ›</span> : '') },
   ];
   return (
     <div className="wiki-log">
@@ -350,7 +358,8 @@ function LogPanel({ onOpen }) {
         <div className="seg">{LEVELS.map(([k, l]) => <button key={k || 'all'} className={level === k ? 'on' : ''} onClick={() => setLevel(k)}>{l}（{k ? data.counts[k] || 0 : total}）</button>)}</div>
         <button className="btn small ghost" onClick={load}>↻ 刷新</button>
       </div>
-      <DataTable id="wikiLog" sessionKey={`wikiLog-${level}`} columns={cols} rows={data.rows} rowKey={(r) => r.id} rowClass={(r) => (r.level === 'error' ? 'row-error' : r.level === 'warn' ? 'row-warn' : '')} empty="没有日志" />
+      <DataTable id="wikiLog" sessionKey={`wikiLog-${level}`} columns={cols} rows={data.rows} rowKey={(r) => r.id} rowClass={(r) => `row-click ${r.level === 'error' ? 'row-error' : r.level === 'warn' ? 'row-warn' : ''}`} onRowClick={(r) => setDetail({ ...r, text: r.title })} empty="没有日志" />
+      {detail && <LogDetail entry={detail} onClose={() => setDetail(null)} onOpen={(sl) => { setDetail(null); onOpen(sl); }} />}
     </div>
   );
 }
@@ -418,7 +427,7 @@ const FEED_MEMO = { follow: true, level: '' };
 function IngestFeed({ feed, job, onOpen }) {
   const [follow, setFollowS] = useState(FEED_MEMO.follow);
   const [level, setLevelS] = useState(FEED_MEMO.level);
-  const [open, setOpen] = useState(() => new Set());
+  const [detail, setDetail] = useState(null);
   const ref = React.useRef(null);
   const rows = level ? feed.filter((x) => (level === 'warn' ? x.level === 'warn' || x.level === 'error' : level === 'main' ? x.level !== 'debug' : true)) : feed;
   useEffect(() => { if (follow && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [feed.length, follow, level]);
@@ -435,17 +444,14 @@ function IngestFeed({ feed, job, onOpen }) {
       <div className="wf-list" ref={ref}>
         {!rows.length && <div className="empty-tip">点“开始炼丹”后，这里逐步显示每份文档的处理过程</div>}
         {rows.map((x) => (
-          <div key={x.seq} className={`wf-row lv-${x.level} k-${x.kind}`}>
+          <div key={x.seq} className={`wf-row lv-${x.level} k-${x.kind}`} onClick={() => setDetail(x)} title="查看详情">
             <span className="wf-time">{new Date(x.at).toLocaleTimeString()}</span>
             <span className="wf-ic">{STEP_ICON[x.kind] || '•'}</span>
-            <span className="wf-text">
-              {x.slug ? <span className="link" onClick={() => onOpen(x.slug)}>{x.text}</span> : x.text}
-              {x.detail ? <span className="link small wf-more" onClick={() => setOpen((o) => { const n = new Set(o); if (n.has(x.seq)) n.delete(x.seq); else n.add(x.seq); return n; })}>{open.has(x.seq) ? ' 收起' : ' 详情'}</span> : null}
-              {x.detail && open.has(x.seq) && <pre className="wf-detail">{x.detail}</pre>}
-            </span>
+            <span className="wf-text">{x.text}{x.detail || x.slug || x.file_id ? <span className="wf-more">详情 ›</span> : null}</span>
           </div>
         ))}
       </div>
+      {detail && <LogDetail entry={detail} onClose={() => setDetail(null)} onOpen={(sl) => { setDetail(null); onOpen(sl); }} />}
     </div>
   );
 }
@@ -473,6 +479,65 @@ function FilterWords() {
         <button className="btn ghost small" disabled={!changed} onClick={() => setText(info.stopPhrases.join('\n'))}>撤销修改</button>
         <button className="btn ghost small" onClick={() => confirm('恢复默认过滤词？') && save({ stopPhrases: info.defaults }, '已恢复默认过滤词')}>恢复默认</button>
       </div>
+    </div>
+  );
+}
+
+const LV_NAME = { error: '错误', warn: '警告', info: '信息', debug: '调试' };
+/** 日志详情（v3.17）：完整内容与详情（大模型答复的要点 / 实体、错误信息等），可打开对应的 Wiki 页面、原文件与解析结果 */
+function LogDetail({ entry, onClose, onOpen }) {
+  const app = useApp();
+  const [file, setFile] = useState(null);
+  useEffect(() => { if (entry.file_id) api.wikiFileBrief(entry.file_id).then(setFile).catch(() => {}); }, [entry.file_id]);
+  const slug = entry.slug || (file && file.wiki);
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="modal tag-dialog log-detail" onClick={(e) => e.stopPropagation()}>
+        <div className="detail-head"><div className="dh-title">{STEP_ICON[entry.kind] || '📜'} 日志详情</div><span className={`tag ${LEVEL_TAG[entry.level || 'info']}`}>{LV_NAME[entry.level || 'info']}</span><span className="muted small">{fmtTime(entry.at)}</span><div className="spacer" /><button className="icon-btn" onClick={onClose}>✕</button></div>
+        <div className="tag-dialog-body">
+          <div className="ld-text">{entry.text || entry.title}</div>
+          {entry.detail ? <pre className="wf-detail ld-detail">{entry.detail}</pre> : null}
+          {entry.ms ? <div className="muted small">耗时 {(entry.ms / 1000).toFixed(1)} 秒</div> : null}
+          {file && <div className="ld-file"><span className="muted small">原始资料</span><b title={file.path}>{file.name}</b><span className="muted small ellipsis" title={file.path}>{file.path}</span></div>}
+        </div>
+        <div className="tag-dialog-foot">
+          {slug && <button className="btn primary" onClick={() => onOpen(slug)}>📖 打开 Wiki 页面</button>}
+          {file && <><button className="btn ghost" title="在资源管理器中显示" onClick={() => api.showItem(file.path)}>📂</button><button className="btn" onClick={() => api.openPath(file.path)}>打开原文件</button><button className="btn" onClick={() => { onClose(); app.openFile(file.id); }}>查看解析结果</button></>}
+          <div className="spacer" />
+          <button className="btn ghost" onClick={() => { try { navigator.clipboard.writeText([entry.text || entry.title, entry.detail].filter(Boolean).join('\n')); app.toast('已复制', 'info', { cat: 'LLMWiki' }); } catch { /* ignore */ } }}>📋 复制</button>
+          <button className="btn" onClick={onClose}>关闭</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 待炼化队列（v3.17）：从任务的目录树 / 文件清单多选后加入的文件夹与文件，可移除、清空、一键炼化 */
+function QueuePanel({ queue, job, refresh }) {
+  const app = useApp();
+  const [sel, setSel] = useState(() => new Set());
+  if (!queue || !queue.items.length) return null;
+  const pending = queue.items.reduce((a, x) => a + x.pending, 0);
+  const cols = [
+    { key: 'type', label: '类型', className: 'nowrap', filterValue: (x) => (x.type === 'dir' ? '文件夹' : '文件'), render: (x) => (x.type === 'dir' ? '📁 文件夹' : '📄 文件') },
+    { key: 'name', label: '名称', render: (x) => <span title={x.path}>{x.name}</span> },
+    { key: 'files', label: '资料数', type: 'number', render: (x) => (x.files ? <span className="link" onClick={() => app.drill({ key: `wq-${x.key}`, title: `待炼化：${x.name}`, load: () => api.wikiQueueFiles(x.key) })}>{x.files}</span> : 0) },
+    { key: 'pending', label: '待炼化', type: 'number' },
+    { key: 'done', label: '已炼化', type: 'number' },
+    { key: 'path', label: '位置', className: 'small muted', render: (x) => <span title={x.path}>{x.path}</span> },
+    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (x) => <><button className="btn tiny ghost" title="在资源管理器中显示" onClick={() => api.showItem(x.path)}>📂</button><button className="btn tiny" disabled={!!job} onClick={() => api.wikiQueueRemove([x.key]).then(refresh)}>移除</button></> },
+  ];
+  return (
+    <div className="wiki-queue">
+      <div className="wf-head">
+        <b>📥 待炼化队列</b>
+        <span className="small">{queue.items.length} 项 · {queue.total} 份资料{pending ? ` · ${pending} 份待炼化` : ''}</span>
+        <div className="spacer" />
+        <button className="btn primary small" disabled={!!job || !queue.total} onClick={() => api.wikiIngestQueue().then(() => { app.toast(`开始炼化队列：${queue.total} 份资料`, 'info', { cat: 'LLMWiki' }); refresh(); }).catch((e) => app.toast(e.message, 'error'))}>⚗ 炼化队列（{queue.total}）</button>
+        <button className="btn small" disabled={!!job || !sel.size} onClick={() => api.wikiQueueRemove([...sel]).then(() => { setSel(new Set()); refresh(); })}>移除所选</button>
+        <button className="btn ghost small" disabled={!!job} onClick={() => confirm('清空待炼化队列？') && api.wikiQueueClear().then(refresh)}>清空</button>
+      </div>
+      <DataTable id="wikiQueue" columns={cols} rows={queue.items} rowKey={(x) => x.key} selectable selected={sel} onSelect={setSel} maxHeight={200} />
     </div>
   );
 }

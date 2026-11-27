@@ -123,7 +123,11 @@ class LlmWiki {
     const n = this.db.prepare("SELECT COUNT(*) n FROM files WHERE status = 'parsed'").get().n;
     if (n < 10) return new Set();
     const min = Math.max(5, Math.ceil(n * 0.2));
-    return new Set(this.db.prepare("SELECT s.title t, COUNT(DISTINCT s.file_id) c FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed' AND s.title IS NOT NULL AND s.title != '' GROUP BY s.title HAVING c >= ?").all(min).map((r) => String(r.t).replace(/\s+/g, ' ').trim()));
+    // 统计全部页标题较慢（上万份文档时数秒）：结果缓存，文档数变化超过 5% 或超过 1 天才重新统计
+    try { const c = JSON.parse(this.meta('boiler') || 'null'); if (c && Math.abs(c.n - n) <= n * 0.05 && Date.now() - c.at < 864e5) return new Set(c.list); } catch { /* ignore */ }
+    const list = [...new Set(this.db.prepare("SELECT s.title t, COUNT(DISTINCT s.file_id) c FROM slides s JOIN files f ON f.id = s.file_id WHERE f.status = 'parsed' AND s.title IS NOT NULL AND s.title != '' GROUP BY s.title HAVING c >= ?").all(min).map((r) => String(r.t).replace(/\s+/g, ' ').trim()))];
+    this.meta('boiler', JSON.stringify({ n, at: Date.now(), list }));
+    return new Set(list);
   }
   filterInfo() { const c = this.cfg(); const b = this.boilerplate(); return { stopPhrases: c.stopPhrases, defaults: DEFAULT_STOP, autoBoiler: !!c.autoBoiler, boilerplate: [...b].slice(0, 200), patterns: NOISE_PATTERNS.length }; }
   setConfig(patch = {}) { this.svc.setConfig({ llmwiki: { ...this.cfg(), ...patch } }); return this.state(); }
@@ -172,11 +176,11 @@ class LlmWiki {
   meta(k, v) { if (v === undefined) { const r = this.db.prepare('SELECT v FROM wiki_meta WHERE k = ?').get(k); return r ? r.v : null; } this.db.prepare('INSERT OR REPLACE INTO wiki_meta(k, v) VALUES (?, ?)').run(k, String(v)); return v; }
   slugOf(fileId) { try { this.init(); const r = this.db.prepare('SELECT slug FROM wiki_sources WHERE file_id = ?').get(fileId); return r ? r.slug : null; } catch { return null; } }
 
-  emit() { this.svc.emit('wiki', this.state()); }
+  emit() { this.svc.emit('wiki', this.state(!!this.job)); }
 
   /** 范围内可炼化的文档：已解析、未在回收站（scopes = 任务 id，空 = 全部资料库） */
-  candidates() {
-    const scopes = (this.cfg().scopes || []).map(Number).filter(Boolean);
+  candidates({ all = false } = {}) {
+    const scopes = all ? [] : (this.cfg().scopes || []).map(Number).filter(Boolean);
     let rows;
     if (scopes.length) {
       const ph = scopes.map(() => '?').join(',');
@@ -186,21 +190,24 @@ class LlmWiki {
     return rows.map((r) => ({ id: r.id, fp: `${r.fingerprint || ''}|${r.parsed_at || 0}|${key}` }));
   }
 
-  state() {
+  /** 炼丹进行中只推送进度与过程（light），统计数字沿用上次的结果，结束时再全部重算——避免每次推送都扫描全部文档 */
+  state(light = false) {
     this.init();
+    const job = this.job ? { op: this.job.op, done: this.job.done, total: this.job.total, label: this.job.label, started: this.job.started, eta: this.eta(), cancelling: !!this.job.cancel, current: this.job.current || null } : null;
+    if (light && this.stCache) return { ...this.stCache, job, feed: (this.feed || []).slice(-200) };
     const c = this.cfg();
     const n = (sql, ...a) => this.db.prepare(sql).get(...a).n;
     const cand = this.candidates();
     const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp]));
     const pending = cand.filter((x) => have.get(x.id) !== x.fp).length;
     const ai = this.svc.ai ? this.svc.ai.engine() : { ok: false };
-    return {
+    this.stCache = {
       dir: this.dir, config: c, ai: { ok: !!ai.ok, model: ai.model || '', reason: ai.reason || '' }, aiOn: this.aiOn(),
       counts: { sources: n('SELECT COUNT(*) n FROM wiki_sources'), candidates: cand.length, pending, queries: n('SELECT COUNT(*) n FROM wiki_queries'), concepts: this.countDir('concepts'), tags: this.countDir('tags'), topics: this.countDir('topics'), logs: n('SELECT COUNT(*) n FROM wiki_log') },
       lastIngest: (this.db.prepare("SELECT at FROM wiki_log WHERE op = 'ingest' ORDER BY id DESC LIMIT 1").get() || {}).at || null,
-      job: this.job ? { op: this.job.op, done: this.job.done, total: this.job.total, label: this.job.label, started: this.job.started, eta: this.eta(), cancelling: !!this.job.cancel, current: this.job.current || null } : null,
-      feed: (this.feed || []).slice(-200),
+      queue: this.queue(),
     };
+    return { ...this.stCache, job, feed: (this.feed || []).slice(-200) };
   }
   countDir(d) { try { return fs.readdirSync(path.join(this.dir, d)).filter((n) => n.endsWith('.md')).length; } catch { return 0; } }
   eta() {
@@ -242,7 +249,8 @@ class LlmWiki {
   async ingest({ force = false, ids = null } = {}) {
     this.init();
     if (this.job) throw new Error('炼丹正在进行中');
-    const cand = this.candidates();
+    // 指定文档（来自任务里所选的文件夹 / 文件）时不受“范围”限制
+    const cand = this.candidates({ all: !!ids });
     const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp]));
     const want = ids ? new Set(ids.map(Number)) : null;
     const todo = cand.filter((x) => (want ? want.has(x.id) : force || have.get(x.id) !== x.fp));
@@ -257,6 +265,7 @@ class LlmWiki {
     const touched = { concepts: new Set(), tags: new Set(), topics: new Set() };
     let ok = 0, failed = 0, aiUsed = 0;
     const doneIds = [];
+    let pre = null; // 预加载的下一份文档
     const tk = ticker();
     const upsert = this.db.prepare('INSERT OR REPLACE INTO wiki_sources(file_id, fp, slug, title, summary, points, concepts, extra, tags, category, kind, path, engine, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
     try {
@@ -268,7 +277,11 @@ class LlmWiki {
           const old = this.db.prepare('SELECT concepts, extra, tags, category FROM wiki_sources WHERE file_id = ?').get(x.id);
           if (old) this.markTouched(touched, old);
           this.job.current = { i: i + 1, file_id: x.id };
-          const s = await this.digest(x.id, { useAi, schema, signal, onStep: (lv, k, t, e) => this.step(lv, k, `[${i + 1}/${todo.length}] ${t}`, e) });
+          // 当前一份：用预加载好的数据（没有则现读）；同时预加载下一份（在等待大模型答复的空档读取），内存里最多两份
+          const data = pre && pre.id === x.id ? await pre.p : this.load(x.id);
+          const nx = todo[i + 1];
+          pre = nx ? { id: nx.id, p: new Promise((res) => setImmediate(() => { try { res(this.job && !this.job.cancel ? this.load(nx.id) : null); } catch { res(undefined); } })) } : null;
+          const s = await this.digest(x.id, { useAi, schema, signal, data, onStep: (lv, k, t, e) => this.step(lv, k, `[${i + 1}/${todo.length}] ${t}`, e) });
           if (this.job.cancel) break;
           if (!s) { this.step('warn', 'skip', `[${i + 1}/${todo.length}] 跳过 #${x.id}：文档不存在`, { file_id: x.id }); continue; }
           this.job.current = { i: i + 1, file_id: x.id, title: s.title };
@@ -313,11 +326,17 @@ class LlmWiki {
   }
 
   /** 读取一个文档，得到资料页的内容（大模型或离线规则） */
-  async digest(fileId, { useAi, schema, signal = null, onStep = null }) {
-    const step = (level, kind, text, extra = {}) => { if (onStep) onStep(level, kind, text, extra); };
+  /** 只读取一份文档需要的数据（文件信息 + 各页文字），炼丹时当前一份处理、下一份预加载 */
+  load(fileId) {
     const f = this.svc.store.getFile(fileId);
     if (!f) return null;
-    const slides = this.db.prepare('SELECT idx, title, text, notes FROM slides WHERE file_id = ? ORDER BY idx').all(fileId);
+    return { f, slides: this.db.prepare('SELECT idx, title, text, notes FROM slides WHERE file_id = ? ORDER BY idx').all(fileId) };
+  }
+  async digest(fileId, { useAi, schema, signal = null, onStep = null, data = undefined }) {
+    const step = (level, kind, text, extra = {}) => { if (onStep) onStep(level, kind, text, extra); };
+    const d = data === undefined ? this.load(fileId) : data;
+    if (!d) return null;
+    const { f, slides } = d;
     const full = slides.map((s) => `${s.title || ''}\n${s.text || ''}\n${s.notes || ''}`).join('\n');
     const titleText = slides.map((s) => s.title || '').join('\n');
     // 概念：词表命中（出现 ≥ 2 次或出现在页标题中），按出现次数排序
@@ -539,6 +558,63 @@ class LlmWiki {
     const sc = this.scan();
     const back = (sc.back.get(slug) || []).slice(0, 200).map((s) => { const x = sc.bySlug.get(s); return { slug: s, title: x ? x.title : s, type: x ? x.type : '' }; });
     return { slug, text: fs.readFileSync(p, 'utf8'), path: p, backlinks: back };
+  }
+
+  // ---------- 待炼化队列（v3.17）：任务里多选的文件夹 / 文件 ----------
+  queueItems() { try { return JSON.parse(this.meta('queue') || '[]'); } catch { return []; } }
+  /** 加入队列：items = [{ type: 'dir', path, taskId } | { type: 'file', id }]；文件夹展开为其中已解析的文档 */
+  queueAdd(items = []) {
+    this.init();
+    const cur = this.queueItems();
+    const keys = new Set(cur.map((x) => x.key));
+    let added = 0;
+    for (const it of items) {
+      if (it.type === 'dir' && it.path) {
+        const dir = String(it.path).replace(/[\\/]+$/, '');
+        const sep = dir.includes('\\') ? '\\' : '/';
+        const like = dir.replace(/([%_!])/g, '!$1') + sep + '%';
+        let rows = this.db.prepare("SELECT id, status, dup_of FROM files WHERE (path LIKE ? ESCAPE '!' OR dir = ?) AND status IN ('parsed', 'duplicate')").all(like, dir);
+        if (it.taskId) { const fam = new Set(this.svc.store.familyIds ? this.svc.store.familyIds(Number(it.taskId)) : [Number(it.taskId)]); const inTask = new Set(this.db.prepare(`SELECT DISTINCT file_id FROM task_files WHERE task_id IN (${[...fam].map(() => '?').join(',')})`).all(...fam).map((r) => r.file_id)); rows = rows.filter((r) => inTask.has(r.id)); }
+        const ids = [...new Set(rows.map((r) => (r.status === 'duplicate' && r.dup_of ? r.dup_of : r.id)))];
+        const key = `dir:${dir}`;
+        if (keys.has(key)) { const x = cur.find((y) => y.key === key); x.ids = [...new Set([...x.ids, ...ids])]; continue; }
+        cur.push({ key, type: 'dir', path: dir, name: dir.split(/[\\/]/).pop() || dir, taskId: it.taskId || null, ids, at: Date.now() });
+        keys.add(key); added++;
+      } else if (it.type === 'file' && it.id) {
+        const f = this.svc.store.getFile(Number(it.id));
+        if (!f || !['parsed', 'duplicate'].includes(f.status)) continue;
+        const id = f.status === 'duplicate' && f.dup_of ? f.dup_of : f.id;
+        const key = `file:${id}`;
+        if (keys.has(key)) continue;
+        cur.push({ key, type: 'file', path: f.path, name: f.name, taskId: it.taskId || null, ids: [id], at: Date.now() });
+        keys.add(key); added++;
+      }
+    }
+    this.meta('queue', JSON.stringify(cur));
+    this.step('info', 'queue', `加入待炼化队列：${added} 项（共 ${cur.length} 项，${new Set(cur.flatMap((x) => x.ids)).size} 份资料）`);
+    this.emit();
+    return this.queue();
+  }
+  /** 队列（带每项的资料数、待炼化数、已炼化数） */
+  queue() {
+    this.init();
+    const items = this.queueItems();
+    const cand = new Map(this.candidates({ all: true }).map((x) => [x.id, x.fp]));
+    const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp]));
+    const out = items.map((x) => { const ids = x.ids.filter((id) => cand.has(id)); const done = ids.filter((id) => have.get(id) === cand.get(id)).length; return { ...x, files: ids.length, done, pending: ids.length - done, ids: undefined }; });
+    return { items: out, total: new Set(items.flatMap((x) => x.ids)).size };
+  }
+  queueRemove(keys = []) { const k = new Set(keys); this.meta('queue', JSON.stringify(this.queueItems().filter((x) => !k.has(x.key)))); this.emit(); return this.queue(); }
+  queueClear() { this.meta('queue', '[]'); this.emit(); return this.queue(); }
+  /** 炼化队列中的全部资料（已炼化过的也按当前规则重新炼化）；完成（未中止）后清空队列 */
+  async ingestQueue() {
+    const items = this.queueItems();
+    const ids = [...new Set(items.flatMap((x) => x.ids))];
+    if (!ids.length) throw new Error('待炼化队列是空的');
+    const r = await this.ingest({ ids });
+    if (!r.cancelled) this.meta('queue', '[]');
+    this.emit();
+    return r;
   }
 
   // ---------- 探索（v3.14）：知识地图、分类、推荐问题 ----------

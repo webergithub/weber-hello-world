@@ -1312,6 +1312,24 @@ test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总
     assert.ok(w.state().feed.some((x) => x.kind === 'cancel') && w.meta('needsCompile') === '1');
     w.setConfig({ useAi: false });
     delete process.env.PPTA_FAKE_LLM;
+    // 待炼化队列（v3.17）：任务里所选的文件夹 / 文件；文件夹展开为其中已解析的文档；炼化后清空
+    const anyDir = svc.store.getFile(src.file_id).dir;
+    let qq = w.queueAdd([{ type: 'dir', path: anyDir, taskId: id }, { type: 'file', id: src.file_id }]);
+    assert.strictEqual(qq.items.length, 2);
+    assert.ok(qq.items[0].files >= 1 && qq.total >= 1);
+    assert.ok(svc.wikiQueueFiles(qq.items[0].key).length === qq.items[0].files, '队列项可下钻');
+    qq = w.queueAdd([{ type: 'file', id: src.file_id }]);
+    assert.strictEqual(qq.items.length, 2, '重复加入不重复');
+    const rq = await w.ingestQueue();
+    assert.strictEqual(rq.ok, qq.total);
+    assert.strictEqual(w.queue().items.length, 0);
+    // 炼丹中推送的是轻量状态（不重新统计全部文档），每份文档只预加载下一份
+    let loads = 0; const origLoad = w.load.bind(w); w.load = (fid) => { loads++; return origLoad(fid); };
+    let lightCalls = 0; const origState = w.state.bind(w); w.state = (light) => { if (light) lightCalls++; return origState(light); };
+    await w.ingest({ force: true });
+    w.load = origLoad; w.state = origState;
+    assert.strictEqual(loads, st0.counts.candidates, '每份文档只读取一次（当前 + 预加载下一份）');
+    assert.ok(lightCalls > 0);
     // 大模型模式（测试替身）
     process.env.PPTA_FAKE_LLM = '1';
     w.setConfig({ useAi: true });

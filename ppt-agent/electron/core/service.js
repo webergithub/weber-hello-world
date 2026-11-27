@@ -1612,6 +1612,18 @@ class AgentService extends EventEmitter {
     return this.wiki.state();
   }
   wikiCancel() { return this.wiki.cancel(); }
+  wikiQueueAdd(items) { return this.wiki.queueAdd(items || []); }
+  wikiQueue() { return this.wiki.queue(); }
+  wikiQueueFiles(key) { const it = this.wiki.queueItems().find((x) => x.key === key); return (it ? it.ids : []).slice(0, 20000).map((id) => this.store.liteRow(this.store.q(`SELECT ${this.store.liteCols()} FROM files WHERE id = ?`).get(id))).filter(Boolean); }
+  wikiQueueRemove(keys) { return this.wiki.queueRemove(keys || []); }
+  wikiQueueClear() { return this.wiki.queueClear(); }
+  wikiIngestQueue() {
+    if (this.wiki.job) throw new Error('炼丹正在进行中');
+    this.wiki.ingestQueue().then((r) => this.emit('notice', { kind: 'info', cat: 'LLMWiki', label: '查看 LLMWiki', msg: `${r.cancelled ? '炼丹已中止' : '队列炼化完成'}：新增 / 更新 ${r.ok} 份资料${r.failed ? `，失败 ${r.failed} 份` : ''}`, link: { type: 'view', view: { type: 'llmwiki' } } }))
+      .catch((e) => this.emit('notice', { kind: 'error', cat: 'LLMWiki', msg: `炼丹失败：${e.message}` }));
+    return this.wiki.state();
+  }
+  wikiFileBrief(id) { const f = this.store.getFile(Number(id)); return f ? { id: f.id, name: f.name, path: f.path, kind: f.kind, slide_count: f.slide_count, status: f.status, wiki: this.wiki.slugOf(f.id) } : null; }
   wikiPendingFiles() { return this.wiki.pendingIds().slice(0, 20000).map((id) => this.store.liteRow(this.store.q(`SELECT ${this.store.liteCols()} FROM files WHERE id = ?`).get(id))).filter(Boolean); }
   wikiPages() { return this.wiki.pages(); }
   wikiExplore() { return this.wiki.explore(); }

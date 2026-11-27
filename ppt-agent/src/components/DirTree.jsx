@@ -102,6 +102,7 @@ export default function DirTree({ task }) {
         {picked.length > 0 && <span className="badge">已选 {picked.length} 个文件夹 · {pickedFiles} 个文档</span>}
         <button className="btn small primary" disabled={busy || !picked.length} onClick={() => run(false)}>▶ 分析所选</button>
         <button className="btn small" disabled={busy || !picked.length} onClick={() => run(true)}>↻ 重新分析所选</button>
+        <button className="btn small" disabled={!picked.length || !picked.some((p) => (nodeMap.get(p) || {}).parsed)} onClick={() => api.wikiQueueAdd(picked.map((p) => ({ type: 'dir', path: p, taskId: task.id }))).then((q) => { app.toast(`已加入待炼化队列：${picked.length} 个文件夹（队列共 ${q.total} 份资料）`, 'info', { cat: 'LLMWiki', label: '去炼丹', link: { type: 'view', view: { type: 'llmwiki', tab: 'ingest' } } }); setSel(new Set()); app.go({ type: 'llmwiki', tab: 'ingest' }); }).catch((e) => app.toast(e.message, 'error'))}>⚗ 炼丹所选</button>
         {picked.length > 0 && <button className="btn small ghost" onClick={() => setSel(new Set())}>清空选择</button>}
       </div>
       <div className="table-wrap dir-tree-wrap" onScroll={(e) => { const el = e.currentTarget; if (el.scrollTop + el.clientHeight > el.scrollHeight - 200 && limit < rows.length) setLimit(limit + STEP); }}>

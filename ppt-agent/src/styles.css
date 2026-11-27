@@ -1684,3 +1684,14 @@ tr.row-warn td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .wiki-filter { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); }
 .wiki-filter textarea { min-height: 120px; font-size: 13px; }
 .wiki-filter .boiler { display: flex; flex-wrap: wrap; gap: 4px; max-height: 80px; overflow: auto; }
+
+/* v3.17 待炼化队列 / 日志详情 */
+.wiki-queue { border: 1px solid var(--accent); border-radius: var(--radius); background: var(--bg2); display: flex; flex-direction: column; }
+.wiki-queue .data-table, .wiki-queue .dt { padding: 0 8px 8px; }
+.wf-row { cursor: pointer; }
+.wf-more { color: var(--accent); margin-left: 8px; font-size: 12px; white-space: nowrap; }
+tr.row-click { cursor: pointer; }
+.modal.log-detail { width: min(720px, 94vw); }
+.ld-text { font-size: 14px; line-height: 1.6; }
+.ld-detail { max-height: 50vh; overflow: auto; }
+.ld-file { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; background: var(--bg3); border-radius: var(--radius); margin-top: 4px; }

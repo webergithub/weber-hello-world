@@ -155,7 +155,7 @@ export function FilesStats({ files, stats, onOpen, title = '', task = null }) {
       </div>
       <DataTable id="taskFiles" columns={columns} rows={rows} rowKey={(r, i) => r.link_path || i} rowClass={(r) => `row-${r.action}`} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文件"
         selectable selected={sel} onSelect={setSel} selectableRow={(r) => r.id && r.status !== 'recycled'}
-        actions={<><CompareButton ids={rows.filter((r) => sel.has(r.link_path) && r.id && r.status !== 'failed').map((r) => r.id)} /><RecycleButton ids={rows.filter((r) => sel.has(r.link_path) && r.id).map((r) => r.id)} done={() => setSel(new Set())} /></>}
+        actions={<><button className="btn small" disabled={!rows.some((r) => sel.has(r.link_path) && r.id && ['parsed', 'duplicate'].includes(r.status))} onClick={() => { const pick = rows.filter((r) => sel.has(r.link_path) && r.id && ['parsed', 'duplicate'].includes(r.status)); api.wikiQueueAdd(pick.map((r) => ({ type: 'file', id: r.id, taskId: task.id }))).then((q) => { app.toast(`已加入待炼化队列：${pick.length} 个文件（队列共 ${q.total} 份资料）`, 'info', { cat: 'LLMWiki', label: '去炼丹', link: { type: 'view', view: { type: 'llmwiki', tab: 'ingest' } } }); setSel(new Set()); app.go({ type: 'llmwiki', tab: 'ingest' }); }).catch((e) => app.toast(e.message, 'error')); }}>⚗ 炼丹所选</button><CompareButton ids={rows.filter((r) => sel.has(r.link_path) && r.id && r.status !== 'failed').map((r) => r.id)} /><RecycleButton ids={rows.filter((r) => sel.has(r.link_path) && r.id).map((r) => r.id)} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
             <input className="input" placeholder="按路径 / 标签过滤" value={q} onChange={(e) => setQ(e.target.value)} />
