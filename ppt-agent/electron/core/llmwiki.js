@@ -136,9 +136,9 @@ class LlmWiki {
   countDir(d) { try { return fs.readdirSync(path.join(this.dir, d)).filter((n) => n.endsWith('.md')).length; } catch { return 0; } }
   eta() {
     const j = this.job;
-    if (!j || !j.done || Date.now() - j.started < 5000) return { remainingMs: null, elapsedMs: j ? Date.now() - j.started : 0 };
+    if (!j || !j.done || Date.now() - j.started < 5000) return { remainingMs: null, elapsed: j ? Date.now() - j.started : 0 };
     const per = (Date.now() - j.started) / j.done;
-    return { remainingMs: Math.round(per * (j.total - j.done)), elapsedMs: Date.now() - j.started, rate: j.done / ((Date.now() - j.started) / 1000) };
+    return { remainingMs: Math.round(per * (j.total - j.done)), elapsed: Date.now() - j.started, rate: Math.round((j.done / ((Date.now() - j.started) / 1000)) * 100) / 100 };
   }
   progress(done, total, label, force = false) {
     const j = this.job;
@@ -146,6 +146,7 @@ class LlmWiki {
     j.done = done; j.total = total; if (label) j.label = label;
     if (force || Date.now() - (j.lastEmit || 0) > 400) { j.lastEmit = Date.now(); this.emit(); }
   }
+  pendingIds() { const have = new Map(this.db.prepare('SELECT file_id, fp FROM wiki_sources').all().map((r) => [r.file_id, r.fp])); return this.candidates().filter((x) => have.get(x.id) !== x.fp).map((x) => x.id); }
   cancel() { if (this.job) this.job.cancel = true; return this.state(); }
 
   // ---------- 炼丹（ingest） ----------
@@ -243,7 +244,7 @@ class LlmWiki {
       if (!summary) {
         const sentences = slides.flatMap((s) => String(s.text || '').split(/[。！？\n]|[.!?]\s/)).map((x) => x.trim()).filter((x) => x.length >= 12 && x.length <= 120 && !/^\d/.test(x));
         const cname = concepts.slice(0, 3).map((id) => glossary.concepts[id].zh[0]);
-        summary = clip(`${title}${sentences[0] ? '：' + sentences[0] : cname.length ? `：涉及${cname.join('、')}` : ''}`, 120);
+        summary = clip(sentences[0] || (cname.length ? `${title}，涉及${cname.join('、')}` : title), 120);
       }
       if (!points.length) {
         const seen = new Set();

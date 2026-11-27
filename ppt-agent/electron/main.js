@@ -413,6 +413,7 @@ app.whenReady().then(async () => {
     wikiSetConfig: (p) => service.wikiSetConfig(p),
     wikiIngest: (o) => service.wikiIngest(o),
     wikiCancel: () => service.wikiCancel(),
+    wikiPendingFiles: () => service.wikiPendingFiles(),
     wikiPages: () => service.wikiPages(),
     wikiPage: (s) => service.wikiPage(s),
     wikiQuery: (q, o) => service.wikiQuery(q, o),

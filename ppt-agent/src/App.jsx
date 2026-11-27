@@ -16,6 +16,7 @@ import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
 import FontUnifyView from './components/FontUnifyView';
+import LlmWikiView from './components/LlmWikiView';
 import PluginView from './components/PluginView';
 import BusyHint from './components/BusyHint';
 import EtaLine from './components/Eta';
@@ -397,6 +398,7 @@ export default function App() {
     { key: 'fontunify', icon: '🔤', label: '字体统一' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
     { key: 'merge', icon: '🧬', label: '智能合成', wip: true },
+    { key: 'llmwiki', icon: '⚗', label: 'LLMWiki 炼丹' },
     { key: 'plugins', icon: '🤖', label: 'PPT_Agent', plugin: true }, // 插件位（v3.5）；v3.11 PPT_Agent：大模型解析入库
   ];
   // 点击任务：选中并在任务下方展开“任务详情”菜单（任务概览 / 解析过程）；再次点击已选中的任务收起菜单
@@ -530,6 +532,7 @@ export default function App() {
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'merge' && <MergeView />}
           {view.type === 'fontunify' && <FontUnifyView />}
+          {view.type === 'llmwiki' && <LlmWikiView />}
           {view.type === 'plugins' && <PluginView />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}

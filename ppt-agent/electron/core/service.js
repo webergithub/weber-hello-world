@@ -1583,6 +1583,7 @@ class AgentService extends EventEmitter {
     return this.wiki.state();
   }
   wikiCancel() { return this.wiki.cancel(); }
+  wikiPendingFiles() { return this.wiki.pendingIds().slice(0, 20000).map((id) => this.store.liteRow(this.store.q(`SELECT ${this.store.liteCols()} FROM files WHERE id = ?`).get(id))).filter(Boolean); }
   wikiPages() { return this.wiki.pages(); }
   wikiPage(slug) { return this.wiki.readPage(slug); }
   wikiQuery(q, opts) { return this.wiki.query(q, opts); }
