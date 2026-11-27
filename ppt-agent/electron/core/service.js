@@ -93,7 +93,7 @@ const DEFAULT_CONFIG = {
   // PPT_Agent（v3.11）：engine 调用方式 llm（大模型接口）/ script（AI 调用脚本），不设置时有生效的脚本用脚本；
   // allowNetwork 允许连接大模型接口（默认关，单机版其他功能仍不联网）；auto 解析完成的文档自动总结（大模型接口时，默认关）；
   // scopes 轮询范围（任务 / 子任务 id），pollSec 轮询间隔；llm.apiKeyEnc 为加密保存的 API Key（不发给界面）；prompt 自定义总结提示词
-  pptAgent: { allowNetwork: false, auto: false, pollSec: 30, scopes: [], prompt: '', llm: { baseURL: 'https://api.deepseek.com/anthropic', model: 'deepseek-flash', reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 } },
+  pptAgent: { allowNetwork: false, auto: false, pollSec: 30, scopes: [], prompt: '', llm: { provider: '', protocol: '', baseURL: '', model: '', reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 } }, // v3.15：不默认任何服务商
 };
 /** PPT_Agent 设置合并（llm 子项单独合并） */
 function mergeAgent(cur, patch) {
@@ -163,6 +163,12 @@ class AgentService extends EventEmitter {
       const c = JSON.parse(fs.readFileSync(this.configFile, 'utf8'));
       // 3.1 新增 PDF：旧配置升级时默认一并启用 PDF（之后用户可在设置中取消）
       if (Array.isArray(c.docTypes) && (c.docTypesRev || 1) < 2) { if (!c.docTypes.includes('pdf')) c.docTypes = [...c.docTypes, 'pdf']; c.docTypesRev = 2; }
+      // 3.15：大模型不再默认 DeepSeek——旧版本写入的默认地址 / 模型，在没有保存过 API Key 时清空；已配置的沿用（按地址推断为 Messages 协议）
+      const l = c.pptAgent && c.pptAgent.llm;
+      if (l && !l.protocol) {
+        if (!l.apiKeyEnc && l.baseURL === 'https://api.deepseek.com/anthropic' && ['deepseek-flash', 'deepseek-v4-pro'].includes(l.model)) { l.baseURL = ''; l.model = ''; }
+        else if (l.baseURL) { l.protocol = /anthropic/i.test(l.baseURL) ? 'messages' : 'openai'; if (/api\.deepseek\.com/.test(l.baseURL)) l.provider = 'deepseek'; }
+      }
       return { ...DEFAULT_CONFIG, ...c, llm: { ...DEFAULT_CONFIG.llm, ...(c.llm || {}) }, embedding: { ...DEFAULT_CONFIG.embedding, ...(c.embedding || {}) }, watch: { ...DEFAULT_CONFIG.watch, ...(c.watch || {}) }, wheel: { ...DEFAULT_CONFIG.wheel, ...(c.wheel || {}) }, mail: { ...DEFAULT_CONFIG.mail, ...(c.mail || {}) }, split: { ...DEFAULT_CONFIG.split, ...(c.split || {}) }, plugins: { ...(c.plugins || {}), summary: { ...DEFAULT_CONFIG.plugins.summary, ...((c.plugins || {}).summary || {}) } } };
     } catch { return JSON.parse(JSON.stringify(DEFAULT_CONFIG)); }
   }

@@ -182,7 +182,7 @@ export default function SettingsView({ focus }) {
         </>}
         {tab === 'ai' && <>
         <section data-sec="agent" ref={agentRef} className={focus === 'agent' ? 'flash-sec' : ''}>
-          <h3>🤖 PPT_Agent · 大模型接入（DeepSeek Harness）</h3>
+          <h3>🤖 PPT_Agent · 大模型接入</h3>
           <PptAgentSettings />
         </section>
         <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>

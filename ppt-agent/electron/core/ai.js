@@ -45,7 +45,7 @@ class AiGateway {
       return { ok: false, engine: 'script', reason: c.script ? 'AI 调用脚本已设置但未生效：请在“设置 → PPT_Agent → AI 调用脚本”中点“生效”' : '还没有设置 AI 调用脚本：请在“设置 → PPT_Agent → AI 调用脚本”中选择脚本并点“生效”' };
     }
     const s = this.llm.status();
-    if (s.ok) return { ok: true, engine: 'llm', model: `DeepSeek · ${s.model}`, host: s.host };
+    if (s.ok) return { ok: true, engine: 'llm', model: `${s.providerName} · ${s.model}`, host: s.host };
     if (isFake()) return { ok: true, engine: 'fake', model: '本地测试替身' };
     return { ok: false, engine: 'llm', reason: s.reason };
   }
@@ -88,7 +88,7 @@ class AiGateway {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   }
 
-  /** PPT_Agent 大模型接口（DeepSeek Harness 接入层）：按任务组织提示词 */
+  /** PPT_Agent 大模型接口（复用 DeepSeek Harness 的连接框架，服务商由用户选择）：按任务组织提示词 */
   async runLlm(task, input, { timeoutMs, signal } = {}) {
     const p = PROMPTS[task];
     if (!p) return { ok: false, error: `未知的 AI 任务：${task}` };

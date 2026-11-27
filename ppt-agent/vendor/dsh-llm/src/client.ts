@@ -15,17 +15,20 @@ import { providerError } from '../upstream/llm-deepseek/transport.ts'
 import { DEFAULT_STREAM_IDLE_TIMEOUT_MS } from '../upstream/llm-deepseek/defaults.ts'
 import type { WireMessage, WireRequest } from '../upstream/llm-deepseek/wire-types.ts'
 import { DEFAULT_RETRY_POLICY, localDelay } from './retry.ts'
+import { streamOpenAI } from './openai.ts'
 import type { ResolvedRetryPolicy } from './retry.ts'
 
-/** Upstream default endpoint (`llm-deepseek` README: baseURL default). */
-export const DEFAULT_BASE_URL = 'https://api.deepseek.com/anthropic'
-/** Upstream default catalog (`llm-deepseek` README: models default). */
-export const DEFAULT_MODELS = ['deepseek-flash', 'deepseek-v4-pro']
+/** PPT_Agent v3.15：不再默认任何服务商——接口地址、协议与模型都由用户在设置中选择（PROVIDERS 只是可选的预设）。 */
+export const DEFAULT_BASE_URL = ''
+export const DEFAULT_MODELS: string[] = []
+export type Protocol = 'messages' | 'openai'
 
 export type ReasoningEffort = 'off' | 'low' | 'high' | 'max'
 
 export interface ClientOptions {
   baseURL?: string
+  /** messages = Anthropic Messages 兼容（Harness 原生）；openai = OpenAI Chat Completions 兼容（./openai.ts） */
+  protocol?: Protocol
   apiKey: string
   model: string
   /** Injected transport; PPT_Agent passes Electron `net.fetch` (system proxy) in the app. */
@@ -77,7 +80,8 @@ function body(opts: ClientOptions, input: ChatInput): WireRequest {
 
 /** One streamed request (no retry): yields upstream `StreamChunk`s. */
 export async function* stream(opts: ClientOptions, input: ChatInput): AsyncGenerator<any> {
-  if (!opts.apiKey) throw new LlmError('DeepSeek API key is not configured', 'MISSING_CREDENTIAL')
+  if (opts.protocol === 'openai') { yield* streamOpenAI(opts, input); return }
+  if (!opts.baseURL) throw new LlmError('Model API base URL is not configured', 'INVALID_REQUEST')
   const doFetch = opts.fetch ?? fetch
   const consumer = new AbortController()
   const signal = input.signal === undefined ? consumer.signal : AbortSignal.any([consumer.signal, input.signal])
@@ -85,12 +89,14 @@ export async function* stream(opts: ClientOptions, input: ChatInput): AsyncGener
   const activity = () => { watchdog.pulse() }
   async function* request(): AsyncGenerator<any> {
     watchdog.signal.throwIfAborted()
-    const response = await doFetch(`${messagesApiRoot(opts.baseURL || DEFAULT_BASE_URL)}/messages`, {
+    const response = await doFetch(`${messagesApiRoot(opts.baseURL as string)}/messages`, {
       method: 'POST', signal: watchdog.signal, body: JSON.stringify(body(opts, input)), redirect: 'error',
       headers: {
         'user-agent': opts.userAgent ?? 'PPT_Agent',
         'content-type': 'application/json', 'accept': 'text/event-stream',
-        'x-api-key': opts.apiKey,
+        // Anthropic 官方只认 x-api-key；其他 Messages 兼容服务（DeepSeek / Kimi / 智谱 / 通义等）多用 Bearer，两个都带
+        ...opts.apiKey ? { 'x-api-key': opts.apiKey } : {},
+        ...opts.apiKey && !/(^|\.)anthropic\.com$/u.test(new URL(opts.baseURL).host) ? { authorization: `Bearer ${opts.apiKey}` } : {},
         'anthropic-version': '2023-06-01',
       },
     })
@@ -143,7 +149,7 @@ export async function complete(opts: ClientOptions, input: ChatInput): Promise<C
         else if (chunk.type === 'usage') usage = chunk.usage
         else if (chunk.type === 'finish') finish = chunk.reason.kind
       }
-      if (!text.trim()) throw new LlmError('DeepSeek Messages returned no text', 'EMPTY_RESPONSE')
+      if (!text.trim()) throw new LlmError('Model API returned no text', 'EMPTY_RESPONSE')
       return { text, reasoning, finish, usage, attempts: attempt, ms: Date.now() - t0 }
     } catch (error) {
       const code = error instanceof LlmError ? error.code : 'TRANSPORT'

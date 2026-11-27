@@ -6,7 +6,13 @@
 // 其他功能仍不联网（llm.client / embedder 不受影响）。
 const dsh = require('./dsh-llm.cjs');
 
-const DEFAULTS = { baseURL: dsh.DEFAULT_BASE_URL, model: dsh.DEFAULT_MODELS[0], reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 };
+// v3.15：只复用 DeepSeek Harness 的连接框架（流式、看门狗、错误分类、重试），不默认任何服务商——地址 / 协议 / 模型由用户选择
+const DEFAULTS = { provider: '', protocol: '', baseURL: '', model: '', reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 };
+const PROTOCOLS = ['messages', 'openai'];
+/** 协议：设置中选的；没选时按地址推断（含 anthropic → Messages，否则 OpenAI 兼容） */
+const protocolOf = (c) => (PROTOCOLS.includes(c.protocol) ? c.protocol : /anthropic/i.test(c.baseURL || '') ? 'messages' : 'openai');
+/** 本机服务（Ollama / vLLM / LM Studio）可以不填 API Key */
+const isLocal = (u) => { try { return ['localhost', '127.0.0.1', '::1', '[::1]'].includes(new URL(u).hostname); } catch { return false; } };
 const EFFORTS = ['off', 'low', 'high', 'max'];
 
 /** API Key 加密：有 Electron safeStorage（Windows DPAPI）时加密，否则只做编码（测试 / 不支持加密的环境） */
@@ -38,15 +44,17 @@ class PptAgentLlm {
   cfg() { const l = this.agentCfg().llm || {}; return { ...DEFAULTS, ...l, reasoningEffort: EFFORTS.includes(l.reasoningEffort) ? l.reasoningEffort : DEFAULTS.reasoningEffort }; }
   allowed() { return !!this.agentCfg().allowNetwork; }
   key() { return unseal(this.box, this.cfg().apiKeyEnc || ''); }
+  providerName(c = this.cfg()) { const p = dsh.PROVIDERS.find((x) => x.id === c.provider); return p && p.id !== 'custom' ? p.name : hostOf(c.baseURL); }
   seal(plain) { return seal(this.box, String(plain || '').trim()); }
 
   /** 是否可用：{ ok, reason, model, host } */
   status() {
     const c = this.cfg();
-    const base = { model: c.model, host: hostOf(c.baseURL), baseURL: c.baseURL, allowNetwork: this.allowed(), hasApiKey: !!c.apiKeyEnc };
+    const base = { model: c.model, host: hostOf(c.baseURL), baseURL: c.baseURL, protocol: protocolOf(c), provider: c.provider || '', providerName: this.providerName(c), allowNetwork: this.allowed(), hasApiKey: !!c.apiKeyEnc };
+    if (!c.baseURL) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型：请在“设置 → PPT_Agent”中选择服务商（或填写接口地址）、模型与 API Key' };
     if (!hostOf(c.baseURL)) return { ...base, ok: false, reason: 'PPT_Agent 大模型接口地址无效：请在“设置 → PPT_Agent”中检查接口地址' };
-    if (!c.apiKeyEnc) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型接口：请在“设置 → PPT_Agent”中填写 API Key，并打开“允许连接大模型接口”（或改用 AI 调用脚本）' };
-    if (!this.key()) return { ...base, ok: false, reason: '无法读取保存的 API Key（可能换了电脑或 Windows 账号）：请在“设置 → PPT_Agent”中重新填写' };
+    if (!c.apiKeyEnc && isLocal(c.baseURL)) { /* 本机服务不需要 Key */ } else if (!c.apiKeyEnc) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型接口：请在“设置 → PPT_Agent”中填写 API Key，并打开“允许连接大模型接口”（或改用 AI 调用脚本）' };
+    if (c.apiKeyEnc && !this.key()) return { ...base, ok: false, reason: '无法读取保存的 API Key（可能换了电脑或 Windows 账号）：请在“设置 → PPT_Agent”中重新填写' };
     if (!this.allowed()) return { ...base, ok: false, reason: 'PPT_Agent 未允许连接大模型接口：请在“设置 → PPT_Agent”中打开“允许连接大模型接口”' };
     if (!c.model) return { ...base, ok: false, reason: '没有设置模型：请在“设置 → PPT_Agent”中选择模型' };
     return { ...base, ok: true };
@@ -55,7 +63,7 @@ class PptAgentLlm {
   options(override = {}) {
     const c = { ...this.cfg(), ...override };
     return {
-      baseURL: c.baseURL, apiKey: override.apiKey !== undefined ? override.apiKey : this.key(), model: c.model,
+      baseURL: c.baseURL, protocol: protocolOf(c), apiKey: override.apiKey !== undefined ? override.apiKey : this.key(), model: c.model,
       fetch: this.fetchImpl || undefined, userAgent: `PPT_Agent/${this.svc.appVersion || ''}`,
       maxTokens: Number(c.maxTokens) || DEFAULTS.maxTokens, reasoningEffort: c.reasoningEffort,
     };
@@ -92,14 +100,14 @@ class PptAgentLlm {
    */
   async test(patch = {}) {
     const override = {};
-    for (const k of ['baseURL', 'model', 'reasoningEffort']) if (patch[k]) override[k] = patch[k];
+    for (const k of ['baseURL', 'model', 'reasoningEffort', 'protocol', 'provider']) if (patch[k]) override[k] = patch[k];
     if (patch.apiKey) override.apiKey = String(patch.apiKey).trim();
     const c = { ...this.cfg(), ...override };
     const host = hostOf(c.baseURL);
-    const base = { at: Date.now(), host, baseURL: c.baseURL, model: c.model, reasoningEffort: c.reasoningEffort };
+    const base = { at: Date.now(), host, baseURL: c.baseURL, model: c.model, protocol: protocolOf(c), reasoningEffort: c.reasoningEffort };
     const checks = [
-      { item: '接口地址', ok: !!host, detail: host || '地址无效' },
-      { item: 'API Key', ok: !!(override.apiKey || this.key()), detail: override.apiKey ? '使用输入框中的 Key（未保存）' : this.key() ? '使用已保存的 Key' : '未填写' },
+      { item: '接口地址', ok: !!host, detail: host ? `${host}（${protocolOf(c) === 'messages' ? 'Messages 协议' : 'OpenAI 兼容协议'}）` : c.baseURL ? '地址无效' : '未填写' },
+      { item: 'API Key', ok: !!(override.apiKey || this.key() || isLocal(c.baseURL)), detail: override.apiKey ? '使用输入框中的 Key（未保存）' : this.key() ? '使用已保存的 Key' : isLocal(c.baseURL) ? '本机服务，不需要' : '未填写' },
       { item: '模型', ok: !!c.model, detail: c.model || '未填写' },
       { item: '联网', ok: this.allowed() || !!patch.once, detail: this.allowed() ? '已允许连接大模型接口' : patch.once ? '仅本次测试连接' : '未允许' },
     ];
@@ -115,17 +123,17 @@ class PptAgentLlm {
   state() {
     const s = this.status();
     const c = this.cfg();
-    return { ...s, reasoningEffort: c.reasoningEffort, maxTokens: c.maxTokens, timeoutSec: c.timeoutSec, models: dsh.DEFAULT_MODELS, defaultBaseURL: dsh.DEFAULT_BASE_URL, calls: this.calls };
+    return { ...s, reasoningEffort: c.reasoningEffort, maxTokens: c.maxTokens, timeoutSec: c.timeoutSec, providers: dsh.PROVIDERS, calls: this.calls };
   }
 }
 
-const HINT = { AUTH: '检查 API Key 是否正确、是否已过期', QUOTA: '到服务商平台充值或检查额度', RATE_LIMIT: '稍后再试', CONTEXT_WINDOW_EXCEEDED: '', INVALID_REQUEST: '检查模型名称是否正确（如 deepseek-flash）', SERVER: '服务商暂时不可用，稍后再试', TIMEOUT: '检查网络、代理或接口地址；也可调大超时', TRANSPORT: '检查网络连接、公司代理 / 防火墙，以及接口地址是否正确', MISSING_CREDENTIAL: '请先填写 API Key' };
+const HINT = { AUTH: '检查 API Key 是否正确、是否已过期', QUOTA: '到服务商平台充值或检查额度', RATE_LIMIT: '稍后再试', CONTEXT_WINDOW_EXCEEDED: '', INVALID_REQUEST: '检查模型名称与接口协议是否与服务商一致', SERVER: '服务商暂时不可用，稍后再试', TIMEOUT: '检查网络、代理或接口地址；也可调大超时', TRANSPORT: '检查网络连接、公司代理 / 防火墙，以及接口地址是否正确', MISSING_CREDENTIAL: '请先填写 API Key' };
 const CODE_TEXT = { AUTH: 'API Key 无效或没有权限', QUOTA: '账户余额 / 额度不足', RATE_LIMIT: '请求过于频繁（已按策略重试）', CONTEXT_WINDOW_EXCEEDED: '文档内容超过模型上下文长度', INVALID_REQUEST: '请求被拒绝', SERVER: '大模型服务暂时不可用（已按策略重试）', TIMEOUT: '大模型响应超时', TRANSPORT: '网络连接失败', ABORTED: '已取消', EMPTY_RESPONSE: '大模型没有返回内容', MALFORMED_RESPONSE: '大模型返回的数据格式不正确', MISSING_CREDENTIAL: '没有 API Key' };
 function describe(e) {
   const code = e && e.code;
   const base = CODE_TEXT[code] || '大模型调用失败';
-  const detail = e && e.message && !String(e.message).startsWith('DeepSeek Messages request failed') ? `：${dsh.errorChain(e).slice(0, 300)}` : e && e.failure && e.failure.status ? `（HTTP ${e.failure.status}）` : '';
+  const detail = e && e.message && !/^(DeepSeek Messages|Model) request failed/.test(String(e.message)) ? `：${dsh.errorChain(e).slice(0, 300)}` : e && e.failure && e.failure.status ? `（HTTP ${e.failure.status}）` : '';
   return `${base}${detail}`;
 }
 
-module.exports = { PptAgentLlm, DEFAULTS, seal, unseal, describe };
+module.exports = { PptAgentLlm, DEFAULTS, seal, unseal, describe, protocolOf, isLocal };

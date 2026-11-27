@@ -805,6 +805,128 @@ function localDelay(config, retry, random) {
 	return Math.min(exponential * jitter, config.maxDelayMs);
 }
 //#endregion
+//#region vendor/dsh-llm/src/openai.ts
+/**
+* PPT_Agent：OpenAI 兼容（Chat Completions）协议的流式请求，复用 DeepSeek Harness 接入层的同一套机制——
+* 空闲看门狗（upstream/timeout）、SSE 分帧（eventsource-parser，与 upstream sse.ts 相同）、错误分类（upstream transport.ts
+* 的 providerError：HTTP 状态 + error.type / message）与整次请求重试（client.ts complete）。只做纯文本对话。
+* 适用：OpenAI、通义千问 DashScope 兼容模式、智谱、Kimi、豆包（火山方舟）、硅基流动、Ollama / vLLM / LM Studio 等。
+*/
+/** baseURL 已带 /chat/completions 时原样使用，否则补上（用户通常填到 /v1 为止） */
+function chatCompletionsUrl(baseURL) {
+	const base = baseURL.replace(/\/+$/u, "");
+	return /\/chat\/completions$/u.test(base) ? base : `${base}/chat/completions`;
+}
+function body$1(opts, input) {
+	const effort = opts.reasoningEffort ?? "off";
+	const messages = [...input.system ? [{
+		role: "system",
+		content: input.system
+	}] : [], ...input.messages.map((m) => ({
+		role: m.role,
+		content: m.text
+	}))];
+	return {
+		model: opts.model,
+		stream: true,
+		messages,
+		max_tokens: input.maxTokens ?? opts.maxTokens ?? 4096,
+		stream_options: { include_usage: true },
+		...effort === "off" ? {} : { reasoning_effort: effort === "max" ? "high" : effort },
+		...input.temperature === void 0 ? {} : { temperature: input.temperature }
+	};
+}
+/** 一次流式请求（不重试），产出与 Messages 翻译结果相同形状的块：text-delta / reasoning-delta / usage / finish */
+async function* streamOpenAI(opts, input) {
+	const doFetch = opts.fetch ?? fetch;
+	const consumer = new AbortController();
+	const watchdog = idleWatchdog(input.signal === void 0 ? consumer.signal : AbortSignal.any([consumer.signal, input.signal]), opts.streamIdleTimeoutMs ?? 3e5, "MESSAGES_IDLE");
+	const activity = () => {
+		watchdog.pulse();
+	};
+	async function* request() {
+		watchdog.signal.throwIfAborted();
+		const response = await doFetch(chatCompletionsUrl(opts.baseURL || ""), {
+			method: "POST",
+			signal: watchdog.signal,
+			body: JSON.stringify(body$1(opts, input)),
+			redirect: "error",
+			headers: {
+				"user-agent": opts.userAgent ?? "PPT_Agent",
+				"content-type": "application/json",
+				"accept": "text/event-stream",
+				...opts.apiKey ? { authorization: `Bearer ${opts.apiKey}` } : {}
+			}
+		});
+		if (!response.ok) {
+			const text = await response.text();
+			let raw;
+			try {
+				raw = JSON.parse(text);
+			} catch (_nonJsonGatewayError) {}
+			const failure = providerError(raw, response.status, response.headers);
+			throw new LlmError(failure.message.replace("DeepSeek Messages request failed", "Model request failed"), failure.code, {
+				...failure.failure,
+				cause: new Error(text.slice(0, 2e3))
+			});
+		}
+		if (response.body === null) throw new LlmError("Model API returned no response body", "EMPTY_RESPONSE");
+		const events = response.body.pipeThrough(new TextDecoderStream()).pipeThrough(new EventSourceParserStream({ onComment: activity }));
+		let finish = "stop";
+		for await (const frame of events) {
+			activity();
+			if (frame.data.trim() === "[DONE]") break;
+			let ev;
+			try {
+				ev = JSON.parse(frame.data);
+			} catch (_invalidSseJson) {
+				throw new LlmError("Model API SSE contains invalid JSON", "MALFORMED_RESPONSE");
+			}
+			if (ev && ev.error) throw providerError(ev, void 0);
+			const choice = ev && Array.isArray(ev.choices) ? ev.choices[0] : void 0;
+			const delta = choice && choice.delta ? choice.delta : {};
+			if (typeof delta.reasoning_content === "string" && delta.reasoning_content) yield {
+				type: "reasoning-delta",
+				text: delta.reasoning_content
+			};
+			if (typeof delta.content === "string" && delta.content) yield {
+				type: "text-delta",
+				text: delta.content
+			};
+			if (choice && choice.finish_reason) finish = String(choice.finish_reason);
+			if (ev && ev.usage) yield {
+				type: "usage",
+				usage: {
+					inputTokens: ev.usage.prompt_tokens || 0,
+					outputTokens: ev.usage.completion_tokens || 0,
+					totalTokens: ev.usage.total_tokens
+				}
+			};
+		}
+		yield {
+			type: "finish",
+			reason: { kind: finish }
+		};
+	}
+	const iterator = request();
+	try {
+		while (true) {
+			const next = await watchdog.next(iterator);
+			if (next.done) return;
+			yield next.value;
+		}
+	} catch (error) {
+		if (timeoutOf(watchdog.signal, "MESSAGES_IDLE") !== void 0) throw new LlmError("Model API stream idle timeout", "TIMEOUT", { cause: error });
+		if (input.signal?.aborted) throw new LlmError("Model API request aborted", "ABORTED", { cause: error });
+		if (error instanceof LlmError) throw error;
+		throw new LlmError("Model API transport failed", "TRANSPORT", { cause: error });
+	} finally {
+		consumer.abort();
+		watchdog[Symbol.dispose]();
+		iterator.return(void 0).catch(() => {});
+	}
+}
+//#endregion
 //#region vendor/dsh-llm/src/client.ts
 /**
 * PPT_Agent model client — a text-only cut of DeepSeek Harness `DeepSeekAdapter`
@@ -814,10 +936,9 @@ function localDelay(config, retry, random) {
 * Removed versus upstream: cordis plugin wiring, Files API / image offload, request extensions, tool calls,
 * replay of previous assistant turns, account auth. Added: a whole-request retry loop using the upstream retry policy.
 */
-/** Upstream default endpoint (`llm-deepseek` README: baseURL default). */
-const DEFAULT_BASE_URL = "https://api.deepseek.com/anthropic";
-/** Upstream default catalog (`llm-deepseek` README: models default). */
-const DEFAULT_MODELS = ["deepseek-flash", "deepseek-v4-pro"];
+/** PPT_Agent v3.15：不再默认任何服务商——接口地址、协议与模型都由用户在设置中选择（PROVIDERS 只是可选的预设）。 */
+const DEFAULT_BASE_URL = "";
+const DEFAULT_MODELS = [];
 function body(opts, input) {
 	const effort = opts.reasoningEffort ?? "off";
 	const messages = [];
@@ -848,7 +969,11 @@ function body(opts, input) {
 }
 /** One streamed request (no retry): yields upstream `StreamChunk`s. */
 async function* stream(opts, input) {
-	if (!opts.apiKey) throw new LlmError("DeepSeek API key is not configured", "MISSING_CREDENTIAL");
+	if (opts.protocol === "openai") {
+		yield* streamOpenAI(opts, input);
+		return;
+	}
+	if (!opts.baseURL) throw new LlmError("Model API base URL is not configured", "INVALID_REQUEST");
 	const doFetch = opts.fetch ?? fetch;
 	const consumer = new AbortController();
 	const watchdog = idleWatchdog(input.signal === void 0 ? consumer.signal : AbortSignal.any([consumer.signal, input.signal]), opts.streamIdleTimeoutMs ?? 3e5, "MESSAGES_IDLE");
@@ -857,7 +982,7 @@ async function* stream(opts, input) {
 	};
 	async function* request() {
 		watchdog.signal.throwIfAborted();
-		const response = await doFetch(`${messagesApiRoot(opts.baseURL || "https://api.deepseek.com/anthropic")}/messages`, {
+		const response = await doFetch(`${messagesApiRoot(opts.baseURL)}/messages`, {
 			method: "POST",
 			signal: watchdog.signal,
 			body: JSON.stringify(body(opts, input)),
@@ -866,7 +991,8 @@ async function* stream(opts, input) {
 				"user-agent": opts.userAgent ?? "PPT_Agent",
 				"content-type": "application/json",
 				"accept": "text/event-stream",
-				"x-api-key": opts.apiKey,
+				...opts.apiKey ? { "x-api-key": opts.apiKey } : {},
+				...opts.apiKey && !/(^|\.)anthropic\.com$/u.test(new URL(opts.baseURL).host) ? { authorization: `Bearer ${opts.apiKey}` } : {},
 				"anthropic-version": "2023-06-01"
 			}
 		});
@@ -931,7 +1057,7 @@ async function complete(opts, input) {
 			} else if (chunk.type === "reasoning-delta") reasoning += chunk.text;
 			else if (chunk.type === "usage") usage = chunk.usage;
 			else if (chunk.type === "finish") finish = chunk.reason.kind;
-			if (!text.trim()) throw new LlmError("DeepSeek Messages returned no text", "EMPTY_RESPONSE");
+			if (!text.trim()) throw new LlmError("Model API returned no text", "EMPTY_RESPONSE");
 			return {
 				text,
 				reasoning,
@@ -949,11 +1075,101 @@ async function complete(opts, input) {
 	}
 }
 //#endregion
+//#region vendor/dsh-llm/src/providers.ts
+/**
+* PPT_Agent v3.15：常见大模型服务的预设（只用于“选择服务商”时一键填入接口地址 / 协议 / 模型候选；没有默认值）。
+* 协议：messages = Anthropic Messages 兼容（Harness 原生传输），openai = OpenAI Chat Completions 兼容。
+* 模型名会随服务商更新，界面上可直接修改。
+*/
+const PROVIDERS = [
+	{
+		id: "anthropic",
+		name: "Anthropic Claude",
+		protocol: "messages",
+		baseURL: "https://api.anthropic.com",
+		models: []
+	},
+	{
+		id: "deepseek",
+		name: "DeepSeek",
+		protocol: "messages",
+		baseURL: "https://api.deepseek.com/anthropic",
+		models: ["deepseek-chat", "deepseek-reasoner"]
+	},
+	{
+		id: "qwen",
+		name: "通义千问（阿里云百炼）",
+		protocol: "openai",
+		baseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+		models: [
+			"qwen-plus",
+			"qwen-max",
+			"qwen-turbo"
+		]
+	},
+	{
+		id: "zhipu",
+		name: "智谱 GLM",
+		protocol: "openai",
+		baseURL: "https://open.bigmodel.cn/api/paas/v4",
+		models: [
+			"glm-4.6",
+			"glm-4-plus",
+			"glm-4-flash"
+		]
+	},
+	{
+		id: "kimi",
+		name: "Kimi（月之暗面）",
+		protocol: "openai",
+		baseURL: "https://api.moonshot.cn/v1",
+		models: ["kimi-k2-turbo-preview", "moonshot-v1-32k"]
+	},
+	{
+		id: "doubao",
+		name: "豆包（火山方舟）",
+		protocol: "openai",
+		baseURL: "https://ark.cn-beijing.volces.com/api/v3",
+		models: ["doubao-seed-1-6", "doubao-1-5-pro-32k"]
+	},
+	{
+		id: "siliconflow",
+		name: "硅基流动",
+		protocol: "openai",
+		baseURL: "https://api.siliconflow.cn/v1",
+		models: ["Qwen/Qwen3-32B", "deepseek-ai/DeepSeek-V3"]
+	},
+	{
+		id: "openai",
+		name: "OpenAI",
+		protocol: "openai",
+		baseURL: "https://api.openai.com/v1",
+		models: ["gpt-4.1", "gpt-4o-mini"]
+	},
+	{
+		id: "ollama",
+		name: "本机 Ollama",
+		protocol: "openai",
+		baseURL: "http://localhost:11434/v1",
+		models: ["qwen3:8b", "llama3.1:8b"],
+		noKey: true
+	},
+	{
+		id: "custom",
+		name: "自定义（其他兼容接口）",
+		protocol: "openai",
+		baseURL: "",
+		models: []
+	}
+];
+//#endregion
 exports.DEFAULT_BASE_URL = DEFAULT_BASE_URL;
 exports.DEFAULT_MODELS = DEFAULT_MODELS;
 exports.DEFAULT_RETRY_POLICY = DEFAULT_RETRY_POLICY;
 exports.HarnessError = HarnessError;
 exports.LlmError = LlmError;
+exports.PROVIDERS = PROVIDERS;
+exports.chatCompletionsUrl = chatCompletionsUrl;
 exports.complete = complete;
 exports.errorChain = errorChain;
 exports.idleWatchdog = idleWatchdog;
@@ -964,4 +1180,5 @@ exports.messagesApiRoot = messagesApiRoot;
 exports.parseSse = parseSse;
 exports.providerError = providerError;
 exports.stream = stream;
+exports.streamOpenAI = streamOpenAI;
 exports.translate = translate;

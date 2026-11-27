@@ -1110,7 +1110,7 @@ test('PPT_Agent（v3.11）：DeepSeek Harness 大模型接入层 + harness 轮�
     assert.deepStrictEqual(st.harness.pipeline.sinks, ['sink.markdown', 'sink.database']);
     const list = svc.summary.list();
     assert.strictEqual(list.length, before.docs);
-    assert.ok(list.every((x) => /DeepSeek · deepseek-flash/.test(x.model)));
+    assert.ok(list.every((x) => /· deepseek-flash$/.test(x.model)), list.map((x) => x.model).join());
     const md = fs.readFileSync(list[0].md_path, 'utf8');
     assert.match(md, /^---\n原文件: /);
     assert.match(md, /一句话概要/);
@@ -1329,4 +1329,48 @@ test('手动标签（v3.14）：加 / 去标签、重新计算后保留、重命
     svc.tagSaveDef('重点', { color: 'c3', note: '领导关注' });
     assert.strictEqual(svc.tagColors()['重点'], 'c3');
   } finally { svc.close(); }
+});
+
+test('PPT_Agent（v3.15）：不默认任何服务商；OpenAI 兼容协议走同一套 Harness 连接框架；旧版默认 DeepSeek 配置升级时清空', async () => {
+  const http = require('http');
+  const { AgentService } = require('../electron/core/service');
+  delete process.env.PPTA_FAKE_LLM;
+  let last = null;
+  const srv = http.createServer((req, res) => {
+    let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => {
+      last = { url: req.url, headers: req.headers, body: JSON.parse(b) };
+      if (req.headers.authorization !== 'Bearer sk-oa') { res.writeHead(401, { 'content-type': 'application/json' }); res.end('{"error":{"message":"bad key","type":"invalid_request_error"}}'); return; }
+      res.writeHead(200, { 'content-type': 'text/event-stream' });
+      const d = (o) => `data: ${JSON.stringify(o)}\n\n`;
+      res.end(d({ choices: [{ delta: { reasoning_content: '想一想' } }] }) + d({ choices: [{ delta: { content: 'O' } }] }) + d({ choices: [{ delta: { content: 'K' }, finish_reason: 'stop' }] }) + d({ choices: [], usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 } }) + 'data: [DONE]\n\n');
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const dir = path.join(tmp, 'data-provider');
+  fs.mkdirSync(dir, { recursive: true });
+  // 旧版本写入的默认 DeepSeek 配置（没有保存过 Key）→ 升级后清空
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ pptAgent: { llm: { baseURL: 'https://api.deepseek.com/anthropic', model: 'deepseek-flash' } } }));
+  const svc = new AgentService(dir);
+  try {
+    const st = svc.ai.llm.state();
+    assert.strictEqual(st.baseURL, '');
+    assert.strictEqual(st.ok, false);
+    assert.match(st.reason, /选择服务商/);
+    assert.ok(st.providers.length >= 8 && st.providers.some((p) => p.protocol === 'openai') && st.providers.some((p) => p.protocol === 'messages'));
+    // OpenAI 兼容协议
+    svc.pptAgentSetConfig({ llm: { provider: 'custom', protocol: 'openai', baseURL: `http://127.0.0.1:${srv.address().port}/v1`, model: 'test-model', apiKey: 'sk-oa', reasoningEffort: 'high' }, allowNetwork: true });
+    const t = await svc.pptAgentTest();
+    assert.ok(t.ok, t.error);
+    assert.strictEqual(t.reply, 'OK');
+    assert.strictEqual(last.url, '/v1/chat/completions');
+    assert.strictEqual(last.body.model, 'test-model');
+    assert.strictEqual(last.body.reasoning_effort, 'high');
+    assert.strictEqual(last.body.messages[0].role, 'system');
+    assert.strictEqual(svc.ai.engine().model, `127.0.0.1:${srv.address().port} · test-model`);
+    const bad = await svc.pptAgentTest({ apiKey: 'wrong' });
+    assert.ok(!bad.ok && bad.code === 'AUTH' && /bad key/.test(bad.error), JSON.stringify(bad));
+    // 本机服务可以不填 Key
+    svc.pptAgentSetConfig({ llm: { apiKey: '' } });
+    assert.strictEqual(svc.ai.llm.status().ok, true, '本机服务不需要 API Key');
+  } finally { svc.close(); srv.close(); }
 });
