@@ -90,8 +90,12 @@ export function FileTagsBar({ file, onChanged }) {
   const { colors } = useTagStore();
   const [adding, setAdding] = useState(false);
   const [draft, setDraft] = useState([]);
+  const [all, setAll] = useState(false);
   if (!file || !file.id) return null;
   const man = new Set(file.manual_tags || []);
+  const list = file.tags || [];
+  const SHOW = Math.max(8, man.size);
+  const shown = all ? list : list.slice(0, SHOW);
   const change = async (c) => {
     try {
       const r = await api.tagFiles([file.id], c);
@@ -103,7 +107,8 @@ export function FileTagsBar({ file, onChanged }) {
   return (
     <div className="file-tags">
       <span className="muted small">🏷</span>
-      {(file.tags || []).map((t) => <span key={t} className={`tag ${colors[t] ? `tc-${colors[t]}` : ''} ${man.has(t) ? 'manual' : ''}`}>{t}<b className="tag-x" title="去掉" onClick={() => change({ remove: [t] })}>×</b></span>)}
+      {shown.map((t) => <span key={t} className={`tag ${colors[t] ? `tc-${colors[t]}` : ''} ${man.has(t) ? 'manual' : ''}`}>{t}<b className="tag-x" title="去掉" onClick={() => change({ remove: [t] })}>×</b></span>)}
+      {list.length > SHOW && <span className="tag-more link" onClick={() => setAll(!all)}>{all ? '收起' : `+${list.length - SHOW}`}</span>}
       {adding ? (
         <span className="ft-add">
           <TagInput value={draft} onChange={setDraft} autoFocus />

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmtSize, fmtTime, KIND_LABEL, unitOf } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
@@ -56,11 +56,21 @@ export default function MergeView() {
   );
 }
 
-/** 从已解析的资料库中选择整个文件（多选） */
-function LibraryPicker({ onClose, onPick, exclude }) {
+/**
+ * 从已解析的资料库中选择文件：可按导入任务筛选；filter 限定文件（如只要 .pptx），single = 只选一个（双击行直接选定）。
+ * 智能合成（多选）与字体统一（单选，v3.14）共用。
+ */
+export function LibraryPicker({ onClose, onPick, exclude = new Set(), filter = null, single = false, title = '🗂 从资料库选择文件', okLabel = '加入所选', id = 'mergePicker' }) {
   const [rows, setRows] = useState(null);
+  const [tasks, setTasks] = useState([]);
+  const [taskId, setTaskId] = useState(PICK_TASK.get(id) || 'all');
   const [sel, setSel] = useState(() => new Set());
-  useEffect(() => { api.library({}).then((r) => setRows((r || []).filter((f) => f.status === 'parsed'))); }, []);
+  useEffect(() => {
+    api.library({}).then((r) => setRows((r || []).filter((f) => f.status === 'parsed' && (!filter || filter(f)))));
+    api.overview({ tasksOnly: true }).then((d) => setTasks((d && d.tasks) || [])).catch(() => {});
+  }, []);
+  const inTask = useMemo(() => { const t = tasks.find((x) => String(x.id) === String(taskId)); return t ? new Set(t.fileIds) : null; }, [tasks, taskId]);
+  const shown = useMemo(() => (rows || []).filter((f) => !inTask || inTask.has(f.id)), [rows, inTask]);
   const cols = [
     { key: 'name', label: '文件名', render: (f) => <span title={f.path}>{f.name}{exclude.has(f.path) ? <span className="tag"> 已选</span> : null}</span> },
     { key: 'kind', label: '类型', sort: (f) => f.kind || 'ppt', render: (f) => KIND_LABEL[f.kind || 'ppt'] },
@@ -68,15 +78,22 @@ function LibraryPicker({ onClose, onPick, exclude }) {
     { key: 'size', label: '大小', type: 'number', sort: (f) => f.size || 0, render: (f) => fmtSize(f.size) },
     { key: 'mtime', label: '修改时间', type: 'date', sort: (f) => f.mtime || 0, filterValue: (f) => f.mtime, className: 'small nowrap', render: (f) => fmtTime(f.mtime) },
     { key: 'dir', label: '目录', className: 'muted small', render: (f) => <span title={f.path}>{f.dir}</span> },
+    { key: 'ops', label: '', nosort: true, nofilter: true, className: 'nowrap', render: (f) => <button className="btn tiny ghost" title="在资源管理器中显示" onClick={(e) => { e.stopPropagation(); api.showItem(f.path); }}>📂</button> },
   ];
-  const picked = (rows || []).filter((f) => sel.has(f.id));
+  const picked = shown.filter((f) => sel.has(f.id));
+  const setSelOne = (s) => { if (!single) return setSel(s); const added = [...s].find((x) => !sel.has(x)); setSel(added ? new Set([added]) : new Set()); };
   return (
     <div className="overlay" onClick={onClose}>
       <div className="modal drill-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="detail-head"><div className="dh-title">🗂 从资料库选择文件</div><span className="muted small">{rows ? `${rows.length} 个已解析文件` : '加载中…'}</span><div className="spacer" /><button className="icon-btn" onClick={onClose}>✕</button></div>
-        <div className="drill-body">{rows && <DataTable id="mergePicker" columns={cols} rows={rows} rowKey={(f) => f.id} selectable selected={sel} onSelect={setSel} selectableRow={(f) => !exclude.has(f.path)} empty="资料库中还没有已解析的文件" />}</div>
-        <div className="detail-head"><div className="spacer" /><button className="btn" onClick={onClose}>取消</button><button className="btn primary" disabled={!picked.length} onClick={() => onPick(picked)}>加入所选（{picked.length}）</button></div>
+        <div className="detail-head"><div className="dh-title">{title}</div><span className="muted small">{rows ? `${shown.length} 个文件` : '加载中…'}</span><div className="spacer" /><button className="icon-btn" onClick={onClose}>✕</button></div>
+        <div className="drill-body">{rows && <DataTable id={id} columns={cols} rows={shown} rowKey={(f) => f.id} selectable selected={sel} onSelect={setSelOne} selectableRow={(f) => !exclude.has(f.path)} onRowClick={single ? (f) => !exclude.has(f.path) && setSel(new Set([f.id])) : undefined} empty="没有可选的文件"
+          toolbar={<select className="input" value={taskId} onChange={(e) => { PICK_TASK.set(id, e.target.value); setTaskId(e.target.value); setSel(new Set()); }}>
+            <option value="all">全部导入任务</option>
+            {tasks.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.name}（{t.fileIds.length}）</option>)}
+          </select>} />}</div>
+        <div className="detail-head"><div className="spacer" /><button className="btn" onClick={onClose}>取消</button><button className="btn primary" disabled={!picked.length} onClick={() => onPick(picked)}>{okLabel}{single ? '' : `（${picked.length}）`}</button></div>
       </div>
     </div>
   );
 }
+const PICK_TASK = new Map(); // 会话内记住每个选择框上次选的导入任务

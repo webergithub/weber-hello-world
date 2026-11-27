@@ -1334,7 +1334,7 @@ class AgentService extends EventEmitter {
     const slides = this.store.slidesOf(target.id);
     const cp = this.store.counterparts(slides.map((s) => s.id));
     const summary = this.store.db.prepare('SELECT md_path, model, at FROM doc_summaries WHERE file_id = ?').get(target.id) || null; // 智能总结（与原文件关联）
-    return { file: f, source: target, summary, slides: slides.map((s) => ({ ...s, counterpart: cp.get(s.id) || null })) };
+    return { file: f, source: target, summary, wiki: this.wiki ? this.wiki.slugOf(target.id) : null, slides: slides.map((s) => ({ ...s, counterpart: cp.get(s.id) || null })) };
   }
 
   slideDetail(id) {
@@ -1608,6 +1608,7 @@ class AgentService extends EventEmitter {
   wikiCancel() { return this.wiki.cancel(); }
   wikiPendingFiles() { return this.wiki.pendingIds().slice(0, 20000).map((id) => this.store.liteRow(this.store.q(`SELECT ${this.store.liteCols()} FROM files WHERE id = ?`).get(id))).filter(Boolean); }
   wikiPages() { return this.wiki.pages(); }
+  wikiExplore() { return this.wiki.explore(); }
   wikiPage(slug) { return this.wiki.readPage(slug); }
   wikiQuery(q, opts) { return this.wiki.query(q, opts); }
   wikiSaveQuery(id) { return this.wiki.saveQuery(id); }
@@ -1615,7 +1616,7 @@ class AgentService extends EventEmitter {
   wikiDeleteQueries(ids) { return this.wiki.deleteQueries(ids || []); }
   wikiLint() { return this.wiki.lint(); }
   async wikiFix(kinds) { if (this.wiki.job) throw new Error('炼丹正在进行中'); return this.wiki.fix(kinds || []); }
-  wikiLogs() { return this.wiki.logs(); }
+  wikiLogs(opts) { return this.wiki.logs(opts || {}); }
   wikiSchema() { return this.wiki.schema(); }
   wikiSaveSchema(text) { return this.wiki.saveSchema(text); }
 

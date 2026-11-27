@@ -1599,3 +1599,21 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .tags-body { gap: 10px; min-height: 0; }
 .color-menu { position: relative; display: inline-block; }
 .color-pop { position: absolute; top: 100%; left: 0; z-index: 20; margin-top: 4px; padding: 8px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--sh-md); }
+
+/* v3.14 LLMWiki 探索 / 日志等级 */
+.wiki-log { display: flex; flex-direction: column; gap: 8px; flex: 1; min-height: 0; }
+tr.row-error td { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+tr.row-warn td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.tag.danger { background: color-mix(in srgb, var(--danger) 18%, transparent); color: var(--danger); }
+.wiki-explore { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; overflow: auto; }
+.wx-ask { display: flex; gap: 8px; }
+.wx-qs { display: flex; flex-wrap: wrap; gap: 6px; }
+.wx-grid { display: grid; grid-template-columns: 3fr minmax(260px, 1fr); gap: 12px; align-items: start; }
+.wx-sec { border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); padding: 10px 12px; }
+.wx-sec h4 { margin: 4px 0 8px; font-size: 13px; }
+.wx-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px; }
+.wx-card { border: 1px solid var(--line); border-radius: var(--radius); padding: 8px 10px; background: var(--bg); cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.wx-card:hover { border-color: var(--accent); }
+.wx-card-t { display: flex; justify-content: space-between; gap: 6px; }
+.wx-rel { display: flex; flex-wrap: wrap; gap: 2px 8px; }
+.wx-row { padding: 4px 0; border-bottom: 1px dashed var(--line); cursor: pointer; }

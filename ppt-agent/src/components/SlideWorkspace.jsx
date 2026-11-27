@@ -4,6 +4,7 @@ import { useIncremental } from '../useIncremental';
 import { api, fmtSize, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
 import { FileTagsBar } from './TagEditor';
+import { canUnify } from './FontUnifyView';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
 import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
@@ -231,6 +232,8 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
                 <button className="btn small" onClick={() => app.openSlide(slide.id, files.map((f) => f.id))}>⛶ 逐页浏览</button>
                 {slide.file && <><button className="btn small ghost" title="在资源管理器中显示并选中该文件" onClick={() => { api.showItem(slide.file.path); }}>📂</button><button className="btn small ghost" onClick={() => api.openPath(slide.file.path)}>打开原文件</button></>}
                 {detail && detail.summary && <button className="btn small ghost" title="打开该文档的智能总结（Markdown）" onClick={() => api.openPath(detail.summary.md_path)}>🧠 智能总结</button>}
+                {detail && canUnify(detail.file) && <button className="btn small ghost" onClick={() => app.go({ type: 'fontunify', path: detail.file.path })}>🔤 字体统一</button>}
+                {detail && detail.wiki && <button className="btn small ghost" onClick={() => app.go({ type: 'llmwiki', slug: detail.wiki })}>📖 Wiki</button>}
               </div>
               {(back.length > 0 || outside) && (
                 <div className="hint-bar">🔗 正在查看推荐的页面{outside ? '（该文档不在当前列表中）' : ''}{back.length > 0 && <> · <button className="btn small" onClick={goBack}>↩ 返回 {back[back.length - 1].label}</button></>}{back.length > 1 && <button className="btn small" onClick={goOrigin}>⤒ 回到最初：{back[0].label}</button>}</div>

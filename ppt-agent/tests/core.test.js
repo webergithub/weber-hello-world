@@ -1233,6 +1233,14 @@ test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总
     const concept = pages.find((p) => p.type === 'concept');
     const cp = w.readPage(concept.slug);
     assert.ok(cp.backlinks.length > 0, '概念页有反向链接');
+    // 日志等级（v3.14）：逐个文档为调试日志，汇总为信息；调试日志不写 log.md
+    const lg = w.logs({ level: 'debug' });
+    assert.ok(lg.rows.length === st0.counts.candidates && lg.counts.info >= 1 && lg.rows[0].slug, JSON.stringify(lg.counts));
+    assert.ok(!fs.readFileSync(path.join(w.dir, 'log.md'), 'utf8').includes('吸收：'));
+    // 探索：知识地图与推荐问题
+    const ex = w.explore();
+    assert.ok(ex.concepts.length > 0 && ex.questions.length > 0 && fs.existsSync(path.join(w.dir, ex.concepts[0].slug + '.md')), '知识地图的概念页存在');
+    assert.ok(svc.fileDetail(src.file_id, { record: false }).wiki === src.slug, '文件详情带 Wiki 资料页');
     // 增量：没有变化时不重新炼化
     const r2 = await w.ingest();
     assert.strictEqual(r2.ok, 0);

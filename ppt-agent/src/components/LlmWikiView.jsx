@@ -5,7 +5,7 @@ import DataTable from './DataTable';
 import EtaLine from './Eta';
 import { StatCards } from './DrillDialog';
 
-const TABS = [['ingest', '⚗ 炼丹'], ['browse', '📖 浏览'], ['ask', '💬 问答'], ['lint', '🩺 体检'], ['log', '📜 日志'], ['schema', '📐 规则']];
+const TABS = [['ingest', '⚗ 炼丹'], ['explore', '🧭 探索'], ['browse', '📖 浏览'], ['ask', '💬 问答'], ['lint', '🩺 体检'], ['log', '📜 日志'], ['schema', '📐 规则']];
 const TYPE_LABEL = { source: '资料', concept: '概念', tag: '标签', topic: '分类', query: '问答', index: '总目录', log: '日志', schema: '规则' };
 const LINT_LABEL = { removed: '已移出资料库', stale: '资料已更新', missing: '未炼化', broken: '断开的链接', orphan: '孤立页面', weak: '单一来源概念' };
 const FIXABLE = { stale: '重新炼化', missing: '炼化', removed: '删除资料页', broken: '重建页面', orphan: '重建页面' };
@@ -70,6 +70,10 @@ export default function LlmWikiView() {
   const open = (s, push = true) => { if (push && slug && slug !== s) MEMO.hist = [...MEMO.hist, slug].slice(-50); MEMO.slug = s; setSlug(s); setTab('browse'); };
   const [typeFilter, setTypeFilterState] = useState(MEMO.typeFilter);
   const browseType = (t) => { MEMO.typeFilter = t; setTypeFilterState(t); setTab('browse'); };
+  // 从文件详情“📖 Wiki”跳转（v3.14）：view.slug
+  const sent = app.view && app.view.type === 'llmwiki' ? app.view.slug : null;
+  useEffect(() => { if (sent) open(sent); }, [sent]);
+  const askNow = (q) => { MEMO.q = q; MEMO.autoAsk = q; setTab('ask'); };
   if (!st) return <div className="view"><div className="empty-tip">加载中…</div></div>;
   const job = st.job;
   return (
@@ -85,9 +89,10 @@ export default function LlmWikiView() {
       <div className="tab-body pad flex-col wiki-body">
         {tab === 'ingest' && <IngestPanel st={st} onBrowse={browseType} onOpen={open} refresh={refresh} />}
         {tab === 'browse' && <BrowsePanel pages={pages || []} slug={slug} onOpen={open} typeFilter={typeFilter} setTypeFilter={(t) => { MEMO.typeFilter = t; setTypeFilterState(t); }} onBack={() => { const h = MEMO.hist; if (h.length) { const s = h[h.length - 1]; MEMO.hist = h.slice(0, -1); open(s, false); } }} canBack={MEMO.hist.length > 0} />}
+        {tab === 'explore' && <ExplorePanel onOpen={open} onAsk={askNow} onIngest={() => setTab('ingest')} />}
         {tab === 'ask' && <AskPanel onOpen={open} />}
         {tab === 'lint' && <LintPanel onOpen={open} busy={!!job} />}
-        {tab === 'log' && <LogPanel />}
+        {tab === 'log' && <LogPanel onOpen={open} />}
         {tab === 'schema' && <SchemaPanel />}
       </div>
     </div>
@@ -214,11 +219,12 @@ function AskPanel({ onOpen }) {
   const [hist, setHist] = useState([]);
   const [sel, setSel] = useState(() => new Set());
   const loadHist = () => api.wikiQueries().then(setHist).catch(() => {});
-  useEffect(() => { loadHist(); }, []);
-  const ask = async () => {
-    if (!q.trim()) return;
-    setBusy(true); MEMO.q = q;
-    try { const r = await api.wikiQuery(q.trim()); MEMO.ask = r; setRes(r); loadHist(); } catch (e) { app.toast(e.message, 'error', { cat: 'LLMWiki' }); } finally { setBusy(false); }
+  useEffect(() => { loadHist(); if (MEMO.autoAsk) { const x = MEMO.autoAsk; MEMO.autoAsk = null; ask(x); } }, []);
+  const ask = async (text) => {
+    const qq = String(text || q).trim();
+    if (!qq) return;
+    setBusy(true); MEMO.q = qq; setQ(qq);
+    try { const r = await api.wikiQuery(qq); MEMO.ask = r; setRes(r); loadHist(); } catch (e) { app.toast(e.message, 'error', { cat: 'LLMWiki' }); } finally { setBusy(false); }
   };
   const save = async (id) => { try { const s = await api.wikiSaveQuery(id); app.toast('已存为 Wiki 页面', 'info', { cat: 'LLMWiki' }); loadHist(); if (res && res.id === id) { const r = { ...res, slug: s }; MEMO.ask = r; setRes(r); } } catch (e) { app.toast(e.message, 'error'); } };
   const cols = [
@@ -232,7 +238,7 @@ function AskPanel({ onOpen }) {
     <div className="wiki-ask">
       <div className="wiki-ask-bar">
         <input className="input grow" value={q} placeholder="向 Wiki 提问" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
-        <button className="btn primary" disabled={busy || !q.trim()} onClick={ask}>{busy ? '思考中…' : '💬 提问'}</button>
+        <button className="btn primary" disabled={busy || !q.trim()} onClick={() => ask()}>{busy ? '思考中…' : '💬 提问'}</button>
       </div>
       {res && (
         <div className="wiki-answer">
@@ -277,16 +283,71 @@ function LintPanel({ onOpen, busy }) {
   );
 }
 
-function LogPanel() {
-  const [rows, setRows] = useState([]);
-  useEffect(() => { api.wikiLogs().then(setRows).catch(() => {}); }, []);
+const LEVELS = [['', '全部'], ['error', '错误'], ['warn', '警告'], ['info', '信息'], ['debug', '调试']];
+const LEVEL_TAG = { error: 'danger', warn: 'warn', info: 'ok', debug: '' };
+const LOG_MEMO = { level: '' };
+function LogPanel({ onOpen }) {
+  const [data, setData] = useState({ rows: [], counts: {} });
+  const [level, setLevelState] = useState(LOG_MEMO.level);
+  const setLevel = (l) => { LOG_MEMO.level = l; setLevelState(l); };
+  const load = () => api.wikiLogs({ level }).then(setData).catch(() => {});
+  useEffect(() => { load(); }, [level]);
+  useEffect(() => on('wiki', (s) => { if (!s.job) load(); }), [level]);
+  const total = Object.values(data.counts).reduce((a, b) => a + b, 0);
   const cols = [
     { key: 'at', label: '时间', type: 'date', render: (r) => fmtTime(r.at) },
+    { key: 'level', label: '等级', className: 'nowrap', sort: (r) => ['error', 'warn', 'info', 'debug'].indexOf(r.level || 'info'), filterValue: (r) => (LEVELS.find(([k]) => k === (r.level || 'info')) || [])[1], render: (r) => <span className={`tag ${LEVEL_TAG[r.level || 'info']}`}>{(LEVELS.find(([k]) => k === (r.level || 'info')) || [])[1]}</span> },
     { key: 'op', label: '操作', className: 'nowrap', filterValue: (r) => OP_LABEL[r.op] || r.op, render: (r) => OP_LABEL[r.op] || r.op },
-    { key: 'title', label: '标题' },
+    { key: 'title', label: '内容', render: (r) => (r.slug ? <span className="link" onClick={() => onOpen(r.slug)}>{r.title}</span> : r.title) },
     { key: 'detail', label: '详情', className: 'small' },
   ];
-  return <DataTable id="wikiLog" columns={cols} rows={rows} rowKey={(r) => r.id} />;
+  return (
+    <div className="wiki-log">
+      <div className="wiki-lint-bar">
+        <div className="seg">{LEVELS.map(([k, l]) => <button key={k || 'all'} className={level === k ? 'on' : ''} onClick={() => setLevel(k)}>{l}（{k ? data.counts[k] || 0 : total}）</button>)}</div>
+        <button className="btn small ghost" onClick={load}>↻ 刷新</button>
+      </div>
+      <DataTable id="wikiLog" sessionKey={`wikiLog-${level}`} columns={cols} rows={data.rows} rowKey={(r) => r.id} rowClass={(r) => (r.level === 'error' ? 'row-error' : r.level === 'warn' ? 'row-warn' : '')} empty="没有日志" />
+    </div>
+  );
+}
+
+/** 探索（v3.14）：炼丹之后的入口——向 Wiki 提问、推荐问题、知识地图（概念及其相关概念）、分类、最近炼化的资料 */
+function ExplorePanel({ onOpen, onAsk, onIngest }) {
+  const [d, setD] = useState(null);
+  const [q, setQ] = useState('');
+  useEffect(() => { api.wikiExplore().then(setD).catch(() => setD({ concepts: [], topics: [], questions: [], recent: [], sources: 0 })); }, []);
+  if (!d) return <div className="empty-tip">加载中…</div>;
+  if (!d.sources) return <div className="empty-tip"><p>Wiki 还是空的。</p><button className="btn primary" onClick={onIngest}>⚗ 去炼丹</button></div>;
+  return (
+    <div className="wiki-explore">
+      <div className="wx-ask">
+        <input className="input grow" value={q} placeholder="向 Wiki 提问" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && q.trim() && onAsk(q.trim())} />
+        <button className="btn primary" disabled={!q.trim()} onClick={() => onAsk(q.trim())}>💬 提问</button>
+      </div>
+      {d.questions.length > 0 && <div className="wx-qs">{d.questions.map((x) => <span key={x} className="chip drill" onClick={() => onAsk(x)}>💡 {x}</span>)}</div>}
+      <div className="wx-grid">
+        <section className="wx-sec wx-map">
+          <h4>🗺 知识地图 <span className="muted small">（{d.concepts.length} 个主要概念）</span></h4>
+          <div className="wx-cards">
+            {d.concepts.map((c) => (
+              <div key={c.slug} className="wx-card" onClick={() => onOpen(c.slug)}>
+                <div className="wx-card-t"><b>{c.title}</b><span className="link small">{c.sources} 份</span></div>
+                <div className="muted small">{c.cat}</div>
+                {c.related.length > 0 && <div className="wx-rel">{c.related.map((r) => <span key={r.slug} className="link small" onClick={(e) => { e.stopPropagation(); onOpen(r.slug); }}>↔ {r.short}（{r.together}）</span>)}</div>}
+              </div>
+            ))}
+          </div>
+        </section>
+        <section className="wx-sec">
+          <h4>📂 分类</h4>
+          {d.topics.map((t) => <div key={t.slug} className="wx-row link" onClick={() => onOpen(t.slug)}>{t.title}<span className="muted small"> {t.sources} 份</span></div>)}
+          <h4>🆕 最近炼化</h4>
+          {d.recent.map((r) => <div key={r.slug} className="wx-row" onClick={() => onOpen(r.slug)}><span className="link">{r.title}</span><div className="muted small">{r.summary}</div></div>)}
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function SchemaPanel() {

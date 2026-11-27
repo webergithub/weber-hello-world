@@ -1,7 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { api, fmtSize, fmtTime } from '../api';
 import { useApp } from '../ctx';
 import DataTable from './DataTable';
+import { LibraryPicker } from './MergeView';
+
+export const canUnify = (f) => !!f && (f.kind || 'ppt') === 'ppt' && /\.(pptx|pptm|potx|ppsx)$/i.test(f.path || '');
 
 const COMMON_LATIN = ['Arial', 'Calibri', 'Times New Roman', 'Segoe UI', 'Verdana', 'Tahoma', 'Georgia', 'Helvetica'];
 const COMMON_EA = ['微软雅黑', '黑体', '宋体', '等线', '仿宋', '楷体', '思源黑体', '华为黑体', '方正兰亭黑'];
@@ -44,6 +47,10 @@ export default function FontUnifyView() {
     finally { setBusy(''); }
   };
   const pick = async () => { const ps = await api.selectFiles('选择要统一字体的 PPT'); if (ps && ps[0]) load(ps[0]); };
+  const [picker, setPicker] = useState(false);
+  // 从资料库 / 文件详情“发送到字体统一”（v3.14）：view.path
+  const sent = app.view && app.view.type === 'fontunify' ? app.view.path : null;
+  useEffect(() => { if (sent && sent !== MEMO.file) load(sent); }, [sent]);
   const run = async () => {
     setBusy('run');
     try {
@@ -97,8 +104,10 @@ export default function FontUnifyView() {
       <div className="view-head">
         <div className="vh-title">🔤 字体统一</div>
         <div className="spacer" />
+        <button className="btn" disabled={!!busy} onClick={() => setPicker(true)}>🗂 从导入任务中选择</button>
         <button className="btn" disabled={!!busy} onClick={pick}>📁 导入 PPT…</button>
       </div>
+      {picker && <LibraryPicker id="fontPicker" single title="🗂 从导入任务中选择 PPT" okLabel="选择" filter={canUnify} onClose={() => setPicker(false)} onPick={(rows) => { setPicker(false); if (rows[0]) load(rows[0].path); }} />}
       <div className="tab-body pad flex-col fu-body">
         <div className="gen-steps">{['导入 PPT', '设置字体与字号', '生成新文件'].map((t, k) => { const step = !file ? 1 : results.some((r) => r.src === file) ? 3 : 2; return <span key={t} className={`gs ${step === k + 1 ? 'on' : step > k + 1 ? 'done' : ''}`}><b>{step > k + 1 ? '✓' : k + 1}</b>{t}</span>; })}</div>
         {file && info && (
@@ -108,7 +117,7 @@ export default function FontUnifyView() {
             <button className="btn tiny ghost" title="在资源管理器中显示" onClick={() => api.showItem(file)}>📂</button><button className="btn tiny" onClick={() => api.openPath(file)}>打开原文件</button>
           </div>
         )}
-        {!file && <div className="empty-tip"><button className="btn primary" disabled={!!busy} onClick={pick}>{busy === 'analyze' ? '分析中…' : '📁 导入 PPT…'}</button></div>}
+        {!file && <div className="empty-tip">{busy === 'analyze' ? '分析中…' : <><button className="btn primary" onClick={() => setPicker(true)}>🗂 从导入任务中选择</button> <button className="btn" onClick={pick}>📁 导入 PPT…</button></>}</div>}
         {file && (
           <>
             <div className="fu-form">

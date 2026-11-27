@@ -10,6 +10,7 @@ import { CompareButton } from './CompareView';
 import { StatCards } from './DrillDialog';
 import TagList from './TagList';
 import { TagDialog } from './TagEditor';
+import { canUnify } from './FontUnifyView';
 
 const SIDE_W = 240;
 
@@ -264,7 +265,7 @@ function OverviewMode({ scopeTask, files }) {
       <StatCards cards={cards} onDrill={drill} />
       <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip drill" onClick={() => drill(`主题分类·${k}`, (r) => r.status === 'parsed' && (r.category || '其他') === k)}>主题分类·{k} {v}</span>)}</div>
       <DataTable id="libOverview" columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文档"
-        actions={<><button className="btn small" disabled={!pickedOk.length} onClick={() => setTagging(pickedOk)}>🏷 标签…</button><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
+        actions={<><button className="btn small" disabled={!pickedOk.length} onClick={() => setTagging(pickedOk)}>🏷 标签…</button><button className="btn small" disabled={pickedOk.length !== 1 || !canUnify(pickedOk[0])} onClick={() => app.go({ type: 'fontunify', path: pickedOk[0].path })}>🔤 字体统一</button><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
             {!scopeTask && <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
