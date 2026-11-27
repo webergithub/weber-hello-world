@@ -302,12 +302,12 @@ class SearchEngine {
   }
 
   async answer(q, slideIds) {
-    const client = llm.client(this.getConfig().llm);
-    if (!client) throw new Error(require('./offline').OFFLINE_ONLY ? require('./offline').OFFLINE_MSG : '未配置大模型，无法生成 RAG 回答（可在"设置"中配置 OpenAI 兼容接口）');
+    const ai = this.getAi();
+    if (!ai) throw new Error('资料库问答需要大模型：请在“设置 → PPT_Agent”中配置');
     const { fileMap } = this.load();
     const slides = this.store.getSlides(slideIds.slice(0, 8));
     const ctx = slides.map((s) => ({ file: (fileMap.get(s.file_id) || {}).name || '', idx: s.idx, title: s.title, text: s.text.slice(0, 1500), notes: (s.notes || '').slice(0, 800) }));
-    const text = await client.answer(q, ctx);
+    const text = (await ai.require('ragAnswer', { q, contexts: ctx })).text; // v3.16：复用 PPT_Agent 的大模型
     return { text, sources: slides.map((s, i) => ({ n: i + 1, id: s.id, file: ctx[i].file, idx: s.idx, title: s.title })) };
   }
 }

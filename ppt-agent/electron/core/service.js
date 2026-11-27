@@ -91,7 +91,7 @@ const DEFAULT_CONFIG = {
   // bigFileMB 超过这个大小的文件同一时间只解析一个
   perf: { yieldOnActivity: true, idleOnly: false, idleSec: 60, memLimitMB: 16384, bigFileMB: 64 },
   // PPT_Agent（v3.11）：engine 调用方式 llm（大模型接口）/ script（AI 调用脚本），不设置时有生效的脚本用脚本；
-  // allowNetwork 允许连接大模型接口（默认关，单机版其他功能仍不联网）；auto 解析完成的文档自动总结（大模型接口时，默认关）；
+  // allowNetwork 允许连接内网大模型（默认关，单机版其他功能仍不联网）；auto 解析完成的文档自动总结（大模型接口时，默认关）；
   // scopes 轮询范围（任务 / 子任务 id），pollSec 轮询间隔；llm.apiKeyEnc 为加密保存的 API Key（不发给界面）；prompt 自定义总结提示词
   pptAgent: { allowNetwork: false, auto: false, pollSec: 30, scopes: [], prompt: '', llm: { provider: '', protocol: '', baseURL: '', model: '', reasoningEffort: 'off', maxTokens: 4096, timeoutSec: 300 } }, // v3.15：不默认任何服务商
 };
@@ -1089,7 +1089,7 @@ class AgentService extends EventEmitter {
     const termRows = await this.store.fileTermsAsync();
     const df = new Map();
     for (const r of termRows) for (const t of Object.keys((r.terms && r.terms.terms) || {})) df.set(t, (df.get(t) || 0) + 1);
-    const client = this.config.llm.enabled && this.config.llm.useForTags ? llm.client(this.config.llm) : null;
+    const client = null; // v3.16：移除“其他大模型功能”的大模型打标签（标签由词表 / TF-IDF 计算，可手动修改）
     const termMap = new Map(termRows.map((r) => [r.id, r.terms || { terms: {}, concepts: {} }]));
     // 分片计算：每 25ms 让出一次事件循环，上万个文件时界面仍可操作
     const tk = ticker();
@@ -1952,14 +1952,10 @@ class AgentService extends EventEmitter {
     const s = this.store.getSlide(id, false);
     if (!s) throw new Error('页面不存在');
     const file = this.store.getFile(s.file_id);
-    const client = llm.client(this.config.llm);
-    if (!client || (!this.config.llm.apiKey && !/127\.0\.0\.1|localhost/.test(this.config.llm.baseUrl || ''))) {
-      throw new Error(OFFLINE_ONLY ? OFFLINE_MSG : '未配置 Agent 接口：请在“设置 → Agent 接口”中选择服务商（如 DeepSeek）、填写 API Key 并启用');
-    }
-    let text = '';
-    try { text = (await client.speakerNotes({ fileName: file.name, title: s.title, text: s.text, md: s.md, notes: s.notes })).trim(); } catch (e) { throw new Error('调用 Agent 接口失败：' + e.message); }
-    if (!text) throw new Error('Agent 接口没有返回内容');
-    const source = `大模型 ${this.config.llm.model}`;
+    // v3.16：复用 PPT_Agent 的大模型（设置 → PPT_Agent）
+    const r = await this.ai.require('speakerNotes', { fileName: file.name, title: s.title, text: s.text, notes: s.notes });
+    const text = r.text;
+    const source = r.model;
     this.store.setSlideUser(id, { notes_ai: text });
     logger.child('agent').info(`生成讲解词：${file.name} 第 ${s.idx} 页（${source}，${text.length} 字）`);
     return { text, source };
@@ -1987,13 +1983,10 @@ class AgentService extends EventEmitter {
     if (lang === srcLang) return { text: src, same: true, lang, variant };
     const hit = !force && this.store.kbGet(f.path, s.idx, variant, lang);
     if (hit) return { text: hit.text, source: hit.source, writtenBack: !!hit.written_back, cached: true, lang, variant };
-    const client = llm.client(this.config.llm);
-    if (!client && OFFLINE_ONLY) throw new Error(OFFLINE_MSG);
-    if (!client) throw new Error('未配置 Agent 接口：请在“设置 → Agent 接口”中填写接口地址、API Key 与模型（支持 DeepSeek、通义千问、Kimi、智谱、OpenAI、本地 Ollama）');
     const name = LANG_NAMES[lang] || lang;
-    const text = await client.translate(src, name);
-    if (!text) throw new Error('翻译接口没有返回内容');
-    const source = `${this.config.llm.model}`;
+    const r = await this.ai.require('translate', { text: src, langName: name }); // v3.16：复用 PPT_Agent 的大模型
+    const text = r.text;
+    const source = r.model;
     this.store.kbPut({ path: f.path, idx: s.idx, variant, lang, text, source, written_back: 0 });
     logger.child('agent').info(`翻译讲解词：${f.name} 第 ${s.idx} ${f.kind === 'word' ? '节' : '页'} → ${name}（${source}，${text.length} 字）`);
     // 解析与翻译都不改动原文件：译文只保存在应用知识库，用户手动点击“写入 PPT 备注”时才写回
@@ -2065,14 +2058,6 @@ class AgentService extends EventEmitter {
     return { ok: done.length, files: byFile.size - errors.length, errors };
   }
 
-  async testLlm(cfg) {
-    if (OFFLINE_ONLY) throw new Error(OFFLINE_MSG);
-    const client = llm.client({ ...this.config.llm, ...(cfg || {}), enabled: true });
-    if (!client) throw new Error('请填写模型名称');
-    const t0 = Date.now();
-    const out = await client.ping();
-    return { ok: true, reply: String(out).slice(0, 40), ms: Date.now() - t0 };
-  }
 
   // ================= 黑白底互转规则脚本 =================
   rulesFile() { return path.join(this.dataDir, 'convert-rules.json'); }
@@ -2087,9 +2072,8 @@ class AgentService extends EventEmitter {
   }
   resetConvertRules() { fs.rmSync(this.rulesFile(), { force: true }); this.log.info('转换规则已恢复默认'); return this.getConvertRules(); }
   async convertRulesFromText(request) {
-    const client = llm.client(this.config.llm);
-    if (!client) throw new Error('用自然语言修改规则需要在“设置”中配置大模型；也可以直接在表单中修改');
-    const r = await client.convertRules(this.getConvertRules(), request);
+    const out = await this.ai.require('convertRules', { current: this.getConvertRules(), request }); // v3.16：复用 PPT_Agent
+    const r = require('./ai').parseJson(out.text);
     if (!r) throw new Error('大模型没有返回有效的规则 JSON');
     return normalizeRules({ ...r, description: request });
   }
@@ -2485,7 +2469,7 @@ class AgentService extends EventEmitter {
     delete p.llm.apiKey; delete p.llm.apiKeyEnc; delete p.llm.hasApiKey;
     if (key !== undefined) p.llm.apiKeyEnc = key ? this.ai.llm.seal(key) : '';
     const r = this.setConfig({ pptAgent: p, __internal: true });
-    if (p.allowNetwork !== undefined) this.log.info(`[PPT_Agent] ${p.allowNetwork ? '已允许' : '已关闭'}连接大模型接口${p.allowNetwork ? `（${this.ai.llm.status().host}）` : ''}`);
+    if (p.allowNetwork !== undefined) this.log.info(`[PPT_Agent] ${p.allowNetwork ? '已允许' : '已关闭'}连接内网大模型${p.allowNetwork ? `（${this.ai.llm.status().host}）` : ''}`);
     if (key !== undefined) this.log.info(`[PPT_Agent] API Key 已${key ? '更新（加密保存）' : '清除'}`);
     this.summary.lastPoll = 0;
     this.summary.changed();

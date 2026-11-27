@@ -2,7 +2,7 @@
 // PPT_Agent 大模型接入层（v3.11）：直接复用 DeepSeek Harness 开源库（MIT）的大模型接入层——
 // vendor/dsh-llm 中原样拷贝的 llm-deepseek 传输（Messages 接口、SSE 流、事件转换、错误分类、空闲超时、重试策略），
 // 由 scripts/build-dsh-llm.mjs 编译为 ./dsh-llm.cjs。本文件只负责：读取设置、联网开关、API Key 加密保存、记录调用。
-// 单机版默认不联网：只有在“设置 → PPT_Agent”打开“允许连接大模型接口”后，PPT_Agent 才会向设置的接口地址发请求；
+// 单机版默认不联网：只有在“设置 → PPT_Agent”打开“允许连接内网大模型”后，PPT_Agent 才会向设置的接口地址发请求；
 // 其他功能仍不联网（llm.client / embedder 不受影响）。
 const dsh = require('./dsh-llm.cjs');
 
@@ -53,9 +53,9 @@ class PptAgentLlm {
     const base = { model: c.model, host: hostOf(c.baseURL), baseURL: c.baseURL, protocol: protocolOf(c), provider: c.provider || '', providerName: this.providerName(c), allowNetwork: this.allowed(), hasApiKey: !!c.apiKeyEnc };
     if (!c.baseURL) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型：请在“设置 → PPT_Agent”中选择服务商（或填写接口地址）、模型与 API Key' };
     if (!hostOf(c.baseURL)) return { ...base, ok: false, reason: 'PPT_Agent 大模型接口地址无效：请在“设置 → PPT_Agent”中检查接口地址' };
-    if (!c.apiKeyEnc && isLocal(c.baseURL)) { /* 本机服务不需要 Key */ } else if (!c.apiKeyEnc) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型接口：请在“设置 → PPT_Agent”中填写 API Key，并打开“允许连接大模型接口”（或改用 AI 调用脚本）' };
+    if (!c.apiKeyEnc && isLocal(c.baseURL)) { /* 本机服务不需要 Key */ } else if (!c.apiKeyEnc) return { ...base, ok: false, reason: '还没有配置 PPT_Agent 大模型接口：请在“设置 → PPT_Agent”中填写 API Key，并打开“允许连接内网大模型”（或改用 AI 调用脚本）' };
     if (c.apiKeyEnc && !this.key()) return { ...base, ok: false, reason: '无法读取保存的 API Key（可能换了电脑或 Windows 账号）：请在“设置 → PPT_Agent”中重新填写' };
-    if (!this.allowed()) return { ...base, ok: false, reason: 'PPT_Agent 未允许连接大模型接口：请在“设置 → PPT_Agent”中打开“允许连接大模型接口”' };
+    if (!this.allowed()) return { ...base, ok: false, reason: 'PPT_Agent 未允许连接内网大模型：请在“设置 → PPT_Agent”中打开“允许连接内网大模型”' };
     if (!c.model) return { ...base, ok: false, reason: '没有设置模型：请在“设置 → PPT_Agent”中选择模型' };
     return { ...base, ok: true };
   }
@@ -72,7 +72,7 @@ class PptAgentLlm {
   /** 一次对话：{ system, user, maxTokens, signal, timeoutMs } → { ok, text, ms, usage, attempts, error, code } */
   async chat({ system, user, maxTokens, signal, timeoutMs, override, force = false, once = false } = {}) {
     if (!force) { const s = this.status(); if (!s.ok) return { ok: false, error: s.reason, code: 'NOT_CONFIGURED', ms: 0 }; }
-    else if (!this.allowed() && !once) return { ok: false, error: 'PPT_Agent 未允许连接大模型接口', code: 'NOT_ALLOWED', ms: 0 };
+    else if (!this.allowed() && !once) return { ok: false, error: 'PPT_Agent 未允许连接内网大模型', code: 'NOT_ALLOWED', ms: 0 };
     const opts = this.options(override);
     const limit = timeoutMs || Math.max(10, Number(this.cfg().timeoutSec) || DEFAULTS.timeoutSec) * 1000;
     const sigs = [AbortSignal.timeout(limit)];
@@ -109,10 +109,10 @@ class PptAgentLlm {
       { item: '接口地址', ok: !!host, detail: host ? `${host}（${protocolOf(c) === 'messages' ? 'Messages 协议' : 'OpenAI 兼容协议'}）` : c.baseURL ? '地址无效' : '未填写' },
       { item: 'API Key', ok: !!(override.apiKey || this.key() || isLocal(c.baseURL)), detail: override.apiKey ? '使用输入框中的 Key（未保存）' : this.key() ? '使用已保存的 Key' : isLocal(c.baseURL) ? '本机服务，不需要' : '未填写' },
       { item: '模型', ok: !!c.model, detail: c.model || '未填写' },
-      { item: '联网', ok: this.allowed() || !!patch.once, detail: this.allowed() ? '已允许连接大模型接口' : patch.once ? '仅本次测试连接' : '未允许' },
+      { item: '联网', ok: this.allowed() || !!patch.once, detail: this.allowed() ? '已允许连接内网大模型' : patch.once ? '仅本次测试连接' : '未允许' },
     ];
     const bad = checks.find((x) => !x.ok);
-    if (bad) return { ...base, ok: false, checks, error: `${bad.item}：${bad.detail}`, code: 'PRECHECK', hint: bad.item === '联网' ? '确认“仅本次测试连接”，或打开“允许连接大模型接口”' : `请先填写${bad.item}` };
+    if (bad) return { ...base, ok: false, checks, error: `${bad.item}：${bad.detail}`, code: 'PRECHECK', hint: bad.item === '联网' ? '确认“仅本次测试连接”，或打开“允许连接内网大模型”' : `请先填写${bad.item}` };
     const r = await this.chat({ system: '只回复 OK', user: 'ping', maxTokens: 16, timeoutMs: 30000, override, force: true, once: !!patch.once });
     this.svc.log.info(`[PPT_Agent] 测试连接 ${host}（模型 ${c.model}）：${r.ok ? `成功 ${r.ms}ms` : `失败 ${r.error}`}`);
     checks.push({ item: '模型回复', ok: r.ok, detail: r.ok ? `${r.text.trim().slice(0, 60)}（${r.ms}ms）` : r.error });

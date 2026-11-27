@@ -516,7 +516,6 @@ app.whenReady().then(async () => {
     notesI18n: (id) => service.notesI18n(id),
     translateNotes: (id, opts) => service.translateNotes(id, opts),
     writeBackNotes: (id, opts) => service.writeBackNotes(id, opts),
-    testLlm: (cfg) => service.testLlm(cfg),
     categories: (opts) => service.categories(opts),
     groups: (opts) => service.groups(opts),
     rescanGroups: () => service.rescanGroups(),

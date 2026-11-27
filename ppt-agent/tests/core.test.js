@@ -213,7 +213,7 @@ test('单机版：不创建大模型 / 语义向量客户端；搜索推荐词�
   const svc = new AgentService(path.join(tmp, 'data-sugg'));
   svc.setConfig({ thumbnails: 'off', llm: { enabled: true, model: 'x' } });
   assert.strictEqual(svc.getConfig().offlineOnly, true);
-  await assert.rejects(svc.testLlm({ enabled: true, model: 'x' }), /单机版/);
+  assert.strictEqual(typeof svc.testLlm, 'undefined', 'v3.16 删除了“其他大模型功能”的测试连接');
   const lib = path.join(tmp, 'lib-sugg');
   fs.cpSync(P('机场运营'), lib, { recursive: true });
   const id = svc.addTask(lib);
@@ -357,7 +357,11 @@ test('任务中断后从断点继续；回收站移入 / 还原 / 彻底删除�
   // 讲解词编辑；Agent 生成未配置接口时提示去设置（不再使用内置模板）
   const any = (await svc.library()).find((x) => x.status === 'parsed' && x.slide_count > 2);
   const sl = svc.store.slidesOf(any.id)[1];
-  await assert.rejects(svc.generateNotes(sl.id), /单机版（不联网）/);
+  await assert.rejects(svc.generateNotes(sl.id), /生成讲解词需要大模型.*PPT_Agent/, '未配置 PPT_Agent 时给出去设置的提示');
+  process.env.PPTA_FAKE_LLM = '1';
+  const gn = await svc.generateNotes(sl.id);
+  assert.ok(gn.text && gn.source === '本地测试替身', 'v3.16：生成讲解词复用 PPT_Agent 的大模型');
+  delete process.env.PPTA_FAKE_LLM;
   const e = svc.updateSlideText(sl.id, { notes: '唯一测试讲解词XYZ' });
   assert.strictEqual(e.notes, '唯一测试讲解词XYZ');
   const r = await svc.searchQuery('唯一测试讲解词XYZ');
@@ -850,7 +854,7 @@ test('讲解词译文：保存到知识库、写回 PPT 备注（同语言再次
   const f = (await svc.library())[0];
   const s = svc.store.slidesOf(f.id).find((x) => x.notes);
   // 单机版不联网：调用大模型的功能给出明确提示
-  await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /单机版（不联网）/);
+  await assert.rejects(svc.translateNotes(s.id, { lang: 'en' }), /翻译讲解词需要大模型/);
   // 中文讲解词切到中文直接返回原文
   assert.strictEqual((await svc.translateNotes(s.id, { lang: 'zh' })).same, true);
   svc.store.kbPut({ path: f.path, idx: s.idx, variant: 'final', lang: 'en', text: 'Line one.\nLine two & more.', source: 'test' });
@@ -1078,7 +1082,7 @@ test('PPT_Agent（v3.11）：DeepSeek Harness 大模型接入层 + harness 轮�
     assert.ok(!('apiKeyEnc' in cfg.pptAgent.llm) && !JSON.stringify(cfg).includes('sk-test'), 'API Key 不发给界面');
     assert.ok(!fs.readFileSync(path.join(tmp, 'dataagent', 'config.json'), 'utf8').includes('sk-test'), '配置文件中不保存明文 API Key');
     assert.strictEqual(svc.summary.available().ok, false, '没有允许联网时不可用');
-    assert.match(svc.summary.available().reason, /允许连接大模型接口/);
+    assert.match(svc.summary.available().reason, /允许连接内网大模型/);
     assert.strictEqual(calls, 0);
     // 测试连接（允许联网前拒绝）
     const pre = await svc.pptAgentTest();

@@ -20,8 +20,8 @@
 - 功能按钮归一：添加目录、扫描本机所有文档只放在左侧；能在侧栏切换的子视图不在右侧重复放页签。
 - 所有列表都用 `src/components/DataTable.jsx`（唯一例外：目录树 `DirTree.jsx` 是树形表，自带排序 / 筛选 / 多选 / 分批渲染）（每列排序、显示/隐藏列、Excel 式筛选、关键字搜索、可多选），新列表不要手写 `<table>`；日期 / 数字列给出 `type`，标签类多值列给出 `filterList`；列表要铺满到窗口底部。
 - 界面上不要随意加说明性提示文字（页头副标题、tooltip 长句等），说明放到帮助指南（`Guide.jsx`）；新增功能同步更新帮助指南与新手指引。
-- **单机版，不联网**（v3.2）：`electron/core/offline.js` 的 `OFFLINE_ONLY = true` 时 `llm.client` / `embedder` 一律返回空，依赖大模型的功能给出 `OFFLINE_MSG`；设置“PPT_Agent”页签下方的“其他大模型功能 / 语义向量”锁定；`getConfig()` 带 `offlineOnly` 给界面判断。网络用途只有：用户主动发送的反馈邮件，以及 PPT_Agent（v3.11，用户在设置中打开“允许连接大模型接口”后才会向其设置的接口地址发请求，默认关闭）。新功能不得引入其他联网调用。
-- 外部大模型只走设置中的接口（PPT_Agent `config.pptAgent.llm`；旧的“Agent 接口”`config.llm` 单机版锁定），不得在代码中内置任何 API Key。PPT_Agent 的 API Key 由 `ppt_agent/llm.js` 用 Electron `safeStorage` 加密保存为 `apiKeyEnc`，`getConfig()` 只给界面 `hasApiKey`，`setConfig` 拒绝界面传入的 apiKey / apiKeyEnc（只能经 `pptAgentSetConfig`）。
+- **单机版，不联网**（v3.2）：`electron/core/offline.js` 的 `OFFLINE_ONLY = true` 时 `llm.client` / `embedder` 一律返回空，依赖大模型的功能给出 `OFFLINE_MSG`；v3.16 起删除了“其他大模型功能 / 语义向量”设置（旧的 `config.llm` 客户端不再使用）；`getConfig()` 带 `offlineOnly` 给界面判断。网络用途只有：用户主动发送的反馈邮件，以及 PPT_Agent（v3.11，用户在设置中打开“允许连接内网大模型”后才会向其设置的接口地址发请求，默认关闭）。新功能不得引入其他联网调用。
+- 外部大模型只走 PPT_Agent（`config.pptAgent.llm`；v3.16 起讲解词生成 / 翻译 / 资料库问答 RAG / 转换规则都经 `service.ai.require(task, input)`，不可用时抛出指向“设置 → PPT_Agent”的错误；界面按 `config.ai.ok` 判断可用；开关文案为“允许连接内网大模型”），不得在代码中内置任何 API Key。PPT_Agent 的 API Key 由 `ppt_agent/llm.js` 用 Electron `safeStorage` 加密保存为 `apiKeyEnc`，`getConfig()` 只给界面 `hasApiKey`，`setConfig` 拒绝界面传入的 apiKey / apiKeyEnc（只能经 `pptAgentSetConfig`）。
 - 所有解析过程不改动原文件（只读打开，输出写数据目录）；唯一例外是用户手动点击“写入 PPT 备注”（二次确认 + 先备份）。
 - 侧栏结构：解析任务（蓝；任务列表，点击任务后在该任务下方展开“任务详情”菜单，`SCOPED` 视图只显示所选任务 `curTask`：任务概览、解析过程；再次点击收起；不再有任务内的资料库浏览，统一用“所有资料库”）→ 总览分析（绿；智能搜索、总览分析、所有资料库、全部任务与历史、相似分组、标签管理）→ 智能模块（紫；导出篮、黑白底互转、字体统一、智能生成、智能合成〔建设中〕、LLMWiki 炼丹、PPT_Agent〔插件〕）→ 维护（橙；回收站、运行日志、通知管理）→ 帮助指南 → 用户信息（预留）/ ⚙ 设置。新视图要先决定属于“任务范围”还是“全部”，任务范围的接口都接受 `taskId`。
 - 凡是显示统计数字的地方（统计卡片、计数、分类 / 扩展名标签）都要能点击下钻：用 `DrillDialog.jsx` 的 `StatCards` / `app.drill({ key, title, rows | load, show })` 打开文件清单，不要只显示数字。

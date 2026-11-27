@@ -6,7 +6,7 @@ const EFFORTS = [['off', '关闭（更快）'], ['low', '低'], ['high', '高'],
 
 /**
  * 设置 → PPT_Agent（v3.11；v3.15 不默认任何服务商）：复用 DeepSeek Harness 的连接框架，服务商 / 协议（Messages 或 OpenAI 兼容）/ 地址 / 模型由用户选择。
- * “允许连接大模型接口”默认关闭，打开时二次确认（会把文档内容发给接口地址）；开关、调用方式、自动总结改了立即保存；
+ * “允许连接内网大模型”默认关闭，打开时二次确认（会把文档内容发给接口地址）；开关、调用方式、自动总结改了立即保存；
  * 接口地址 / 模型 / API Key / 推理强度 / 超时 / 轮询间隔 / 提示词点“保存”；API Key 只写不读（加密保存，界面只显示是否已保存）。
  */
 export default function PptAgentSettings() {
@@ -35,8 +35,8 @@ export default function PptAgentSettings() {
   };
   const host = (() => { try { return new URL(f.baseURL).host; } catch { return f.baseURL; } })();
   const toggleNet = async (on) => {
-    if (on && !confirm(`允许 PPT_Agent 连接大模型接口？\n\n打开后，PPT_Agent 会把要总结的文档内容（页面标题、正文、讲解词）发送到：\n${host}\n\n其他功能仍不联网；可随时关闭。`)) return;
-    await apply({ allowNetwork: on }, on ? `已允许连接大模型接口（${host}）` : '已关闭大模型接口连接');
+    if (on && !confirm(`允许 PPT_Agent 连接内网大模型？\n\n打开后，PPT_Agent 会把要总结的文档内容（页面标题、正文、讲解词）发送到：\n${host}\n\n其他功能仍不联网；可随时关闭。`)) return;
+    await apply({ allowNetwork: on }, on ? `已允许连接内网大模型（${host}）` : '已关闭内网大模型连接');
   };
   const save = async () => {
     setBusy('save');
@@ -52,7 +52,7 @@ export default function PptAgentSettings() {
     if (!(key.trim() || llm.hasApiKey || local)) { setResult({ ok: false, error: 'API Key：未填写', hint: '请先填写 API Key', checks: [{ item: 'API Key', ok: false, detail: '未填写' }], at: Date.now() }); return; }
     let once = false;
     if (!pa.allowNetwork) {
-      if (!confirm(`测试需要连接大模型接口：\n${host}\n\n只为这次测试连接一次（发送一条“ping”），不会打开“允许连接大模型接口”。继续？`)) return;
+      if (!confirm(`测试需要连接内网大模型：\n${host}\n\n只为这次测试连接一次（发送一条“ping”），不会打开“允许连接内网大模型”。继续？`)) return;
       once = true;
     }
     setBusy('test'); setResult(null);
@@ -67,14 +67,14 @@ export default function PptAgentSettings() {
     <div className="agent-settings plugin-settings">
       <div className="row"><label>联网</label>
         <div className="seg plugin-switch">
-          <button className={pa.allowNetwork ? 'on' : ''} onClick={() => !pa.allowNetwork && toggleNet(true)}>● 允许连接大模型接口</button>
+          <button className={pa.allowNetwork ? 'on' : ''} onClick={() => !pa.allowNetwork && toggleNet(true)}>● 允许连接内网大模型</button>
           <button className={!pa.allowNetwork ? 'on' : ''} onClick={() => pa.allowNetwork && toggleNet(false)}>○ 不联网</button>
         </div>
         {pa.allowNetwork ? <span className="tag warn">会向 {host} 发送文档内容</span> : null}
       </div>
       <div className="row"><label>调用方式</label>
         <div className="seg">
-          <button className={mode === 'llm' ? 'on' : ''} onClick={() => apply({ engine: 'llm' })}>大模型接口</button>
+          <button className={mode === 'llm' ? 'on' : ''} onClick={() => apply({ engine: 'llm' })}>内网大模型</button>
           <button className={mode === 'script' ? 'on' : ''} onClick={() => apply({ engine: 'script' })}>AI 调用脚本</button>
         </div>
         <span className={`tag ${ai.ok ? 'ok' : 'warn'}`}>{ai.ok ? `可用：${ai.model}` : '不可用'}</span>

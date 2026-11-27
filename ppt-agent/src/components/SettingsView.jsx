@@ -10,19 +10,6 @@ import PerfSettings from './PerfSettings';
 import PptAgentSettings from './PptAgentSettings';
 import { LANG_NAMES } from './Panels';
 
-const LLM_PRESETS = [
-  { key: 'deepseek', label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat' },
-  { key: 'qwen', label: '通义千问', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'qwen-plus' },
-  { key: 'kimi', label: 'Kimi', baseUrl: 'https://api.moonshot.cn/v1', model: 'moonshot-v1-8k' },
-  { key: 'glm', label: '智谱 GLM', baseUrl: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4-flash' },
-  { key: 'openai', label: 'OpenAI GPT', baseUrl: 'https://api.openai.com/v1', model: 'gpt-5' },
-  { key: 'claude', label: 'Anthropic Claude', baseUrl: 'https://api.anthropic.com/v1', model: 'claude-opus-5-5' },
-  { key: 'gemini', label: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.5-pro' },
-  { key: 'grok', label: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', model: 'grok-4' },
-  { key: 'mistral', label: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-large-latest' },
-  { key: 'ollama', label: '本地 Ollama', baseUrl: 'http://127.0.0.1:11434/v1', model: 'qwen2.5:7b' },
-];
-
 const SET_TABS = [['general', '常规'], ['ui', '界面与快捷键'], ['mail', '反馈邮件'], ['ai', 'PPT_Agent'], ['data', '目录与数据']];
 const FOCUS_TAB = { watch: 'general', langs: 'general', split: 'general', plugin: 'ai', procs: 'general', perf: 'general', keys: 'ui', mail: 'mail', agent: 'ai', datadir: 'data' };
 const LAST_TAB = { k: null };
@@ -45,7 +32,6 @@ export default function SettingsView({ focus }) {
   const [cfg, setCfg] = useState(null);
   const [eng, setEng] = useState(null);
   const [stats, setStats] = useState(null);
-  const [embProg, setEmbProg] = useState(null);
   const [types, setTypes] = useState([]);
   const [dd, setDd] = useState(null);
   const [newDir, setNewDir] = useState('');
@@ -58,8 +44,6 @@ export default function SettingsView({ focus }) {
   if (!cfg) return null;
   const offline = !!cfg.offlineOnly;
   const set = (patch) => setCfg({ ...cfg, ...patch });
-  const setL = (patch) => setCfg({ ...cfg, llm: { ...cfg.llm, ...patch } });
-  const setE = (patch) => setCfg({ ...cfg, embedding: { ...cfg.embedding, ...patch } });
   const save = async () => { const c = await api.setConfig(cfg); setCfg(c); app.setConfig(c); app.toast('设置已保存'); };
   // 立即生效的小项（鼠标滚轮）：保存后同步本页状态，避免之后“保存设置”用旧值覆盖
   const saveNow = async (patch, msg) => { const c = await api.setConfig(patch); setCfg((cur) => ({ ...cur, ...patch, ...c })); app.setConfig(c); if (msg) app.toast(msg); };
@@ -186,46 +170,9 @@ export default function SettingsView({ focus }) {
           <PptAgentSettings />
         </section>
         <section data-sec="plugin" ref={pluginRef} className={focus === 'plugin' ? 'flash-sec' : ''}>
-          <h3>AI 调用脚本（不联网时可用自己的脚本代替大模型接口）</h3>
+          <h3>AI 调用脚本（不联网时可用自己的脚本代替内网大模型）</h3>
           <PluginSettings />
         </section>
-          {offline && <Notice id="offline-ai-tab2" className="offline-notice">🔒 单机版：下面的其他大模型功能（讲解词生成 / 翻译 / 打标签 / RAG 回答）与语义向量接口暂不可用，已锁定；PPT_Agent 只在打开“允许连接大模型接口”后联网。</Notice>}
-          <fieldset className="settings-lock" disabled={offline}>
-        <section>
-          <h3>其他大模型功能（OpenAI 兼容接口）</h3>
-          <p className="muted">用于：讲解词生成、讲解词翻译（中文 / English / 小语种）、查询的中英文解析与扩展、自动打标签、RAG 回答、转换规则生成。应用中没有内置任何 API Key，所有调用都使用这里的配置；未配置时，讲解词生成（建设中）与翻译不可用，其余功能使用内置双语词表与 TF-IDF，完全离线。</p>
-          <div className="row"><label>服务商</label>
-            <div className="seg small wrap">{LLM_PRESETS.map((pr) => <button key={pr.key} className={cfg.llm.baseUrl === pr.baseUrl ? 'on' : ''} onClick={() => setL({ baseUrl: pr.baseUrl, model: pr.model })} title={pr.baseUrl}>{pr.label}</button>)}</div>
-          </div>
-          <div className="row"><label>启用</label><input type="checkbox" checked={cfg.llm.enabled} onChange={(e) => setL({ enabled: e.target.checked })} /></div>
-          <div className="row"><label>接口地址</label><input className="input wide" value={cfg.llm.baseUrl} onChange={(e) => setL({ baseUrl: e.target.value })} /></div>
-          <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.llm.apiKey} placeholder="在服务商控制台创建的 API Key（本地 Ollama 可留空）" onChange={(e) => setL({ apiKey: e.target.value })} /></div>
-          <div className="row"><label>模型</label><input className="input" value={cfg.llm.model} onChange={(e) => setL({ model: e.target.value })} />
-            <button className="btn" onClick={async () => { try { const r = await api.testLlm(cfg.llm); app.toast(`连接成功（${r.ms}ms）：${r.reply}`); } catch (e) { app.toast('连接失败：' + e.message, 'error'); } }}>测试连接</button></div>
-          <div className="row"><label>用于查询解析</label><input type="checkbox" checked={cfg.llm.useForQuery} onChange={(e) => setL({ useForQuery: e.target.checked })} /></div>
-          <div className="row"><label>用于打标签</label><input type="checkbox" checked={cfg.llm.useForTags} onChange={(e) => setL({ useForTags: e.target.checked })} /><span className="muted small">（解析 / 重算标签时调用，每个文件一次）</span></div>
-          <p className="muted small">修改后点击右上角“保存设置”生效。</p>
-        </section>
-        <section>
-          <h3>语义向量（可选，增强 RAG 召回）</h3>
-          <p className="muted">内置“中英概念哈希向量”离线可用；如需更强的语义召回，可接入 Ollama（推荐 bge-m3，多语言）或 OpenAI 兼容的 embeddings 接口。</p>
-          <div className="row"><label>提供方</label>
-            <select className="input" value={cfg.embedding.provider} onChange={(e) => setE({ provider: e.target.value })}>
-              <option value="none">仅内置（离线）</option><option value="ollama">Ollama</option><option value="openai">OpenAI 兼容</option>
-            </select>
-          </div>
-          {cfg.embedding.provider !== 'none' && <>
-            <div className="row"><label>Base URL</label><input className="input wide" value={cfg.embedding.baseUrl} onChange={(e) => setE({ baseUrl: e.target.value })} /></div>
-            <div className="row"><label>API Key</label><input className="input wide" type="password" value={cfg.embedding.apiKey} onChange={(e) => setE({ apiKey: e.target.value })} /></div>
-            <div className="row"><label>模型</label><input className="input" value={cfg.embedding.model} onChange={(e) => setE({ model: e.target.value })} /></div>
-            <div className="row"><label /><button className="btn" onClick={async () => {
-              await save();
-              const off = window.ppta.on('embedding', setEmbProg);
-              try { const n = await api.buildEmbeddings(false); app.toast(`语义向量生成完成：${n} 页`); } catch (e) { app.toast('生成失败：' + e.message, 'error'); } finally { off(); }
-            }}>为已解析页面生成语义向量</button>{embProg && <span className="muted">{embProg.done}/{embProg.total}</span>}</div>
-          </>}
-        </section>
-          </fieldset>
         </>}
         {tab === 'data' && <>
         <section>

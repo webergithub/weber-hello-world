@@ -118,7 +118,7 @@ const MINOR_DEFAULT = ['ja', 'ko', 'fr', 'de', 'es', 'ru'];
 
 /**
  * 讲解词模块：页签「原讲解词」「生成讲解词」「修正讲解词」（当前采用的版本，可编辑），
- * 每个页签可切换 原文 / 中文 / English / 小语种：缺少的语言自动调用设置中的 Agent 接口翻译，
+ * 每个页签可切换 原文 / 中文 / English / 小语种：缺少的语言自动调用 PPT_Agent 的大模型翻译（v3.16），
  * 译文只保存在应用知识库；用户手动点击“写入 PPT 备注”（二次确认、先备份）时才写回原 PPT。
  */
 export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
@@ -157,7 +157,7 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
     try { const s = await api.updateSlideText(slide.id, { notes: text }); emitSlide(s); setEdit(false); setTab('final'); app.toast(msg); } catch (e) { app.toast('保存失败：' + e.message, 'error'); }
   };
   const showing = lang === 'src' ? base : tr && tr.text ? tr.text : '';
-  const empty = { orig: word ? '（原文档没有批注）' : '（原 PPT 没有讲解词）', ai: '尚未生成。“🤖 自动调用 Agent 生成讲解词”（建设中）需先在“设置 → Agent 接口”中配置 API Key。', final: '（无）' }[tabKey];
+  const empty = { orig: word ? '（原文档没有批注）' : '（原 PPT 没有讲解词）', ai: '尚未生成。“🤖 生成讲解词”使用 PPT_Agent 的大模型（设置 → PPT_Agent），配置 API Key。', final: '（无）' }[tabKey];
   const tabs = [['orig', word ? '原批注' : '原讲解词'], ['ai', `生成讲解词${slide.notes_ai ? '' : '（空）'}`], ['final', `修正讲解词${slide.edited && final !== slide.notes_orig ? ' ✎' : ''}`]];
   return (
     <div className="edit-pane">
@@ -187,14 +187,14 @@ export function NotesBody({ slide, terms = [], unit = '页', tab, setTab }) {
         {lang !== 'src' && tr && tr.same && <span className="muted small">原文即为{LANG_NAMES[lang]}</span>}
       </div>
       {edit ? <textarea className="pane-edit" value={val} onChange={(e) => setVal(e.target.value)} autoFocus />
-        : lang !== 'src' && tr && tr.loading ? <div className="pane-body notes muted">正在调用 Agent 接口翻译为 {LANG_NAMES[lang]}…</div>
-          : lang !== 'src' && tr && tr.error ? <div className="pane-body notes"><div className={`notice ${/单机版/.test(tr.error) ? "" : "danger"}`} style={{ margin: 0 }}>{tr.error}{/Agent 接口/.test(tr.error) && <> <span className="link" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>去设置</span></>}</div></div>
+        : lang !== 'src' && tr && tr.loading ? <div className="pane-body notes muted">正在调用 PPT_Agent 大模型翻译为 {LANG_NAMES[lang]}…</div>
+          : lang !== 'src' && tr && tr.error ? <div className="pane-body notes"><div className={`notice ${/单机版/.test(tr.error) ? "" : "danger"}`} style={{ margin: 0 }}>{tr.error}{/PPT_Agent|大模型/.test(tr.error) && <> <span className="link" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>去设置</span></>}</div></div>
             : <div className="pane-body notes" dangerouslySetInnerHTML={{ __html: showing ? highlight(esc(showing), terms) : `<span class="muted">${empty}</span>` }} />}
     </div>
   );
 }
 
-/** Markdown 模块：预览 / 源码 / 编辑，附“自动调用 Agent 生成讲解词”按钮 */
+/** Markdown 模块：预览 / 源码 / 编辑，附“🤖 生成讲解词”按钮（v3.16 使用 PPT_Agent 的大模型） */
 export function MdBody({ slide, terms = [], onGenerated }) {
   const app = useApp();
   const [mode, setMode] = useState('render');
@@ -208,8 +208,8 @@ export function MdBody({ slide, terms = [], onGenerated }) {
       const s = await api.slideDetail(slide.id);
       emitSlide(s);
       if (onGenerated) onGenerated();
-      app.toast(`Agent 已生成讲解词（${r.source}）`);
-    } catch (e) { app.toast('生成失败：' + e.message, 'error', /Agent 接口/.test(e.message) ? { label: '去设置', run: () => app.go({ type: 'settings', focus: 'agent' }) } : undefined); } finally { setBusy(false); }
+      app.toast(`已生成讲解词（${r.source}）`, 'info', { cat: 'PPT_Agent' });
+    } catch (e) { app.toast('生成失败：' + e.message, 'error', { cat: 'PPT_Agent', label: '去设置', link: { type: 'view', view: { type: 'settings', focus: 'agent' } } }); } finally { setBusy(false); }
   };
   return (
     <div className="edit-pane">
@@ -227,7 +227,7 @@ export function MdBody({ slide, terms = [], onGenerated }) {
           <>
             {slide.md !== slide.md_orig && <button className="btn tiny" onClick={async () => { const s = await api.updateSlideText(slide.id, { md: null }); emitSlide(s); }}>恢复原文</button>}
             <button className="btn tiny" onClick={() => navigator.clipboard.writeText(slide.md || '')}>复制</button>
-            <button className="btn tiny gen-btn" disabled={busy || !!(app.config && app.config.offlineOnly)} onClick={gen} title={app.config && app.config.offlineOnly ? "单机版不联网，暂不可用" : "调用“设置 → Agent 接口”中配置的大模型（如 DeepSeek）根据本页内容生成讲解词，结果显示在“生成讲解词”页签（建设中）"}>{busy ? '生成中…' : <>🤖 自动调用 Agent 生成讲解词 <span className="wip">建设中</span></>}</button>
+            <button className="btn tiny gen-btn" disabled={busy || !(app.config && app.config.ai && app.config.ai.ok)} onClick={gen} title={app.config && app.config.ai && app.config.ai.ok ? app.config.ai.model : '需要在“设置 → PPT_Agent”中配置大模型'}>{busy ? '生成中…' : '🤖 生成讲解词'}</button>
           </>
         )}
       </div>

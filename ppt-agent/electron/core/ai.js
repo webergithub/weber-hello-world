@@ -2,7 +2,7 @@
 // AI 调用模块（v3.9）：统一封装“调用 AI”的方式，供智能总结、智能搜索（查询扩展）、智能生成（需求理解）复用。
 // 引擎（v3.11，设置 → PPT_Agent → 调用方式 config.pptAgent.engine：llm | script，未设置时有生效的脚本用脚本，否则用大模型接口）：
 //   llm    —— PPT_Agent 大模型接口：DeepSeek Harness 的大模型接入层（ppt_agent/llm.js → dsh-llm.cjs），
-//             需要填写 API Key 并打开“允许连接大模型接口”（默认关闭；其他功能仍不联网）；
+//             需要填写 API Key 并打开“允许连接内网大模型”（默认关闭；其他功能仍不联网）；
 //   script —— 设置中的 AI 调用脚本（config.plugins.summary：script / args / timeout / enabled），子进程中异步执行；
 //   fake   —— 测试用本地替身（环境变量 PPTA_FAKE_LLM=1），上面两种都不可用时使用。
 // 脚本约定：输入 JSON 含 task 字段（summarize / expandQuery / generate）与该任务的输入，脚本把结果写入 output
@@ -13,7 +13,7 @@ const path = require('path');
 const runner = require('./plugins/scriptRunner');
 const { PptAgentLlm } = require('./ppt_agent/llm');
 
-const TASKS = { summarize: '文档总结', expandQuery: '查询扩展（智能搜索）', generate: '需求理解（智能生成）', wikiIngest: 'LLMWiki 炼丹', wikiQuery: 'LLMWiki 问答' };
+const TASKS = { summarize: '文档总结', expandQuery: '查询扩展（智能搜索）', generate: '需求理解（智能生成）', wikiIngest: 'LLMWiki 炼丹', wikiQuery: 'LLMWiki 问答', speakerNotes: '生成讲解词', translate: '翻译讲解词', ragAnswer: '资料库问答', convertRules: '转换规则' };
 const isFake = () => process.env.PPTA_FAKE_LLM === '1';
 
 class AiGateway {
@@ -100,6 +100,17 @@ class AiGateway {
   // ---------- 各功能使用的便捷方法（失败时返回 null，不影响调用方的正常流程） ----------
   async summarize(doc, opts) { const r = await this.run('summarize', doc, opts); return r; }
 
+  /** 需要大模型才能完成的功能（讲解词生成、翻译、问答等）：不可用时抛出带原因的错误（指向“设置 → PPT_Agent”） */
+  async require(task, input, opts = {}) {
+    const e = this.engine();
+    if (!e.ok) throw new Error(`${TASKS[task] || task}需要大模型：${e.reason || '请在“设置 → PPT_Agent”中配置并允许连接内网大模型'}`);
+    const r = await this.run(task, input, { timeoutMs: 120000, ...opts });
+    if (!r.ok) throw new Error(`${TASKS[task] || task}失败：${r.error}`);
+    const text = String(r.text || '').trim();
+    if (!text) throw new Error(`${TASKS[task] || task}：大模型没有返回内容`);
+    return { text, model: e.model, engine: e.engine, ms: r.ms };
+  }
+
   async expandQuery(query) {
     if (!this.can('expandQuery')) return null;
     const r = await this.run('expandQuery', { query }, { timeoutMs: 30000 });
@@ -123,6 +134,11 @@ const PROMPTS = {
   expandQuery: { system: '你是检索查询分析助手。把用户的检索输入解析为中英文检索关键词与同义词，只输出 JSON：{"zh":[...],"en":[...],"synonyms":[...]}', maxTokens: 600, user: (input) => String(input.query || '') },
   generate: { system: '把用户对新 PPT 的描述整理为检索用的 JSON：{"keywords":[中英文关键词],"topic":"主题"}，只输出 JSON。', maxTokens: 800, user: (input) => String(input.description || '') },
   // LLMWiki（v3.13）：炼丹 = 把一份原始资料提炼为资料页；问答 = 只基于选出的 Wiki 页面作答并引用页面
+  // v3.16：原“其他大模型功能”（讲解词生成 / 翻译 / RAG 回答 / 转换规则）改为复用 PPT_Agent 的大模型
+  speakerNotes: { system: '你是资深演讲教练。根据幻灯片内容写一段中文讲解词（150~300 字），口语化、条理清楚，先点题再分点讲解，最后一句承上启下。只输出讲解词正文。', maxTokens: 1200, user: (i) => `文件：${i.fileName}\n标题：${i.title}\n页面内容：\n${String(i.text || '').slice(0, 2500)}\n${i.notes ? '原讲解词（可参考）：' + String(i.notes).slice(0, 800) : ''}` },
+  translate: { system: '你是专业的演讲稿翻译。把用户给出的 PPT 讲解词翻译成目标语言，保持口语化与原有分段，专业术语准确，不要增删内容，不要解释。只输出译文。', maxTokens: 4000, user: (i) => `目标语言：${i.langName}\n\n${String(i.text || '').slice(0, 8000)}` },
+  ragAnswer: { system: '你是 PPT 资料库问答助手。只依据给定的检索片段回答，用中文，条理清晰，并在句末用 [编号] 标注出处；资料不足时直接说明。', maxTokens: 2000, user: (i) => `问题：${i.q}\n\n检索片段：\n${(i.contexts || []).map((c, k) => `[${k + 1}] ${c.file} 第 ${c.idx} 页 ${c.title}\n${c.text}${c.notes ? `\n讲解词：${c.notes}` : ''}`).join('\n\n')}` },
+  convertRules: { system: '你是 PPT 配色转换规则助手。根据用户要求修改给定的 JSON 规则，只输出修改后的完整 JSON。颜色使用 6 位十六进制（不带#），null 表示无/透明。', maxTokens: 3000, user: (i) => `当前规则：${JSON.stringify(i.current)}\n修改要求：${i.request}` },
   wikiIngest: { system: '你是 LLM Wiki 的维护者，按下面的 Wiki 规则把一份原始资料提炼为资料页。只依据给定内容，不要编造。只输出 JSON：{"summary":"一句话概要（不超过 60 字）","points":["要点（3~10 条，每条不超过 40 字）"],"entities":["资料中的关键实体 / 概念名称（人名、系统、项目、产品、术语，最多 10 个）"]}', maxTokens: 1500, user: (input) => `# Wiki 规则\n${String(input.schema || '').slice(0, 4000)}\n\n# 原始资料\n${pagesText(input).slice(0, 40000)}` },
   wikiQuery: { system: '你是 LLM Wiki 的问答助手。只根据给定的 Wiki 页面回答问题，用中文 Markdown；引用页面时用 [[页面路径|标题]] 的格式写出来源；页面中没有的信息要明确说明“Wiki 中没有相关内容”，不要编造；不同页面说法冲突时并列列出。', maxTokens: 3000, user: (input) => `${(input.history || []).length ? `# 之前的问答（追问的上下文）\n${input.history.map((h) => `问：${h.q}\n答：${h.a}`).join('\n\n')}\n\n` : ''}# 问题\n${input.question}\n\n# Wiki 页面\n${(input.pages || []).map((p) => `## [[${p.slug}|${p.title}]]\n${p.content}`).join('\n\n').slice(0, 60000)}` },
 };
@@ -142,6 +158,10 @@ function fakeRun(task, input) {
   if (task === 'expandQuery') return JSON.stringify({ zh: [String(input.query || '')], en: [], synonyms: [] });
   if (task === 'generate') return JSON.stringify({ keywords: String(input.description || '').split(/[\s，,、]+/).filter(Boolean), topic: input.description || '' });
   if (task === 'wikiIngest') { const ps = input.pages || []; return JSON.stringify({ summary: `${(input.file && input.file.name) || ''}：共 ${ps.length} 页`, points: ps.slice(0, 5).map((p) => p.title).filter(Boolean), entities: ['测试实体'] }); }
+  if (task === 'speakerNotes') return `这一页讲的是“${input.title || ''}”。`;
+  if (task === 'translate') return `[${input.langName}] ${input.text}`;
+  if (task === 'ragAnswer') return `根据资料：${(input.contexts || []).map((c, k) => `${c.title} [${k + 1}]`).join('；')}`;
+  if (task === 'convertRules') return JSON.stringify(input.current || {});
   if (task === 'wikiQuery') return `关于“${input.question}”：\n\n${(input.pages || []).map((p) => `- 见 [[${p.slug}|${p.title}]]`).join('\n')}`;
   const pages = input.pages || [];
   return `# ${(input.file && input.file.name) || ''} · 总结\n\n## 一句话概要\n共 ${pages.length} 页。\n\n## 核心要点\n${pages.slice(0, 8).map((p) => `- ${p.title}`).join('\n')}\n`;

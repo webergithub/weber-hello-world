@@ -43,7 +43,7 @@ export default function SearchView({ state, setState, taskId, taskName, defaultA
   const [fileFilter, setFileFilter] = useState(null);
   const [cmpSel, setCmpSel] = useState(() => new Set());
   const inputRef = useRef(null);
-  const llmOn = app.config && !app.config.offlineOnly && app.config.llm && app.config.llm.enabled;
+  const llmOn = !!(app.config && app.config.ai && app.config.ai.ok); // v3.16：RAG 回答使用 PPT_Agent 的大模型
   // 查询扩展走 AI 调用模块（AI 脚本勾选“用于智能搜索”，或联网版的大模型接口）
   const aiOn = !!(app.config && app.config.ai && app.config.ai.can && app.config.ai.can.expandQuery);
   const [stats, setStats] = useState(null);
