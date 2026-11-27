@@ -1515,3 +1515,12 @@ fieldset.settings-lock:disabled { opacity: .55; filter: grayscale(.6); pointer-e
 .tag.dir-same { color: var(--fg3); }
 .tag.dir-changed { color: var(--warn-fg, #b45309); border-color: currentColor; }
 .tag.dir-new { color: var(--accent); border-color: currentColor; }
+
+/* v3.13 字体统一 */
+.fu-body { gap: 10px; }
+.fu-file { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); }
+.fu-form { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--bg2); border: 1px solid var(--line); border-radius: var(--radius); }
+.fu-form .row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.fu-form .row > label:first-child { width: 48px; color: var(--fg2); }
+.fu-form .fu-row .input:not(.split-par) { width: 160px; }
+.fu-tables { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }

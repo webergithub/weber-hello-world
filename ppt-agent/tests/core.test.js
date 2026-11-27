@@ -1176,3 +1176,30 @@ test('文件夹特征值增量（v3.12）：未变化的文件夹整体跳过；
     assert.strictEqual(tree.nodes.find((n) => n.path === root).files, 5);
   } finally { svc.close(); }
 });
+
+test('字体统一：标题 / 正文字体与字号统一，另存新文件且原文件不变', async () => {
+  const { analyzeFonts, unifyFonts } = require('../electron/core/fontunify');
+  const { parsePptx } = require('../electron/core/pptx');
+  const f = P('机场运营', '航班过站保障Turnaround_白底.pptx');
+  const before = fs.readFileSync(f);
+  const a = await analyzeFonts(f);
+  assert.ok(a.slides > 1 && a.body.runs > 0);
+  const out = path.join(tmp, 'fu.pptx');
+  const r = await unifyFonts(f, out, { title: { latin: 'Arial', ea: '黑体', size: 30 }, body: { latin: 'Arial', ea: '微软雅黑', size: 16 } });
+  assert.ok(r.stats.runs > 0 && r.stats.titleShapes > 0);
+  assert.ok(before.equals(fs.readFileSync(f)), '原文件不变');
+  const b = await analyzeFonts(out);
+  assert.deepStrictEqual(Object.keys(b.title.fonts), ['黑体']);
+  assert.deepStrictEqual(Object.keys(b.title.sizes), ['30 磅']);
+  assert.deepStrictEqual(Object.keys(b.body.fonts), ['微软雅黑']);
+  assert.deepStrictEqual(Object.keys(b.body.sizes), ['16 磅']);
+  assert.strictEqual(b.theme.minor.latin, 'Arial');
+  const back = await parsePptx(out, { mediaDir: tmp });
+  assert.strictEqual(back.slides.length, a.slides, '生成的文件可正常解析');
+  // 只改字号：字体保持
+  const out2 = path.join(tmp, 'fu2.pptx');
+  await unifyFonts(f, out2, { body: { size: 20 }, masters: false });
+  const c = await analyzeFonts(out2);
+  assert.deepStrictEqual(Object.keys(c.body.sizes), ['20 磅']);
+  assert.deepStrictEqual(c.title.sizes, a.title.sizes);
+});

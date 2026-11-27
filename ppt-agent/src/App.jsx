@@ -15,6 +15,7 @@ import BasketView from './components/BasketView';
 import ConvertView from './components/ConvertView';
 import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
+import FontUnifyView from './components/FontUnifyView';
 import PluginView from './components/PluginView';
 import BusyHint from './components/BusyHint';
 import EtaLine from './components/Eta';
@@ -393,6 +394,7 @@ export default function App() {
   const smartNav = [
     { key: 'basket', icon: '🧺', label: '导出篮', badge: basket.length || '' },
     { key: 'convert', icon: '🌓', label: 'PPT 黑白底互转' },
+    { key: 'fontunify', icon: '🔤', label: '字体统一' },
     { key: 'generate', icon: '✨', label: '智能生成', wip: true },
     { key: 'merge', icon: '🧬', label: '智能合成', wip: true },
     { key: 'plugins', icon: '🤖', label: 'PPT_Agent', plugin: true }, // 插件位（v3.5）；v3.11 PPT_Agent：大模型解析入库
@@ -527,6 +529,7 @@ export default function App() {
           {view.type === 'notesreview' && <NotesReviewView />}
           {view.type === 'generate' && <GenerateView state={genState} setState={setGenState} />}
           {view.type === 'merge' && <MergeView />}
+          {view.type === 'fontunify' && <FontUnifyView />}
           {view.type === 'plugins' && <PluginView />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}

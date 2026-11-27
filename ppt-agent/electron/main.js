@@ -406,6 +406,8 @@ app.whenReady().then(async () => {
     convertHistory: () => service.convertHistory(),
     listPptx: (paths) => service.listPptx(paths),
     convertFile: (src, opts) => service.convertFile(src, opts),
+    fontAnalyze: (src) => service.fontAnalyze(src),
+    fontUnify: (src, opts) => service.fontUnify(src, opts),
     selectFiles: async (title, kind) => {
       // kind = 'docs'：PPT / Word / PDF 都可选（智能合成）；默认只选 PPT
       const filters = kind === 'docs' ? [{ name: 'PPT / Word / PDF', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt', 'docx', 'docm', 'doc', 'pdf'] }] : [{ name: 'PowerPoint', extensions: ['pptx', 'pptm', 'ppsx', 'potx', 'ppt'] }];

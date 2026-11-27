@@ -1572,6 +1572,29 @@ class AgentService extends EventEmitter {
     return result;
   }
 
+  // ---------- 字体统一（v3.13）：导入一个 PPT，统一标题 / 正文字体与字号，另存为 *_字体统一.pptx（原文件只读） ----------
+  async fontAnalyze(src) {
+    if (!fs.existsSync(src)) throw new Error('文件不存在');
+    if (/\.ppt$/i.test(src)) throw new Error('旧版 .ppt 请先用 PowerPoint 另存为 .pptx');
+    const r = await require('./fontunify').analyzeFonts(src);
+    const st = fs.statSync(src);
+    return { ...r, path: src, name: path.basename(src), size: st.size, mtime: Math.round(st.mtimeMs) };
+  }
+  async fontUnify(src, opts = {}) {
+    const log = logger.child('fontunify');
+    if (!fs.existsSync(src)) throw new Error('文件不存在');
+    if (/\.ppt$/i.test(src)) throw new Error('旧版 .ppt 请先用 PowerPoint 另存为 .pptx');
+    const ext = path.extname(src), base = path.basename(src, ext);
+    const dir = opts.outDir && fs.existsSync(opts.outDir) ? opts.outDir : path.dirname(src);
+    let out = path.join(dir, `${base}_字体统一${ext}`);
+    for (let k = 2; fs.existsSync(out) || out === src; k++) out = path.join(dir, `${base}_字体统一 (${k})${ext}`);
+    const t0 = Date.now();
+    const clean = (x = {}) => ({ latin: String(x.latin || '').trim(), ea: String(x.ea || '').trim(), size: Number(x.size) > 0 ? Math.min(400, Number(x.size)) : 0 });
+    const r = await require('./fontunify').unifyFonts(src, out, { title: clean(opts.title), body: clean(opts.body), tables: opts.tables !== false, masters: opts.masters !== false });
+    log.info(`字体统一 ${src} → ${out}（${r.stats.slides} 页，修改 ${r.stats.runs} 处，${Date.now() - t0}ms）`);
+    return { ...r, ms: Date.now() - t0 };
+  }
+
   // ---------- 按文件 / 文件夹批量转换（整份 PPT）：原文件只读，结果另存 ----------
   /** 列出若干文件 / 文件夹中的 PPT（递归，跳过 Office 临时文件与本工具数据目录） */
   listPptx(paths) {
