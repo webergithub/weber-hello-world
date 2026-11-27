@@ -48,7 +48,7 @@ function pageTags(kw, df, N) {
  * withWord：同时关联 Word 章节与 PPT 页（设置中同时选择了 PPT 与 Word）
  * 返回 [{ a, b, score, kind: 'ppt' | 'word'（b 的类型）, reasons }]，a 为推荐给谁
  */
-async function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore = 0.32, preK = 60 } = {}) {
+async function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, minScore = 0.32, preK = 60, onProgress = null } = {}) {
   const tk = ticker();
   const N = slides.length;
   const tagIdx = new Map();
@@ -60,21 +60,32 @@ async function computeLinks(slides, { withWord = false, pptK = 8, wordK = 6, min
     if (s._nt.length >= 4) { if (!titleIdx.has(s._nt)) titleIdx.set(s._nt, []); titleIdx.get(s._nt).push(i); }
   });
   // 过于常见的标签 / 页标题（如“目录”“谢谢”）不参与召回：上万页时会退化成两两比较
-  const cap = Math.min(2000, Math.max(300, Math.round(N * 0.05)));
+  // v3.12.1：每个标签最多看与本页相邻的 400 页、每页总共最多看 BUDGET 个候选（稀有标签优先），几十万页时也是线性时间
+  const cap = Math.min(400, Math.max(200, Math.round(N * 0.05)));
+  const BUDGET = 1500;
   const idf = (t) => Math.log(1 + N / (tagIdx.get(t).length));
   const out = [];
   for (let i = 0; i < N; i++) {
     { const p = tk(); if (p) await p; }
+    if (onProgress && (i & 1023) === 0) onProgress(i, N);
     const s = slides[i];
     // Word / PDF 都算“文档”：文档之间不互相推荐，文档 ↔ PPT 仅在同时启用两类时关联
     const sDoc = isDoc(s);
     const allow = (o) => o.file_id !== s.file_id && (sDoc ? withWord && !isDoc(o) : !isDoc(o) || withWord);
     const cand = new Map();
-    for (const t of s._tags) {
-      const post = tagIdx.get(t);
-      if (post.length > cap) continue;
+    let budget = BUDGET;
+    for (const t of [...s._tags].sort((a, b) => tagIdx.get(a).length - tagIdx.get(b).length)) {
+      if (budget <= 0) break;
+      let post = tagIdx.get(t);
+      if (post.length > cap) {
+        // 很常见的标签：只看与本页相邻（同一批 / 同一文件夹先后解析）的 cap 页
+        let lo = 0, hi = post.length;
+        while (lo < hi) { const m = (lo + hi) >> 1; if (post[m] < i) lo = m + 1; else hi = m; }
+        const from = Math.max(0, Math.min(post.length - cap, lo - (cap >> 1)));
+        post = post.slice(from, from + cap);
+      }
       const w = idf(t);
-      for (const j of post) if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + w);
+      for (const j of post) { if (--budget < 0) break; if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + w); }
     }
     const sameT = s._nt.length >= 4 ? titleIdx.get(s._nt) || [] : [];
     if (sameT.length <= cap) for (const j of sameT) if (j !== i && allow(slides[j])) cand.set(j, (cand.get(j) || 0) + 3);

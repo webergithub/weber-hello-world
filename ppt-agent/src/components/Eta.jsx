@@ -29,6 +29,14 @@ export default function EtaLine({ eta, compact = false, unit = '个' }) {
   const elapsed = (eta.elapsed || 0) + since;
   const remaining = eta.remainingMs === null || eta.remainingMs === undefined ? null : Math.max(0, eta.remainingMs - since);
   const guess = eta.paused ? '已暂停' : remaining === null ? '正在估算…' : fmtGuess(remaining);
+  // 文件都处理完后的收尾计算（v3.12.1）：显示阶段与进度，不再显示“预计剩余不到 1 分钟”
+  if (eta.post) {
+    const p = eta.post;
+    const pct = p.total ? Math.round((p.done / p.total) * 100) : null;
+    const txt = `收尾计算 ${p.step}/${p.steps}：${p.label}${pct !== null ? ` ${pct}%` : '…'}`;
+    if (compact) return <span className="eta-compact" title={`已用 ${fmtSpan(elapsed)}`}>{txt}</span>;
+    return <span className="eta-line"><span>已用 <b>{fmtSpan(elapsed)}</b></span><span><b>{txt}</b></span></span>;
+  }
   if (compact) return <span className="eta-compact" title={`已用 ${fmtSpan(elapsed)}`}>{remaining === null ? '估算中' : `剩余${guess.replace(/^约 /, '约')}`}</span>;
   return (
     <span className="eta-line">

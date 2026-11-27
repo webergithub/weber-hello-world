@@ -700,6 +700,12 @@ class AgentService extends EventEmitter {
     const explicit = roots && !Array.isArray(roots) ? roots : null;
     if (explicit) roots = null;
     const fullDisk = !!roots;
+    // v3.12.1：总任务自己执行（不再拆分）时，旧版本拆分出的子任务退役（软删除，解析历史保留），
+    // 否则任务统计会把旧子任务上一轮的记录也算进来（同一个文件算两次），总任务的数量也会被子任务汇总覆盖
+    if (!task.parent_id && !explicit && !resume && !ro.scanOnly) {
+      const kids = this.store.children(id);
+      if (kids.length) { for (const c of kids) this.store.deleteTask(c.id); log.info(`${tag} 旧版本拆分的 ${kids.length} 个子任务已合并回总任务（解析历史保留）`); }
+    }
     const engines = await this.office.detect();
     let files;
     if (resume) {
@@ -1079,8 +1085,10 @@ class AgentService extends EventEmitter {
     // 分片计算：每 25ms 让出一次事件循环，上万个文件时界面仍可操作
     const tk = ticker();
     let tagEmitAt = 0;
+    let fi = 0;
     for (const f of files) {
       { const p = tk(); if (p) await p; }
+      if ((++fi & 127) === 0) this.postPhase(taskId, '生成标签与分类', fi, files.length);
       const slides = this.store.slidesOf(f.id);
       let llmTags = (f.meta && f.meta.llmTags) || [];
       if (client && !llmTags.length) {
@@ -1101,18 +1109,22 @@ class AgentService extends EventEmitter {
     }
     log.info(`${tag} 已为 ${files.length} 个文件生成标签与分类（${Date.now() - t0}ms）`);
     const t1 = Date.now();
+    this.postPhase(taskId, '相似分组', 0, 0, true);
     const groups = await this.computeGroupsNow();
+    this.postPhase(taskId, '黑白底对应页', 0, 0, true);
     const slideVecs = await this.store.slideVectorsAsync();
     const pairs = await computePairs(slideVecs, groups);
     this.store.replacePairs(pairs);
     log.info(`${tag} 相似分组 ${groups.length} 组，黑白底对应页 ${pairs.length} 对（${Date.now() - t1}ms）`);
     await this.computeRelations(log, tag, taskId);
+    if (this.postInfo) this.postInfo.delete(taskId);
     this.search.invalidate();
   }
 
   /** 页面级标签（每页 8 个）+ 页面相互关联（相似 PPT 页；同时选择 Word 时关联 Word 章节与 PPT 页） */
   async computeRelations(log = this.log, tag = '', taskId = null) {
     const t0 = Date.now();
+    this.postPhase(taskId, '页面关键词与标签', 0, 0, true);
     const rows = await this.store.relationRowsAsync();
     let fresh = 0;
     for (let i = 0; i < rows.length; i++) {
@@ -1131,7 +1143,7 @@ class AgentService extends EventEmitter {
     if (changed.length) await this.store.setSlideKwTagsAsync(changed);
     const types = this.config.docTypes || ['ppt'];
     const withWord = types.includes('ppt') && (types.includes('word') || types.includes('pdf'));
-    const links = await computeLinks(rows, { withWord });
+    const links = await computeLinks(rows, { withWord, onProgress: (i, n) => this.postPhase(taskId, '页面关联', i, n) });
     await this.store.replaceLinksAsync(links);
     const nPpt = links.filter((l) => l.kind === 'ppt').length, nWord = links.length - nPpt;
     const pages = new Set(links.map((l) => l.a)).size;
@@ -1243,7 +1255,8 @@ class AgentService extends EventEmitter {
     const elapsed = t.started_at ? now - t.started_at : dt;
     const left = Math.max(0, t.total - done);
     const remainingMs = rate ? Math.round(left / rate) : left === 0 ? 0 : null;
-    const eta = { elapsed, remainingMs, totalMs: remainingMs === null ? null : elapsed + remainingMs, rate: rate ? Math.round(rate * 100000) / 100 : 0, done, total: t.total };
+    const post = this.postInfo && this.postInfo.get(t.id);
+    const eta = { elapsed, remainingMs, totalMs: remainingMs === null ? null : elapsed + remainingMs, rate: rate ? Math.round(rate * 100000) / 100 : 0, done, total: t.total, ...(post ? { post: { label: post.label, done: post.done, total: post.total, step: post.step, steps: post.steps } } : {}) };
     this.etaLast.set(t.id, eta);
     return eta;
   }
@@ -1262,7 +1275,8 @@ class AgentService extends EventEmitter {
   async taskDetail(id) {
     const task = this.store.getTask(id);
     if (!task) return null;
-    const files = await this.store.taskFilesLiteAsync(id); // 精简行、分页读取，避免上万条记录拖慢界面
+    // 精简行、分页读取，避免上万条记录拖慢界面；同一个文件只按最后一次处理结果统计（v3.12.1）
+    const files = [...new Map((await this.store.taskFilesLiteAsync(id)).map((f) => [f.link_path, f])).values()];
     const parsedIds = [...new Set(files.filter((f) => f.id && (f.status === 'parsed')).map((f) => f.id))];
     const st = { files: files.length, parsed: 0, skipped: 0, duplicate: 0, failed: 0, slides: 0, notes: 0, videos: 0, dark: 0, light: 0, size: 0, hidden: 0, subtitles: 0, byExt: {}, byCategory: {} };
     for (const f of files) {
@@ -2286,6 +2300,21 @@ class AgentService extends EventEmitter {
     if (this.onReleaseMemory) { try { this.onReleaseMemory(); } catch { /* ignore */ } }
     forceGc();
     this.log.warn(`内存占用超过上限，已释放检索 / 分组缓存`);
+  }
+
+  /**
+   * 收尾计算进度（v3.12.1）：文件都处理完后的全库计算（标签 / 相似分组 / 黑白底对应 / 页面关联）可能要几分钟，
+   * 记在 postInfo 中随任务事件推给界面（预计时间那一行改为显示“收尾计算：阶段 进度”），不再停在 100% 像假死。
+   */
+  postPhase(taskId, label, done = 0, total = 0, force = false) {
+    if (!taskId) return;
+    if (!this.postInfo) this.postInfo = new Map();
+    const now = Date.now();
+    const prev = this.postInfo.get(taskId);
+    if (!force && prev && prev.label === label && now - (prev.at || 0) < 500) { prev.done = done; prev.total = total; return; }
+    const step = ['生成标签与分类', '相似分组', '黑白底对应页', '页面关键词与标签', '页面关联'].indexOf(label);
+    this.postInfo.set(taskId, { label, done, total, at: now, step: step + 1, steps: 5 });
+    this.emitTask(taskId, { current: `收尾计算（${step + 1}/5）：${label}${total ? ` ${done}/${total}` : ''}` });
   }
 
   /** 大文件锁：同一时间只解析一个大文件 */
