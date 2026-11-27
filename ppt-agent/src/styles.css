@@ -1627,3 +1627,60 @@ tr.row-warn td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .at-checks > div { display: flex; gap: 6px; align-items: baseline; }
 .at-checks .ok > span:first-child { color: var(--ok); }
 .at-checks .bad > span:first-child { color: var(--danger); }
+
+/* v3.16 炼丹过程 */
+.btn.danger-outline { border-color: var(--danger); color: var(--danger); }
+.wiki-ingest { display: flex; flex-direction: column; gap: 10px; flex: 1; min-height: 0; }
+.wiki-feed { flex: 1; min-height: 220px; display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); }
+.wf-head { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.wf-list { flex: 1; overflow: auto; padding: 6px 4px; font-size: 12.5px; }
+.wf-row { display: grid; grid-template-columns: 74px 22px 1fr; gap: 4px; padding: 3px 8px; border-radius: 6px; align-items: baseline; }
+.wf-row:hover { background: var(--bg3); }
+.wf-time { color: var(--fg3); font-variant-numeric: tabular-nums; }
+.wf-row.lv-debug .wf-text { color: var(--fg2); }
+.wf-row.lv-warn { background: color-mix(in srgb, var(--warn) 8%, transparent); }
+.wf-row.lv-error { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.wf-row.k-write .wf-text, .wf-row.k-done .wf-text { font-weight: 600; }
+.wf-row.k-write { border-bottom: 1px dashed var(--line); padding-bottom: 6px; margin-bottom: 3px; }
+.wf-detail { margin: 4px 0 2px; padding: 6px 8px; background: var(--bg); border-radius: 6px; white-space: pre-wrap; font-size: 12px; color: var(--fg2); }
+/* v3.16 问答 */
+.qa { display: grid; grid-template-columns: 270px 1fr; gap: 0; flex: 1; min-height: 0; border: 1px solid var(--line); border-radius: var(--radius-lg, 12px); overflow: hidden; background: var(--bg2); }
+.qa-side { display: flex; flex-direction: column; gap: 8px; padding: 10px; border-right: 1px solid var(--line); background: var(--bg); min-height: 0; }
+.qa-new { width: 100%; }
+.qa-filter { align-self: stretch; display: flex; }
+.qa-filter button { flex: 1; }
+.qa-list { flex: 1; overflow: auto; margin: 0 -4px; }
+.qa-empty { padding: 16px 8px; text-align: center; }
+.qa-group { font-size: 11px; color: var(--fg3); padding: 8px 8px 4px; }
+.qa-item { position: relative; padding: 7px 10px; border-radius: 8px; cursor: pointer; margin: 0 4px 2px; }
+.qa-item:hover { background: var(--bg3); }
+.qa-item.on { background: var(--accent-soft, var(--bg3)); box-shadow: inset 3px 0 0 var(--accent); }
+.qa-item-t { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 44px; }
+.qa-item-m { margin-top: 2px; }
+.qa-item-ops { position: absolute; right: 6px; top: 6px; display: none; gap: 2px; }
+.qa-item:hover .qa-item-ops { display: flex; }
+.qa-main { display: flex; flex-direction: column; min-height: 0; }
+.qa-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.qa-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qa-body { flex: 1; overflow: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 18px; }
+.qa-welcome { margin: auto; text-align: center; max-width: 640px; display: flex; flex-direction: column; gap: 8px; align-items: center; }
+.qa-welcome-t { font-size: 20px; font-weight: 600; }
+.qa-sugg { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-top: 10px; }
+.qa-chip { border: 1px solid var(--line); background: var(--bg); color: var(--fg); border-radius: 999px; padding: 6px 12px; cursor: pointer; font-size: 13px; }
+.qa-chip:hover { border-color: var(--accent); color: var(--accent); }
+.qa-turn { display: flex; flex-direction: column; gap: 10px; }
+.qa-q { display: flex; justify-content: flex-end; }
+.qa-bubble { max-width: 75%; background: var(--accent); color: #fff; padding: 8px 14px; border-radius: 14px 14px 4px 14px; white-space: pre-wrap; line-height: 1.55; }
+.qa-a { max-width: 92%; background: var(--bg); border: 1px solid var(--line); border-radius: 4px 14px 14px 14px; padding: 10px 16px; box-shadow: var(--sh-sm); }
+.qa-a-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.qa-avatar { width: 24px; height: 24px; border-radius: 50%; background: var(--m-smart, var(--accent)); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 13px; }
+.qa-thinking { color: var(--fg2); display: flex; align-items: center; gap: 8px; }
+.qa-cites { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
+.qa-cite { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--bg3); cursor: pointer; }
+.qa-cite b { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 10px; display: inline-flex; align-items: center; justify-content: center; }
+.qa-cite:hover { background: var(--bg4); }
+.qa-input { display: flex; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); align-items: flex-end; background: var(--bg2); }
+.qa-input textarea { flex: 1; resize: none; min-height: 44px; max-height: 160px; }
+.wiki-filter { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg2); }
+.wiki-filter textarea { min-height: 120px; font-size: 13px; }
+.wiki-filter .boiler { display: flex; flex-wrap: wrap; gap: 4px; max-height: 80px; overflow: auto; }

@@ -133,7 +133,7 @@ function IngestPanel({ st, onBrowse, onOpen, refresh }) {
           {!st.ai.ok && <button className="btn ghost small" onClick={() => app.go({ type: 'settings', focus: 'agent' })}>⚙ PPT_Agent 设置</button>}
         </div>
         <div className="row"><label />
-          {st.job ? <button className="btn" onClick={() => api.wikiCancel()}>⏹ 中止</button>
+          {st.job ? <button className="btn danger-outline" disabled={st.job.cancelling} onClick={() => api.wikiCancel().then(refresh)}>{st.job.cancelling ? '正在中止…' : '⏹ 中止'}</button>
             : <>
               <button className="btn primary" disabled={!c.pending} onClick={() => start(false)}>⚗ 开始炼丹（{c.pending}）</button>
               <button className="btn" disabled={!c.candidates} onClick={() => start(true)}>↻ 全部重新炼化</button>
@@ -149,6 +149,7 @@ function IngestPanel({ st, onBrowse, onOpen, refresh }) {
           </div>
         )}
       </div>
+      <IngestFeed feed={st.feed || []} job={st.job} onOpen={onOpen} />
     </div>
   );
 }
@@ -211,74 +212,116 @@ function SourceFileBar({ text }) {
   );
 }
 
+const ASK_MEMO = { threadId: null, filter: 'all', q: '' };
+const dayLabel = (t) => { const d = new Date(t), n = new Date(); const k = (x) => x.toDateString(); if (k(d) === k(n)) return '今天'; const y = new Date(n); y.setDate(n.getDate() - 1); if (k(d) === k(y)) return '昨天'; if (n - d < 7 * 864e5) return '最近 7 天'; return '更早'; };
+/**
+ * 问答（v3.16 重新设计）：左侧“历史 / 归档”会话列表（搜索、按日期分组、归档 / 删除），右侧对话区（问题气泡、答案卡片、
+ * 引用页面、追问），底部输入框（Enter 发送、Shift + Enter 换行）；归档 = 把整个会话写成 Wiki 问答页。
+ */
 function AskPanel({ onOpen }) {
   const app = useApp();
-  const [q, setQ] = useState(MEMO.q);
-  const [res, setRes] = useState(MEMO.ask);
-  const [busy, setBusy] = useState(false);
-  const [hist, setHist] = useState([]);
-  const [sel, setSel] = useState(() => new Set());
-  const loadHist = () => api.wikiQueries().then(setHist).catch(() => {});
-  useEffect(() => { loadHist(); if (MEMO.autoAsk) { const x = MEMO.autoAsk; MEMO.autoAsk = null; ask(x); } }, []);
-  const ask = async (text) => {
-    const qq = String(text || q).trim();
-    if (!qq) return;
-    setBusy(true); MEMO.q = qq; setQ(qq);
-    try { const r = await api.wikiQuery(qq); MEMO.ask = r; setRes(r); loadHist(); } catch (e) { app.toast(e.message, 'error', { cat: 'LLMWiki' }); } finally { setBusy(false); }
+  const [threads, setThreads] = useState([]);
+  const [filter, setFilterS] = useState(ASK_MEMO.filter);
+  const [kw, setKw] = useState(ASK_MEMO.q);
+  const [tid, setTidS] = useState(ASK_MEMO.threadId);
+  const [thread, setThread] = useState(null);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState('');
+  const [suggest, setSuggest] = useState([]);
+  const bodyRef = React.useRef(null);
+  const setTid = (x) => { ASK_MEMO.threadId = x; setTidS(x); };
+  const loadThreads = () => api.wikiThreads({ archived: filter === 'archived' ? true : null, q: kw }).then(setThreads).catch(() => {});
+  const loadThread = (id) => (id ? api.wikiThread(id).then((t) => { setThread(t); if (!t) setTid(null); }) : Promise.resolve(setThread(null)));
+  useEffect(() => { loadThreads(); }, [filter, kw]);
+  useEffect(() => { loadThread(tid); }, [tid]);
+  useEffect(() => { api.wikiExplore().then((d) => setSuggest((d && d.questions) || [])).catch(() => {}); }, []);
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight; }, [thread, busy]);
+  const ask = async (text, newThread = false) => {
+    const q = String(text || '').trim();
+    if (!q || busy) return;
+    setBusy(q); setInput('');
+    try {
+      const r = await api.wikiQuery(q, { threadId: newThread ? null : tid });
+      setTid(r.thread_id); await loadThread(r.thread_id); loadThreads();
+    } catch (e) { app.toast(e.message, 'error', { cat: 'LLMWiki' }); setInput(q); } finally { setBusy(''); }
   };
-  const save = async (id) => { try { const s = await api.wikiSaveQuery(id); app.toast('已存为 Wiki 页面', 'info', { cat: 'LLMWiki' }); loadHist(); if (res && res.id === id) { const r = { ...res, slug: s }; MEMO.ask = r; setRes(r); } } catch (e) { app.toast(e.message, 'error'); } };
-  const cols = [
-    { key: 'q', label: '问题', render: (r) => <span className="link" onClick={() => { const x = { ...r }; MEMO.ask = x; MEMO.q = r.q; setRes(x); setQ(r.q); }}>{r.q}</span> },
-    { key: 'pages', label: '引用页面', type: 'number', sort: (r) => r.pages.length, render: (r) => r.pages.length },
-    { key: 'engine', label: '方式', filterValue: (r) => r.engine },
-    { key: 'slug', label: '已存为页面', sort: (r) => (r.slug ? 1 : 0), filterValue: (r) => (r.slug ? '是' : '否'), render: (r) => (r.slug ? <span className="link" onClick={() => onOpen(r.slug)}>查看</span> : <button className="btn tiny" onClick={() => save(r.id)}>存为页面</button>) },
-    { key: 'at', label: '时间', type: 'date', render: (r) => fmtTime(r.at) },
-  ];
+  useEffect(() => { if (MEMO.autoAsk) { const x = MEMO.autoAsk; MEMO.autoAsk = null; ask(x, true); } }, []);
+  const archive = async (id, on) => {
+    try { const t = await api.wikiArchive(id, on); app.toast(on ? '已归档到 Wiki（问答页）' : '已取消归档', 'info', { cat: 'LLMWiki' }); if (tid === id) setThread(t); loadThreads(); } catch (e) { app.toast(e.message, 'error'); }
+  };
+  const remove = async (id) => { if (!confirm('删除这个会话？已归档的会同时删除对应的 Wiki 问答页。')) return; await api.wikiDeleteThreads([id]); if (tid === id) { setTid(null); setThread(null); } loadThreads(); };
+  const copy = (text) => { try { navigator.clipboard.writeText(text); app.toast('已复制', 'info', { cat: 'LLMWiki' }); } catch { /* ignore */ } };
+  const groups = [];
+  for (const t of threads) { const g = dayLabel(t.last); if (!groups.length || groups[groups.length - 1][0] !== g) groups.push([g, []]); groups[groups.length - 1][1].push(t); }
   return (
-    <div className="wiki-ask">
-      <div className="wiki-ask-bar">
-        <input className="input grow" value={q} placeholder="向 Wiki 提问" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && ask()} />
-        <button className="btn primary" disabled={busy || !q.trim()} onClick={() => ask()}>{busy ? '思考中…' : '💬 提问'}</button>
-      </div>
-      {res && (
-        <div className="wiki-answer">
-          <div className="wiki-answer-head"><b>{res.q}</b><span className="tag">{res.engine}</span><div className="spacer" />{res.slug ? <button className="btn small ghost" onClick={() => onOpen(res.slug)}>📖 查看页面</button> : <button className="btn small" onClick={() => save(res.id)}>💾 存为 Wiki 页面</button>}</div>
-          <Md text={res.answer} onLink={onOpen} />
-          {res.pages.length > 0 && <div className="wiki-back"><h4>引用页面</h4>{res.pages.map((p) => <span key={p.slug} className="link wiki-link" onClick={() => onOpen(p.slug)}>{p.title}</span>)}</div>}
+    <div className="qa">
+      <aside className="qa-side">
+        <button className="btn primary qa-new" onClick={() => { setTid(null); setThread(null); }}>＋ 新的提问</button>
+        <input className="input" placeholder="🔎 搜索历史问答" value={kw} onChange={(e) => { ASK_MEMO.q = e.target.value; setKw(e.target.value); }} />
+        <div className="seg qa-filter">{[['all', '🕘 历史'], ['archived', '📦 归档']].map(([k, l]) => <button key={k} className={filter === k ? 'on' : ''} onClick={() => { ASK_MEMO.filter = k; setFilterS(k); }}>{l}</button>)}</div>
+        <div className="qa-list">
+          {!threads.length && <div className="muted small qa-empty">{filter === 'archived' ? '还没有归档的问答' : '还没有提问过'}</div>}
+          {groups.map(([g, list]) => (
+            <div key={g}>
+              <div className="qa-group">{g}</div>
+              {list.map((t) => (
+                <div key={t.id} className={`qa-item ${t.id === tid ? 'on' : ''}`} onClick={() => setTid(t.id)}>
+                  <div className="qa-item-t">{t.archived ? <span title="已归档">📦 </span> : null}{t.title}</div>
+                  <div className="qa-item-m muted small">{t.turns > 1 ? `${t.turns} 轮 · ` : ''}{fmtTime(t.last)}</div>
+                  <div className="qa-item-ops">
+                    <button className="icon-btn" title={t.archived ? '取消归档' : '归档到 Wiki'} onClick={(e) => { e.stopPropagation(); archive(t.id, !t.archived); }}>{t.archived ? '↩' : '📦'}</button>
+                    <button className="icon-btn" title="删除" onClick={(e) => { e.stopPropagation(); remove(t.id); }}>🗑</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ))}
         </div>
-      )}
-      <DataTable id="wikiQueries" columns={cols} rows={hist} rowKey={(r) => r.id} selectable selected={sel} onSelect={setSel}
-        actions={<button className="btn small" disabled={!sel.size} onClick={() => confirm(`删除所选的 ${sel.size} 条问答？已存为页面的会同时删除页面。`) && api.wikiDeleteQueries([...sel]).then(() => { setSel(new Set()); loadHist(); })}>🗑 删除所选</button>} />
-    </div>
-  );
-}
-
-function LintPanel({ onOpen, busy }) {
-  const app = useApp();
-  const [r, setR] = useState(MEMO.lint);
-  const [running, setRunning] = useState(false);
-  const run = async () => { setRunning(true); try { const x = await api.wikiLint(); MEMO.lint = x; setR(x); } catch (e) { app.toast(e.message, 'error'); } finally { setRunning(false); } };
-  useEffect(() => { if (!r) run(); }, []);
-  const fix = async (kind) => {
-    setRunning(true);
-    try { const x = await api.wikiFix([kind]); MEMO.lint = x.lint; setR(x.lint); app.toast(`已修复：${LINT_LABEL[kind]}`, 'info', { cat: 'LLMWiki' }); } catch (e) { app.toast(e.message, 'error'); } finally { setRunning(false); }
-  };
-  const cols = [
-    { key: 'kind', label: '问题', className: 'nowrap', sort: (i) => i.kind, filterValue: (i) => LINT_LABEL[i.kind], render: (i) => <span className={`tag ${i.level === 'warn' ? 'warn' : ''}`}>{LINT_LABEL[i.kind]}</span> },
-    { key: 'title', label: '页面', render: (i) => (i.slug ? <span className="link" onClick={() => onOpen(i.slug)}>{i.title}</span> : i.title) },
-    { key: 'detail', label: '说明' },
-    { key: 'ops', label: '操作', nosort: true, nofilter: true, className: 'nowrap', render: (i) => (i.path ? <button className="btn tiny ghost" title="在资源管理器中显示" onClick={() => api.showItem(i.path)}>📂</button> : null) },
-  ];
-  const sum = (r && r.summary) || {};
-  return (
-    <div className="wiki-lint">
-      <div className="wiki-lint-bar">
-        <button className="btn" disabled={running || busy} onClick={run}>{running ? '检查中…' : '🩺 重新体检'}</button>
-        {Object.keys(FIXABLE).filter((k) => sum[k]).map((k) => <button key={k} className="btn small" disabled={running || busy} onClick={() => fix(k)}>🔧 {FIXABLE[k]}：{LINT_LABEL[k]}（{sum[k]}）</button>)}
-        <div className="spacer" />
-        {r && <span className="muted small">体检于 {fmtTime(r.at)}</span>}
-      </div>
-      <DataTable id="wikiLint" columns={cols} rows={(r && r.issues) || []} rowKey={(i) => `${i.kind}-${i.slug}-${i.file_id || ''}`} empty={r ? '没有发现问题' : '检查中…'} />
+      </aside>
+      <section className="qa-main">
+        {thread && (
+          <div className="qa-head">
+            <b className="qa-title">{thread.title}</b>
+            {thread.archived ? <span className="tag ok">📦 已归档</span> : null}
+            <div className="spacer" />
+            {thread.archived && thread.slug && <button className="btn small ghost" onClick={() => onOpen(thread.slug)}>📖 查看问答页</button>}
+            <button className="btn small" onClick={() => archive(thread.id, !thread.archived)}>{thread.archived ? '↩ 取消归档' : '📦 归档到 Wiki'}</button>
+          </div>
+        )}
+        <div className="qa-body" ref={bodyRef}>
+          {!thread && !busy && (
+            <div className="qa-welcome">
+              <div className="qa-welcome-t">💬 向 Wiki 提问</div>
+              <div className="muted small">回答只依据已炼化的 Wiki 页面，并注明引用的页面</div>
+              {suggest.length > 0 && <div className="qa-sugg">{suggest.map((x) => <button key={x} className="qa-chip" onClick={() => ask(x, true)}>💡 {x}</button>)}</div>}
+            </div>
+          )}
+          {thread && thread.turns.map((t) => (
+            <div key={t.id} className="qa-turn">
+              <div className="qa-q"><div className="qa-bubble">{t.q}</div></div>
+              <div className="qa-a">
+                <div className="qa-a-head"><span className="qa-avatar">⚗</span><span className="tag">{t.engine}</span>{t.ms ? <span className="muted small">{(t.ms / 1000).toFixed(1)} 秒</span> : null}<span className="muted small">{fmtTime(t.at)}</span><div className="spacer" />
+                  <button className="icon-btn" title="复制答案" onClick={() => copy(t.answer)}>📋</button>
+                  <button className="icon-btn" title="重新提问" onClick={() => ask(t.q)}>↻</button>
+                </div>
+                <Md text={t.answer} onLink={onOpen} />
+                {t.pages.length > 0 && <div className="qa-cites"><span className="muted small">引用</span>{t.pages.map((p, k) => <span key={p.slug} className="qa-cite" onClick={() => onOpen(p.slug)}><b>{k + 1}</b>{p.title}</span>)}</div>}
+              </div>
+            </div>
+          ))}
+          {busy && (
+            <div className="qa-turn">
+              <div className="qa-q"><div className="qa-bubble">{busy}</div></div>
+              <div className="qa-a qa-thinking"><span className="qa-avatar">⚗</span> 正在查阅 Wiki 并作答…</div>
+            </div>
+          )}
+        </div>
+        <div className="qa-input">
+          <textarea className="input" rows={2} value={input} placeholder={thread ? '继续追问（Enter 发送，Shift + Enter 换行）' : '输入问题（Enter 发送，Shift + Enter 换行）'} onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); ask(input); } }} />
+          <button className="btn primary" disabled={!input.trim() || !!busy} onClick={() => ask(input)}>{busy ? '…' : thread ? '追问' : '发送'}</button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -358,11 +401,77 @@ function SchemaPanel() {
   if (text === null) return <div className="empty-tip">加载中…</div>;
   return (
     <div className="wiki-schema">
+      <FilterWords />
       <textarea className="input grow wiki-schema-text" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
       <div className="row">
         <button className="btn primary" disabled={text === saved} onClick={() => api.wikiSaveSchema(text).then((t) => { setText(t); setSaved(t); app.toast('规则已保存，下次炼丹生效', 'info', { cat: 'LLMWiki' }); })}>💾 保存规则</button>
         <button className="btn ghost" disabled={text === saved} onClick={() => setText(saved)}>撤销修改</button>
         <button className="btn ghost" onClick={() => confirm('恢复默认规则？') && api.wikiSaveSchema('').then((t) => { setText(t); setSaved(t); })}>恢复默认</button>
+      </div>
+    </div>
+  );
+}
+
+const STEP_ICON = { start: '⚗', read: '📄', send: '📤', reply: '📥', extract: '🔎', write: '💾', skip: '⏭', fail: '❌', remove: '🗑', compile: '🧱', cancel: '⏹', done: '✅' };
+const FEED_MEMO = { follow: true, level: '' };
+/** 炼丹过程（v3.16）：实时显示每份文档的每一步——读取、发送给大模型、收到答复 / 离线提取、写入资料页，再到下一份 */
+function IngestFeed({ feed, job, onOpen }) {
+  const [follow, setFollowS] = useState(FEED_MEMO.follow);
+  const [level, setLevelS] = useState(FEED_MEMO.level);
+  const [open, setOpen] = useState(() => new Set());
+  const ref = React.useRef(null);
+  const rows = level ? feed.filter((x) => (level === 'warn' ? x.level === 'warn' || x.level === 'error' : level === 'main' ? x.level !== 'debug' : true)) : feed;
+  useEffect(() => { if (follow && ref.current) ref.current.scrollTop = ref.current.scrollHeight; }, [feed.length, follow, level]);
+  const cur = job && job.current;
+  return (
+    <div className="wiki-feed">
+      <div className="wf-head">
+        <b>🧪 炼丹过程</b>
+        {job ? <span className="small">{job.cancelling ? '正在中止…' : cur ? `正在处理 ${cur.i}/${job.total}${cur.title ? `：${cur.title}` : ''}` : job.label}</span> : feed.length ? <span className="muted small">上次炼丹的过程</span> : null}
+        <div className="spacer" />
+        <div className="seg small">{[['', '全部步骤'], ['main', '只看结果'], ['warn', '警告与错误']].map(([k, l]) => <button key={k || 'all'} className={level === k ? 'on' : ''} onClick={() => { FEED_MEMO.level = k; setLevelS(k); }}>{l}</button>)}</div>
+        <label className="chk small"><input type="checkbox" checked={follow} onChange={(e) => { FEED_MEMO.follow = e.target.checked; setFollowS(e.target.checked); }} /> 跟随最新</label>
+      </div>
+      <div className="wf-list" ref={ref}>
+        {!rows.length && <div className="empty-tip">点“开始炼丹”后，这里逐步显示每份文档的处理过程</div>}
+        {rows.map((x) => (
+          <div key={x.seq} className={`wf-row lv-${x.level} k-${x.kind}`}>
+            <span className="wf-time">{new Date(x.at).toLocaleTimeString()}</span>
+            <span className="wf-ic">{STEP_ICON[x.kind] || '•'}</span>
+            <span className="wf-text">
+              {x.slug ? <span className="link" onClick={() => onOpen(x.slug)}>{x.text}</span> : x.text}
+              {x.detail ? <span className="link small wf-more" onClick={() => setOpen((o) => { const n = new Set(o); if (n.has(x.seq)) n.delete(x.seq); else n.add(x.seq); return n; })}>{open.has(x.seq) ? ' 收起' : ' 详情'}</span> : null}
+              {x.detail && open.has(x.seq) && <pre className="wf-detail">{x.detail}</pre>}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/** 过滤词（v3.16）：炼丹整理时去掉的无意义词语（“PowerPoint 演示文稿”等），每行一个；自动识别多数文档都有的模板标题 */
+function FilterWords() {
+  const app = useApp();
+  const [info, setInfo] = useState(null);
+  const [text, setText] = useState('');
+  const load = () => api.wikiFilterInfo().then((i) => { setInfo(i); setText(i.stopPhrases.join('\n')); }).catch(() => {});
+  useEffect(() => { load(); }, []);
+  if (!info) return null;
+  const list = [...new Set(text.split('\n').map((x) => x.trim()).filter(Boolean))];
+  const changed = list.join('\n') !== info.stopPhrases.join('\n');
+  const save = (patch, msg) => api.wikiSetConfig(patch).then(() => { load(); app.toast(msg, 'info', { cat: 'LLMWiki' }); }).catch((e) => app.toast(e.message, 'error'));
+  return (
+    <div className="wiki-filter">
+      <div className="row"><b>🧹 过滤词</b><span className="muted small">{list.length} 个</span><div className="spacer" />
+        <label className="chk small"><input type="checkbox" checked={info.autoBoiler} onChange={(e) => save({ autoBoiler: e.target.checked }, e.target.checked ? '已开启自动识别模板标题' : '已关闭自动识别模板标题')} /> 自动过滤多数文档都有的模板标题（{info.boilerplate.length}）</label>
+      </div>
+      <textarea className="input" value={text} onChange={(e) => setText(e.target.value)} spellCheck={false} />
+      {info.boilerplate.length > 0 && <div className="boiler">{info.boilerplate.map((b) => <span key={b} className="tag">{b}</span>)}</div>}
+      <div className="row">
+        <button className="btn primary small" disabled={!changed} onClick={() => save({ stopPhrases: list }, '过滤词已保存：已炼化的资料标记为待重新炼化')}>💾 保存过滤词</button>
+        <button className="btn ghost small" disabled={!changed} onClick={() => setText(info.stopPhrases.join('\n'))}>撤销修改</button>
+        <button className="btn ghost small" onClick={() => confirm('恢复默认过滤词？') && save({ stopPhrases: info.defaults }, '已恢复默认过滤词')}>恢复默认</button>
       </div>
     </div>
   );
