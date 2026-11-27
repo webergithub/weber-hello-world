@@ -282,7 +282,7 @@ class Store {
   duplicatesOf(id) { return this.q("SELECT * FROM files WHERE dup_of = ? AND status = 'duplicate' ORDER BY id").all(id).map(this.fileRow); }
 
   // ---------- 文件 ----------
-  fileRow = (r) => (r ? { ...r, tags: J(r.tags, []), terms: undefined, meta: J(r.meta, {}), preview: J(r.preview, null), vec: undefined, emb: undefined } : null);
+  fileRow = (r) => (r ? { ...r, tags: J(r.tags, []), auto_tags: J(r.auto_tags, null), manual_tags: J(r.manual_tags, []), terms: undefined, meta: J(r.meta, {}), preview: J(r.preview, null), vec: undefined, emb: undefined } : null);
   fileByPath(p) { return this.fileRow(this.q('SELECT * FROM files WHERE path = ?').get(p)); }
   fileByFingerprint(fp) { return this.fileRow(this.q("SELECT * FROM files WHERE fingerprint = ? AND status = 'parsed' ORDER BY id LIMIT 1").get(fp)); }
   getFile(id) { return this.fileRow(this.q('SELECT * FROM files WHERE id = ?').get(id)); }
@@ -415,7 +415,7 @@ class Store {
   liteRow = (r) => {
     if (!r) return null;
     const m = J(r.meta, {});
-    return { ...r, tags: J(r.tags, []), meta: { slideSize: m.slideSize, legacy: m.legacy }, preview: J(r.preview, null) };
+    return { ...r, tags: J(r.tags, []), auto_tags: undefined, manual_tags: J(r.manual_tags, []), meta: { slideSize: m.slideSize, legacy: m.legacy }, preview: J(r.preview, null) };
   };
   async listLibraryAsync() { return (await this.paged(`SELECT ${this.liteCols()} FROM files WHERE status != 'recycled'`, [], this.liteRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }
   async listAllFilesAsync() { return (await this.paged('SELECT * FROM files WHERE 1 = 1', [], this.fileRow)).sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0)); }

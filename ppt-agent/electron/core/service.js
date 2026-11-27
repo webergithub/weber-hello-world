@@ -129,6 +129,8 @@ class AgentService extends EventEmitter {
     this.office = new Office(logger.child('office'));
     this.ai = new AiGateway(this); // AI 调用模块：智能总结、搜索查询扩展、智能生成共用
     this.wiki = new (require('./llmwiki').LlmWiki)(this); // LLMWiki 炼丹（v3.13）
+    this.utags = new (require('./usertags').UserTags)(this); // 手动标签与标签管理（v3.14）
+    this.utags.init();
     this.search = new SearchEngine(this.store, () => this.config, logger.child('search'), () => this.ai);
     this.queue = [];
     this.runningSet = new Set(); // 正在执行的任务（子任务可并行，见 config.split.parallel）
@@ -938,7 +940,7 @@ class AgentService extends EventEmitter {
     const same = this.store.fileByFingerprint(fp);
     if (!force && same && same.path !== file && fs.existsSync(same.path)) {
       const id = this.store.upsertFile({ path: file, dir: path.dirname(file), name, ext, size: st.size, mtime: Math.round(st.mtimeMs), author, title, fingerprint: fp,
-        status: 'duplicate', kind, dup_of: same.id, error: null, slide_count: same.slide_count, theme: same.theme, tags: same.tags, category: same.category, task_id: taskId, parsed_at: Date.now() });
+        status: 'duplicate', kind, dup_of: same.id, error: null, slide_count: same.slide_count, theme: same.theme, tags: same.auto_tags || same.tags, auto_tags: same.auto_tags || same.tags, category: same.category, task_id: taskId, parsed_at: Date.now() });
       if (existing) this.store.deleteSlidesOf(existing.id);
       this.store.linkTaskFile(taskId, id, file, 'duplicate', `与已解析文件信息完全一致：${same.path}`);
       log.info(`${tag} 与已解析文件一致，不重复解析：${file} == ${same.path}`);
@@ -1087,6 +1089,7 @@ class AgentService extends EventEmitter {
     const tk = ticker();
     let tagEmitAt = 0;
     let fi = 0;
+    const applyUser = this.utags.applier(); // 手动标签 / 重命名 / 屏蔽（v3.14）：叠加在自动标签之上
     for (const f of files) {
       { const p = tk(); if (p) await p; }
       if ((++fi & 127) === 0) this.postPhase(taskId, '生成标签与分类', fi, files.length);
@@ -1098,15 +1101,16 @@ class AgentService extends EventEmitter {
           this.store.updateFile(f.id, { meta: { ...f.meta, llmTags } });
         } catch (e) { log.warn(`大模型打标签失败 ${f.name}`, e); }
       }
-      const { tags, category } = computeTags(f, slides, termMap.get(f.id) || { terms: {}, concepts: {} }, df, files.length, llmTags);
-      this.store.updateFile(f.id, { tags, category });
+      const { tags: autoTags, category } = computeTags(f, slides, termMap.get(f.id) || { terms: {}, concepts: {} }, df, files.length, llmTags);
+      const { tags, manual } = applyUser(f.id, autoTags);
+      this.store.updateFile(f.id, { auto_tags: autoTags, tags, manual_tags: manual, category });
       // 解析动态只需要最近的标签：限制推送频率，避免上万个事件涌向界面
       if (taskId && f.task_id === taskId && Date.now() - tagEmitAt > 80) { tagEmitAt = Date.now(); this.emitProgress(taskId, { stage: 'tag', file: f.path, tags, category }); }
     }
     for (const d of this.store.listFiles({ status: 'duplicate' })) {
       { const p = tk(); if (p) await p; }
       const o = d.dup_of && this.store.getFile(d.dup_of);
-      if (o) this.store.updateFile(d.id, { tags: o.tags, category: o.category, theme: o.theme, slide_count: o.slide_count });
+      if (o) { const auto = o.auto_tags || o.tags || []; const { tags, manual } = applyUser(d.id, auto); this.store.updateFile(d.id, { auto_tags: auto, tags, manual_tags: manual, category: o.category, theme: o.theme, slide_count: o.slide_count }); }
     }
     log.info(`${tag} 已为 ${files.length} 个文件生成标签与分类（${Date.now() - t0}ms）`);
     const t1 = Date.now();
@@ -1573,6 +1577,18 @@ class AgentService extends EventEmitter {
     return result;
   }
 
+  // ---------- 手动标签与标签管理（v3.14，见 usertags.js） ----------
+  tagFiles(ids, change) { return this.utags.tagFiles(ids, change || {}); }
+  tagCatalog() { return this.utags.catalog(); }
+  tagColors() { return this.utags.colors(); }
+  tagSaveDef(name, patch) { return this.utags.saveDef(name, patch || {}); }
+  tagRename(from, to) { return this.utags.rename(from, to); }
+  tagBlock(names) { return this.utags.block(names); }
+  tagRestore(names) { return this.utags.restore(names); }
+  tagOps() { return this.utags.ops(); }
+  tagUndo(id) { return this.utags.undo(id); }
+  tagFileRows(name) { const ids = this.utags.fileIdsOf(name); return ids.slice(0, 20000).map((id) => this.store.liteRow(this.store.q(`SELECT ${this.store.liteCols()} FROM files WHERE id = ?`).get(id))).filter(Boolean); }
+
   // ---------- LLMWiki 炼丹（v3.13）：资料库 → 持续维护的 Markdown 知识库（见 llmwiki.js） ----------
   wikiState() { return this.wiki.state(); }
   wikiSetConfig(patch) { return this.wiki.setConfig(patch || {}); }
@@ -1810,7 +1826,7 @@ class AgentService extends EventEmitter {
             const heir = dups[0];
             this.store.moveSlides(id, heir.id);
             const keep = this.store.db.prepare('SELECT * FROM files WHERE id = ?').get(id);
-            this.store.updateFile(heir.id, { status: 'parsed', dup_of: null, theme: keep.theme, slide_count: keep.slide_count, dark_slides: keep.dark_slides, light_slides: keep.light_slides, video_count: keep.video_count, notes_count: keep.notes_count, lang: keep.lang, tags: keep.tags, category: keep.category, terms: keep.terms, md_path: keep.md_path, meta: keep.meta, vec: keep.vec, preview: keep.preview, kind: keep.kind });
+            this.store.updateFile(heir.id, { status: 'parsed', dup_of: null, theme: keep.theme, slide_count: keep.slide_count, dark_slides: keep.dark_slides, light_slides: keep.light_slides, video_count: keep.video_count, notes_count: keep.notes_count, lang: keep.lang, tags: keep.tags, auto_tags: keep.auto_tags || keep.tags, manual_tags: keep.manual_tags || [], category: keep.category, terms: keep.terms, md_path: keep.md_path, meta: keep.meta, vec: keep.vec, preview: keep.preview, kind: keep.kind });
             for (const d of dups.slice(1)) this.store.updateFile(d.id, { dup_of: heir.id });
             log.info(`回收主文件，其重复副本提升为主文件：${heir.path}`);
           }

@@ -1261,3 +1261,54 @@ test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总
     delete process.env.PPTA_FAKE_LLM;
   } finally { svc.close(); }
 });
+
+test('手动标签（v3.14）：加 / 去标签、重新计算后保留、重命名 / 合并 / 删除、撤销', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'data-tags'));
+  svc.setConfig({ thumbnails: 'off' });
+  try {
+    const lib = path.join(tmp, 'lib-tags');
+    fs.cpSync(P('机场运营'), path.join(lib, '机场运营'), { recursive: true });
+    const id = svc.addTask(lib);
+    const done = new Promise((res) => svc.on('task', (t) => { if (t.id === id && ['done', 'failed'].includes(t.status)) res(t); }));
+    svc.startTask(id);
+    await done;
+    const files = svc.store.listFiles({ status: 'parsed' });
+    const [a, b] = files;
+    const auto = a.tags.find((t) => !/底|页|PPT/.test(t)) || a.tags[0];
+    assert.ok(auto, '有自动标签');
+    // 加标签、去掉一个自动标签
+    await svc.tagFiles([a.id, b.id], { add: ['重点项目'] });
+    await svc.tagFiles([a.id], { remove: [auto] });
+    let fa = svc.store.getFile(a.id);
+    assert.strictEqual(fa.tags[0], '重点项目', '手动标签排在前面');
+    assert.deepStrictEqual(fa.manual_tags, ['重点项目']);
+    assert.ok(!fa.tags.includes(auto), '去掉的自动标签不再显示');
+    // 全库重算后仍保留
+    await svc.afterLibraryChange(svc.log, '[测试]');
+    fa = svc.store.getFile(a.id);
+    assert.ok(fa.tags.includes('重点项目') && !fa.tags.includes(auto), '重新计算后手动修改仍然有效');
+    let cat = svc.tagCatalog();
+    assert.strictEqual(cat.find((t) => t.name === '重点项目').manual, 2);
+    assert.deepStrictEqual(svc.tagFileRows('重点项目').map((r) => r.id).sort(), [a.id, b.id].sort());
+    // 重命名
+    await svc.tagRename('重点项目', '重点');
+    assert.ok(svc.store.getFile(b.id).tags.includes('重点') && !svc.store.getFile(b.id).tags.includes('重点项目'));
+    // 合并：把 b 的一个自动标签合并到“重点”
+    const autoB = svc.store.getFile(b.id).auto_tags.find((t) => t !== auto);
+    await svc.tagRename([autoB], '重点');
+    await svc.afterLibraryChange(svc.log, '[测试]');
+    assert.ok(!svc.store.getFile(b.id).tags.includes(autoB), '合并后的自动标签以新名称显示');
+    // 删除（屏蔽）后撤销
+    const r = await svc.tagBlock(['重点']);
+    assert.ok(!svc.store.getFile(a.id).tags.includes('重点'));
+    await svc.tagUndo(r.opId);
+    assert.ok(svc.store.getFile(a.id).tags.includes('重点'), '撤销删除');
+    const ops = svc.tagOps();
+    assert.ok(ops.length >= 5 && ops[0].undone === 1);
+    await assert.rejects(() => svc.tagUndo(ops[3].id), /依次撤销/);
+    // 颜色与说明
+    svc.tagSaveDef('重点', { color: 'c3', note: '领导关注' });
+    assert.strictEqual(svc.tagColors()['重点'], 'c3');
+  } finally { svc.close(); }
+});
