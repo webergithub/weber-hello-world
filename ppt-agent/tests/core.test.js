@@ -1203,3 +1203,61 @@ test('字体统一：标题 / 正文字体与字号统一，另存新文件且�
   assert.deepStrictEqual(Object.keys(c.body.sizes), ['20 磅']);
   assert.deepStrictEqual(c.title.sizes, a.title.sizes);
 });
+
+test('LLMWiki 炼丹：增量吸收资料生成资料 / 概念 / 分类页与总目录、问答可存为页面、体检与修复', async () => {
+  const { AgentService } = require('../electron/core/service');
+  const svc = new AgentService(path.join(tmp, 'data-wiki'));
+  svc.setConfig({ thumbnails: 'off' });
+  try {
+    const lib = path.join(tmp, 'lib-wiki');
+    fs.cpSync(P('机场运营'), path.join(lib, '机场运营'), { recursive: true });
+    const id = svc.addTask(lib);
+    const done = new Promise((res) => svc.on('task', (t) => { if (t.id === id && ['done', 'failed'].includes(t.status)) res(t); }));
+    svc.startTask(id);
+    await done;
+    const w = svc.wiki;
+    const st0 = w.state();
+    assert.ok(st0.counts.candidates > 0 && st0.counts.pending === st0.counts.candidates, '已解析的资料都待炼化');
+    const r = await w.ingest();
+    assert.strictEqual(r.ok, st0.counts.candidates);
+    const st = w.state();
+    assert.strictEqual(st.counts.pending, 0);
+    assert.ok(st.counts.concepts > 0, '生成概念页');
+    const pages = w.pages();
+    const src = pages.find((p) => p.type === 'source');
+    assert.ok(src && src.inbound > 0, '资料页被概念 / 分类页链接');
+    const idx = w.readPage('index');
+    assert.ok(idx.text.includes('# 总目录') && idx.text.includes(src.slug));
+    assert.ok(fs.readFileSync(path.join(w.dir, 'log.md'), 'utf8').includes('炼丹 | 增量炼化'));
+    assert.ok(fs.existsSync(path.join(w.dir, 'schema.md')));
+    const concept = pages.find((p) => p.type === 'concept');
+    const cp = w.readPage(concept.slug);
+    assert.ok(cp.backlinks.length > 0, '概念页有反向链接');
+    // 增量：没有变化时不重新炼化
+    const r2 = await w.ingest();
+    assert.strictEqual(r2.ok, 0);
+    // 问答（离线摘录）并存为页面
+    const q = await w.query('航班过站保障');
+    assert.ok(q.pages.length > 0 && q.answer.includes('[['));
+    const slug = await w.saveQuery(q.id);
+    assert.ok(fs.existsSync(path.join(w.dir, slug + '.md')));
+    assert.ok(w.readPage('index').text.includes(slug), '问答页加入总目录');
+    // 体检：资料重新解析后标记为需要更新，修复后恢复
+    let lint = await w.lint();
+    assert.ok(!lint.issues.some((i) => ['stale', 'broken', 'removed', 'missing'].includes(i.kind)), JSON.stringify(lint.issues.filter((i) => i.kind === 'broken')));
+    svc.store.db.prepare('UPDATE files SET parsed_at = parsed_at + 1 WHERE id = ?').run(src.file_id);
+    lint = await w.lint();
+    assert.ok(lint.issues.some((i) => i.kind === 'stale' && i.file_id === src.file_id));
+    const fx = await w.fix(['stale']);
+    assert.ok(!fx.lint.issues.some((i) => i.kind === 'stale'));
+    // 大模型模式（测试替身）
+    process.env.PPTA_FAKE_LLM = '1';
+    w.setConfig({ useAi: true });
+    const r3 = await w.ingest({ force: true });
+    assert.strictEqual(r3.ok, st0.counts.candidates);
+    assert.ok(w.pages().some((p) => p.type === 'concept' && /测试实体/.test(p.title)), '大模型提取的实体生成概念页');
+    const q2 = await w.query('航班过站');
+    assert.strictEqual(q2.engine, '本地测试替身');
+    delete process.env.PPTA_FAKE_LLM;
+  } finally { svc.close(); }
+});

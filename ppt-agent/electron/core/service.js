@@ -128,6 +128,7 @@ class AgentService extends EventEmitter {
     this.store = new Store(path.join(dataDir, 'ppt-agent.db'));
     this.office = new Office(logger.child('office'));
     this.ai = new AiGateway(this); // AI 调用模块：智能总结、搜索查询扩展、智能生成共用
+    this.wiki = new (require('./llmwiki').LlmWiki)(this); // LLMWiki 炼丹（v3.13）
     this.search = new SearchEngine(this.store, () => this.config, logger.child('search'), () => this.ai);
     this.queue = [];
     this.runningSet = new Set(); // 正在执行的任务（子任务可并行，见 config.split.parallel）
@@ -1571,6 +1572,28 @@ class AgentService extends EventEmitter {
     } catch (e) { log.warn('保存转换历史失败', e); }
     return result;
   }
+
+  // ---------- LLMWiki 炼丹（v3.13）：资料库 → 持续维护的 Markdown 知识库（见 llmwiki.js） ----------
+  wikiState() { return this.wiki.state(); }
+  wikiSetConfig(patch) { return this.wiki.setConfig(patch || {}); }
+  wikiIngest(opts = {}) {
+    if (this.wiki.job) throw new Error('炼丹正在进行中');
+    this.wiki.ingest(opts).then((r) => this.emit('notice', { kind: 'info', cat: 'LLMWiki', label: '查看 LLMWiki', msg: `炼丹完成：新增 / 更新 ${r.ok} 份资料${r.failed ? `，失败 ${r.failed} 份` : ''}${r.removed ? `，移除 ${r.removed} 份` : ''}${r.cancelled ? '（已中止）' : ''}`, link: { type: 'view', view: { type: 'llmwiki' } } }))
+      .catch((e) => { this.log.warn('[LLMWiki] 炼丹失败', e); this.emit('notice', { kind: 'error', cat: 'LLMWiki', msg: `炼丹失败：${e.message}` }); });
+    return this.wiki.state();
+  }
+  wikiCancel() { return this.wiki.cancel(); }
+  wikiPages() { return this.wiki.pages(); }
+  wikiPage(slug) { return this.wiki.readPage(slug); }
+  wikiQuery(q, opts) { return this.wiki.query(q, opts); }
+  wikiSaveQuery(id) { return this.wiki.saveQuery(id); }
+  wikiQueries() { return this.wiki.queries(); }
+  wikiDeleteQueries(ids) { return this.wiki.deleteQueries(ids || []); }
+  wikiLint() { return this.wiki.lint(); }
+  async wikiFix(kinds) { if (this.wiki.job) throw new Error('炼丹正在进行中'); return this.wiki.fix(kinds || []); }
+  wikiLogs() { return this.wiki.logs(); }
+  wikiSchema() { return this.wiki.schema(); }
+  wikiSaveSchema(text) { return this.wiki.saveSchema(text); }
 
   // ---------- 字体统一（v3.13）：导入一个 PPT，统一标题 / 正文字体与字号，另存为 *_字体统一.pptx（原文件只读） ----------
   async fontAnalyze(src) {

@@ -13,7 +13,7 @@ const path = require('path');
 const runner = require('./plugins/scriptRunner');
 const { PptAgentLlm } = require('./ppt_agent/llm');
 
-const TASKS = { summarize: '文档总结', expandQuery: '查询扩展（智能搜索）', generate: '需求理解（智能生成）' };
+const TASKS = { summarize: '文档总结', expandQuery: '查询扩展（智能搜索）', generate: '需求理解（智能生成）', wikiIngest: 'LLMWiki 炼丹', wikiQuery: 'LLMWiki 问答' };
 const isFake = () => process.env.PPTA_FAKE_LLM === '1';
 
 class AiGateway {
@@ -122,6 +122,9 @@ const PROMPTS = {
   summarize: { system: SUMMARY_SYSTEM, maxTokens: 4096, user: (input) => pagesText(input).slice(0, 60000) },
   expandQuery: { system: '你是检索查询分析助手。把用户的检索输入解析为中英文检索关键词与同义词，只输出 JSON：{"zh":[...],"en":[...],"synonyms":[...]}', maxTokens: 600, user: (input) => String(input.query || '') },
   generate: { system: '把用户对新 PPT 的描述整理为检索用的 JSON：{"keywords":[中英文关键词],"topic":"主题"}，只输出 JSON。', maxTokens: 800, user: (input) => String(input.description || '') },
+  // LLMWiki（v3.13）：炼丹 = 把一份原始资料提炼为资料页；问答 = 只基于选出的 Wiki 页面作答并引用页面
+  wikiIngest: { system: '你是 LLM Wiki 的维护者，按下面的 Wiki 规则把一份原始资料提炼为资料页。只依据给定内容，不要编造。只输出 JSON：{"summary":"一句话概要（不超过 60 字）","points":["要点（3~10 条，每条不超过 40 字）"],"entities":["资料中的关键实体 / 概念名称（人名、系统、项目、产品、术语，最多 10 个）"]}', maxTokens: 1500, user: (input) => `# Wiki 规则\n${String(input.schema || '').slice(0, 4000)}\n\n# 原始资料\n${pagesText(input).slice(0, 40000)}` },
+  wikiQuery: { system: '你是 LLM Wiki 的问答助手。只根据给定的 Wiki 页面回答问题，用中文 Markdown；引用页面时用 [[页面路径|标题]] 的格式写出来源；页面中没有的信息要明确说明“Wiki 中没有相关内容”，不要编造；不同页面说法冲突时并列列出。', maxTokens: 3000, user: (input) => `# 问题\n${input.question}\n\n# Wiki 页面\n${(input.pages || []).map((p) => `## [[${p.slug}|${p.title}]]\n${p.content}`).join('\n\n').slice(0, 60000)}` },
 };
 
 function parseJson(text) {
@@ -138,6 +141,8 @@ function pagesText(input) {
 function fakeRun(task, input) {
   if (task === 'expandQuery') return JSON.stringify({ zh: [String(input.query || '')], en: [], synonyms: [] });
   if (task === 'generate') return JSON.stringify({ keywords: String(input.description || '').split(/[\s，,、]+/).filter(Boolean), topic: input.description || '' });
+  if (task === 'wikiIngest') { const ps = input.pages || []; return JSON.stringify({ summary: `${(input.file && input.file.name) || ''}：共 ${ps.length} 页`, points: ps.slice(0, 5).map((p) => p.title).filter(Boolean), entities: ['测试实体'] }); }
+  if (task === 'wikiQuery') return `关于“${input.question}”：\n\n${(input.pages || []).map((p) => `- 见 [[${p.slug}|${p.title}]]`).join('\n')}`;
   const pages = input.pages || [];
   return `# ${(input.file && input.file.name) || ''} · 总结\n\n## 一句话概要\n共 ${pages.length} 页。\n\n## 核心要点\n${pages.slice(0, 8).map((p) => `- ${p.title}`).join('\n')}\n`;
 }
