@@ -136,7 +136,7 @@ export function FilesStats({ files, stats, onOpen, title = '', task = null }) {
     { key: 'notes_count', label: '含备注页', sort: (r) => r.notes_count || 0, hidden: true },
     { key: 'video_count', label: '视频', sort: (r) => r.video_count || 0, render: (r) => r.video_count || '' },
     { key: 'category', label: '分类' },
-    { key: 'tags', label: '标签（20 个）', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} /> },
+    { key: 'tags', label: '标签（20 个）', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} manual={r.manual_tags} /> },
     { key: 'message', label: '说明', sort: (r) => r.error || r.message, className: 'small muted', render: (r) => r.error || r.message },
     { key: 'at', label: '处理时间', sort: (r) => r.at || 0, render: (r) => fmtTime(r.at), className: 'small nowrap', hidden: true },
     { key: 'ops', label: '操作', nosort: true, className: 'nowrap', render: (r) => (

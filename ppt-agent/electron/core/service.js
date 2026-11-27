@@ -1583,6 +1583,13 @@ class AgentService extends EventEmitter {
   tagColors() { return this.utags.colors(); }
   tagSaveDef(name, patch) { return this.utags.saveDef(name, patch || {}); }
   tagRename(from, to) { return this.utags.rename(from, to); }
+  /** 编辑标签：改名（含合并到已有标签）+ 颜色 / 说明，一次操作 */
+  async tagEdit(name, patch = {}) {
+    const to = String(patch.name || name).trim();
+    if (to && to !== name) return this.utags.rename(name, to, patch);
+    this.utags.saveDef(name, patch, `修改标签 ${name}`);
+    return { title: `修改标签 ${name}` };
+  }
   tagBlock(names) { return this.utags.block(names); }
   tagRestore(names) { return this.utags.restore(names); }
   tagOps() { return this.utags.ops(); }

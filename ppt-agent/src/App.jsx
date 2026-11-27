@@ -17,6 +17,7 @@ import GenerateView from './components/GenerateView';
 import MergeView from './components/MergeView';
 import FontUnifyView from './components/FontUnifyView';
 import LlmWikiView from './components/LlmWikiView';
+import TagsView from './components/TagsView';
 import PluginView from './components/PluginView';
 import BusyHint from './components/BusyHint';
 import EtaLine from './components/Eta';
@@ -369,7 +370,7 @@ export default function App() {
   };
   const ctx = {
     tasks, allTasks, liveTasks, progress, taskTick, logLines, reloadLogs, refreshTasks, toast, basket: basketApi, config, setConfig, bump, setTheme,
-    exportSlides, openSlide, openCompare, startParse, notices, setNotices, openLink, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal,
+    exportSlides, openSlide, openCompare, startParse, notices, setNotices, openLink, modalOpen: !!modal || !!compare, openFile: (id) => { setView({ type: 'file', id, back: view, backDrill: drill }); setDrill(null); }, go: setView, drill: setDrill, addDir, addAllLocal, view,
   };
 
   const cur = tasks.find((t) => t.id === curTask) || null;
@@ -385,6 +386,7 @@ export default function App() {
     { key: 'alllib', icon: '🗂', label: '所有资料库' },
     { key: 'monitor', icon: '🕘', label: `全部任务与历史${tasks.some((t) => isActive(t)) ? ' ●' : ''}`, sub: [['queue', '任务队列'], ['live', '解析动态'], ['history', '解析历史']] },
     { key: 'groups', icon: '🧩', label: '相似分组' },
+    { key: 'tags', icon: '🏷', label: '标签管理' },
     { key: 'notesreview', icon: '✍', label: '完善讲解词' },
   ];
   const maintNav = [
@@ -533,6 +535,7 @@ export default function App() {
           {view.type === 'merge' && <MergeView />}
           {view.type === 'fontunify' && <FontUnifyView />}
           {view.type === 'llmwiki' && <LlmWikiView />}
+          {view.type === 'tags' && <TagsView key={view.tab || 'tags'} />}
           {view.type === 'plugins' && <PluginView />}
           {view.type === 'settings' && <SettingsView focus={view.focus} />}
           {view.type === 'help' && <HelpView focus={view.focus} onTour={startTour} onWelcome={() => setWelcome(true)} />}

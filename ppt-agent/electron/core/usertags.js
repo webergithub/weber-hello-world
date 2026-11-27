@@ -227,7 +227,7 @@ class UserTags {
   }
 
   /** 重命名 / 合并：from 中的每个标签都改为 to（以后重新计算出的自动标签也按此改名） */
-  async rename(from, to) {
+  async rename(from, to, patch = null) {
     this.init();
     from = [...new Set((Array.isArray(from) ? from : [from]).map(clean).filter(Boolean))];
     to = clean(to);
@@ -253,6 +253,9 @@ class UserTags {
         this.db.prepare('DELETE FROM file_tags WHERE tag = ?').run(f);
       }
       this.db.prepare('UPDATE tag_defs SET updated_at = ? WHERE name = ?').run(Date.now(), to);
+      // 编辑标签（改名的同时改颜色 / 说明）算一次操作，一次撤销
+      if (patch && patch.color !== undefined) this.db.prepare('UPDATE tag_defs SET color = ? WHERE name = ?').run(COLORS.includes(patch.color) ? patch.color : '', to);
+      if (patch && patch.note !== undefined) this.db.prepare('UPDATE tag_defs SET note = ? WHERE name = ?').run(String(patch.note || '').slice(0, 200), to);
       this.db.exec('COMMIT');
     } catch (e) { try { this.db.exec('ROLLBACK'); } catch { /* ignore */ } throw e; }
     const title = from.length > 1 ? `合并标签 ${from.join('、')} → ${to}` : `重命名标签 ${from[0]} → ${to}`;

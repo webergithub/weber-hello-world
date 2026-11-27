@@ -9,6 +9,7 @@ import { RecycleButton } from './Recycle';
 import { CompareButton } from './CompareView';
 import { StatCards } from './DrillDialog';
 import TagList from './TagList';
+import { TagDialog } from './TagEditor';
 
 const SIDE_W = 240;
 
@@ -215,6 +216,7 @@ function OverviewMode({ scopeTask, files }) {
   const [q, setQ] = useState('');
   const [kind, setKind] = useState('');
   const [sel, setSel] = useState(() => new Set());
+  const [tagging, setTagging] = useState(null);
   useEffect(() => { api.overview({ tasksOnly: true }).then(setData); }, [app.taskTick]);
   const byId = useMemo(() => new Map(data.files.map((f) => [f.id, f])), [data]);
   const scope = taskId === 'all' ? data.files : ((data.tasks.find((t) => String(t.id) === String(taskId)) || { fileIds: [] }).fileIds.map((id) => byId.get(id)).filter(Boolean));
@@ -245,7 +247,7 @@ function OverviewMode({ scopeTask, files }) {
     { key: 'light_slides', label: '白底页', sort: (r) => r.light_slides || 0, render: (r) => (r.kind !== 'word' ? r.light_slides || 0 : '-') },
     { key: 'theme', label: '底色', render: (r) => (r.kind !== 'word' && r.theme ? <span className={`tag theme-${r.theme}`}>{THEME_LABEL[r.theme]}</span> : '') },
     { key: 'category', label: '主题分类' },
-    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} /> },
+    { key: 'tags', label: '标签', sort: (r) => (r.tags || []).join(' '), filterList: (r) => r.tags || [], className: 'tags-cell', render: (r) => <TagList tags={r.tags} manual={r.manual_tags} /> },
     { key: 'size', label: '大小', sort: (r) => r.size || 0, className: 'nowrap', render: (r) => fmtSize(r.size) },
     { key: 'author', label: '作者' },
     { key: 'mtime', label: '修改时间', sort: (r) => r.mtime || 0, className: 'small nowrap', render: (r) => fmtTime(r.mtime) },
@@ -255,12 +257,14 @@ function OverviewMode({ scopeTask, files }) {
     { key: 'parsed_at', label: '解析时间', sort: (r) => r.parsed_at || 0, className: 'small nowrap', render: (r) => fmtTime(r.parsed_at), hidden: true },
     { key: 'status', label: '状态', render: (r) => <span className={`tag act-${r.status === 'parsed' ? 'parsed' : r.status}`}>{{ parsed: '已解析', duplicate: '重复', failed: '失败' }[r.status] || r.status}</span> },
   ];
+  const pickedOk = [...sel].map((id) => byId.get(id)).filter((f) => f && f.status !== 'failed');
   return (
     <div className="files-stats">
+      {tagging && <TagDialog files={tagging} onClose={() => setTagging(null)} />}
       <StatCards cards={cards} onDrill={drill} />
       <div className="chips">{Object.entries(cats).sort((a, b) => b[1] - a[1]).map(([k, v]) => <span key={k} className="chip drill" onClick={() => drill(`主题分类·${k}`, (r) => r.status === 'parsed' && (r.category || '其他') === k)}>主题分类·{k} {v}</span>)}</div>
       <DataTable id="libOverview" columns={columns} rows={rows} selectable selected={sel} onSelect={setSel} defaultSort={{ k: 'name', d: 1 }} empty="没有匹配的文档"
-        actions={<><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
+        actions={<><button className="btn small" disabled={!pickedOk.length} onClick={() => setTagging(pickedOk)}>🏷 标签…</button><CompareButton ids={[...sel].filter((id) => (byId.get(id) || {}).status !== 'failed')} /><RecycleButton ids={[...sel]} done={() => setSel(new Set())} /></>}
         toolbar={(
           <>
             {!scopeTask && <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>

@@ -3,6 +3,7 @@ import Notice from './Notice';
 import { useIncremental } from '../useIncremental';
 import { api, fmtSize, THEME_LABEL, unitOf, slideRatio } from '../api';
 import { useApp } from '../ctx';
+import { FileTagsBar } from './TagEditor';
 import { renderMarkdown } from '../md';
 import SlidePreview from './SlidePreview';
 import { PanelLayout, useStoredLayout, NotesBody, MdBody, onSlideUpdated } from './Panels';
@@ -192,6 +193,7 @@ export default function SlideWorkspace({ files, initialFileId, initialSlideId, e
             <div className="ws-slides-head">
               <div className="col-head inline"><label className="chk"><input type="checkbox" checked={allInFile} onChange={selectFile} /> 全选本文件</label><button className="icon-btn tiny" title="折叠页面列" onClick={() => setCol('slides', false)}>«</button></div>
               <span className="muted">{slides.length} {unit} · Shift 连选 · ↑↓ 切换 · 空格选择</span>
+              {detail.file.status !== 'failed' && <FileTagsBar file={detail.file} onChanged={() => api.fileDetail(detail.file.id, { record: false }).then((d) => d && setDetail(d))} />}
             </div>
           )}
           {detail && detail.file.status === 'duplicate' && <Notice id={`dupfile-${detail.file.id}`}>该文件与 <b>{detail.source.path}</b> 信息完全一致，未重复解析，显示的是原文件的解析结果。</Notice>}

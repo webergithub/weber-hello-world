@@ -414,6 +414,7 @@ app.whenReady().then(async () => {
     tagColors: () => service.tagColors(),
     tagSaveDef: (n, p) => service.tagSaveDef(n, p),
     tagRename: (f, t) => service.tagRename(f, t),
+    tagEdit: (n, p) => service.tagEdit(n, p),
     tagBlock: (n) => service.tagBlock(n),
     tagRestore: (n) => service.tagRestore(n),
     tagOps: () => service.tagOps(),
