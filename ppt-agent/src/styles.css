@@ -1617,3 +1617,13 @@ tr.row-warn td { background: color-mix(in srgb, var(--warn) 8%, transparent); }
 .wx-card-t { display: flex; justify-content: space-between; gap: 6px; }
 .wx-rel { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .wx-row { padding: 4px 0; border-bottom: 1px dashed var(--line); cursor: pointer; }
+
+/* v3.14 PPT_Agent 测试结果 */
+.agent-test { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius); padding: 8px 12px; margin: 2px 0 6px; background: var(--bg2); display: flex; flex-direction: column; gap: 4px; }
+.agent-test.ok { border-left-color: var(--ok); }
+.agent-test.bad { border-left-color: var(--danger); }
+.agent-test .at-head { display: flex; align-items: center; gap: 8px; }
+.at-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 2px 14px; }
+.at-checks > div { display: flex; gap: 6px; align-items: baseline; }
+.at-checks .ok > span:first-child { color: var(--ok); }
+.at-checks .bad > span:first-child { color: var(--danger); }

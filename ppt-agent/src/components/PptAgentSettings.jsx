@@ -37,13 +37,20 @@ export default function PptAgentSettings() {
     setKey('');
     setBusy('');
   };
+  // 测试（v3.14）：随时可点，用当前填写（未保存）的设置；没打开联网开关时询问“仅本次测试连接”
   const test = async () => {
-    setBusy('test');
+    if (!(key.trim() || llm.hasApiKey)) { setResult({ ok: false, error: 'API Key：未填写', hint: '请先填写 API Key', checks: [{ item: 'API Key', ok: false, detail: '未填写' }], at: Date.now() }); return; }
+    let once = false;
+    if (!pa.allowNetwork) {
+      if (!confirm(`测试需要连接大模型接口：\n${host}\n\n只为这次测试连接一次（发送一条“ping”），不会打开“允许连接大模型接口”。继续？`)) return;
+      once = true;
+    }
+    setBusy('test'); setResult(null);
     try {
-      const r = await api.pptAgentTest({ baseURL: f.baseURL.trim(), model: f.model.trim(), reasoningEffort: f.reasoningEffort, ...(key.trim() ? { apiKey: key.trim() } : {}) });
+      const r = await api.pptAgentTest({ baseURL: f.baseURL.trim(), model: f.model.trim(), reasoningEffort: f.reasoningEffort, once, ...(key.trim() ? { apiKey: key.trim() } : {}) });
       setResult(r);
       app.toast(r.ok ? `连接成功（${r.ms}ms）：${r.reply}` : `连接失败：${r.error}`, r.ok ? 'info' : 'error', { cat: 'PPT_Agent' });
-    } finally { setBusy(''); }
+    } catch (e) { setResult({ ok: false, error: e.message, at: Date.now() }); } finally { setBusy(''); }
   };
   const mode = ai.mode || 'llm';
   return (
@@ -74,7 +81,21 @@ export default function PptAgentSettings() {
       <div className="row"><label>API Key</label>
         <input className="input grow" type="password" autoComplete="off" value={key} placeholder={llm.hasApiKey ? '已保存（加密，不显示）；输入新的 Key 可替换' : '在 DeepSeek 开放平台创建的 API Key'} onChange={(e) => setKey(e.target.value)} />
         {llm.hasApiKey && <button className="btn ghost small" onClick={() => confirm('清除已保存的 API Key？') && apply({ llm: { apiKey: '' } }, '已清除 API Key')}>清除</button>}
+        <button className="btn" disabled={!!busy} onClick={test}>{busy === 'test' ? '测试中…' : '🔌 测试'}</button>
       </div>
+      {(result || busy === 'test') && (
+        <div className={`agent-test ${busy === 'test' ? '' : result.ok ? 'ok' : 'bad'}`}>
+          <div className="at-head">
+            <b>{busy === 'test' ? '⏳ 正在测试…' : result.ok ? `✔ 连接成功（${result.ms}ms）` : '✖ 连接失败'}</b>
+            {result && result.host && <span className="muted small">{result.host} · {result.model}{result.at ? ` · ${new Date(result.at).toLocaleTimeString()}` : ''}</span>}
+            <div className="spacer" />
+            {result && <button className="icon-btn" onClick={() => setResult(null)}>✕</button>}
+          </div>
+          {result && result.checks && <div className="at-checks">{result.checks.map((c) => <div key={c.item} className={c.ok ? 'ok' : 'bad'}><span>{c.ok ? '✔' : '✖'}</span><b>{c.item}</b><span className="small">{c.detail}</span></div>)}</div>}
+          {result && !result.ok && !result.checks && <div className="small">{result.error}</div>}
+          {result && result.hint && <div className="small muted">建议：{result.hint}</div>}
+        </div>
+      )}
       <div className="row"><label>超时</label><input className="input split-par" type="number" min="10" max="3600" value={f.timeoutSec} onChange={(e) => set({ timeoutSec: e.target.value })} /> <span className="muted">秒 / 文档</span>
         <label>轮询间隔</label><input className="input split-par" type="number" min="5" max="3600" value={f.pollSec} onChange={(e) => set({ pollSec: e.target.value })} /> <span className="muted">秒</span></div>
       <div className="row"><label>用于</label>
@@ -83,10 +104,9 @@ export default function PptAgentSettings() {
       <div className="row top"><label>总结提示词</label><textarea className="input grow" rows={3} value={f.prompt} placeholder="留空使用内置提示词（标题 / 一句话概要 / 核心要点 / 各部分摘要 / 关键词）" onChange={(e) => set({ prompt: e.target.value })} /></div>
       <div className="row"><label />
         <button className="btn primary" disabled={!!busy} onClick={save}>{busy === 'save' ? '保存中…' : '💾 保存'}</button>
-        <button className="btn" disabled={!!busy || !pa.allowNetwork || !(key.trim() || llm.hasApiKey)} onClick={test}>{busy === 'test' ? '连接中…' : '🔌 测试连接'}</button>
+        <button className="btn" disabled={!!busy} onClick={test}>{busy === 'test' ? '测试中…' : '🔌 测试'}</button>
         <button className="btn ghost" onClick={() => app.go({ type: 'plugins' })}>🤖 打开 PPT_Agent</button>
       </div>
-      {result && <div className={`plugin-check ${result.ok ? 'ok' : 'bad'}`}>{result.ok ? `✔ 连接成功（${result.ms}ms）：${result.reply}` : `✖ ${result.error}`}</div>}
     </div>
   );
 }

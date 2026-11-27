@@ -62,9 +62,9 @@ class PptAgentLlm {
   }
 
   /** 一次对话：{ system, user, maxTokens, signal, timeoutMs } → { ok, text, ms, usage, attempts, error, code } */
-  async chat({ system, user, maxTokens, signal, timeoutMs, override, force = false } = {}) {
+  async chat({ system, user, maxTokens, signal, timeoutMs, override, force = false, once = false } = {}) {
     if (!force) { const s = this.status(); if (!s.ok) return { ok: false, error: s.reason, code: 'NOT_CONFIGURED', ms: 0 }; }
-    else if (!this.allowed()) return { ok: false, error: 'PPT_Agent 未允许连接大模型接口', code: 'NOT_ALLOWED', ms: 0 };
+    else if (!this.allowed() && !once) return { ok: false, error: 'PPT_Agent 未允许连接大模型接口', code: 'NOT_ALLOWED', ms: 0 };
     const opts = this.options(override);
     const limit = timeoutMs || Math.max(10, Number(this.cfg().timeoutSec) || DEFAULTS.timeoutSec) * 1000;
     const sigs = [AbortSignal.timeout(limit)];
@@ -86,13 +86,30 @@ class PptAgentLlm {
   }
 
   /** 测试连接：可传入尚未保存的设置（apiKey 为明文；不传则用已保存的） */
+  /**
+   * 测试连接（v3.14：界面上的“🔌 测试”随时可点）：用界面上当前填写、尚未保存的设置（apiKey 为明文；不传则用已保存的）；
+   * once = 用户确认“只为这次测试连接一次”（未打开联网开关时），不改变联网开关。返回逐项检查结果 checks 与建议 hint。
+   */
   async test(patch = {}) {
     const override = {};
     for (const k of ['baseURL', 'model', 'reasoningEffort']) if (patch[k]) override[k] = patch[k];
     if (patch.apiKey) override.apiKey = String(patch.apiKey).trim();
-    if (!(override.apiKey || this.key())) return { ok: false, error: '请先填写 API Key' };
-    const r = await this.chat({ system: '只回复 OK', user: 'ping', maxTokens: 16, timeoutMs: 30000, override, force: true });
-    return r.ok ? { ok: true, ms: r.ms, reply: r.text.trim().slice(0, 60) } : { ok: false, error: r.error, code: r.code };
+    const c = { ...this.cfg(), ...override };
+    const host = hostOf(c.baseURL);
+    const base = { at: Date.now(), host, baseURL: c.baseURL, model: c.model, reasoningEffort: c.reasoningEffort };
+    const checks = [
+      { item: '接口地址', ok: !!host, detail: host || '地址无效' },
+      { item: 'API Key', ok: !!(override.apiKey || this.key()), detail: override.apiKey ? '使用输入框中的 Key（未保存）' : this.key() ? '使用已保存的 Key' : '未填写' },
+      { item: '模型', ok: !!c.model, detail: c.model || '未填写' },
+      { item: '联网', ok: this.allowed() || !!patch.once, detail: this.allowed() ? '已允许连接大模型接口' : patch.once ? '仅本次测试连接' : '未允许' },
+    ];
+    const bad = checks.find((x) => !x.ok);
+    if (bad) return { ...base, ok: false, checks, error: `${bad.item}：${bad.detail}`, code: 'PRECHECK', hint: bad.item === '联网' ? '确认“仅本次测试连接”，或打开“允许连接大模型接口”' : `请先填写${bad.item}` };
+    const r = await this.chat({ system: '只回复 OK', user: 'ping', maxTokens: 16, timeoutMs: 30000, override, force: true, once: !!patch.once });
+    this.svc.log.info(`[PPT_Agent] 测试连接 ${host}（模型 ${c.model}）：${r.ok ? `成功 ${r.ms}ms` : `失败 ${r.error}`}`);
+    checks.push({ item: '模型回复', ok: r.ok, detail: r.ok ? `${r.text.trim().slice(0, 60)}（${r.ms}ms）` : r.error });
+    return r.ok ? { ...base, ok: true, ms: r.ms, reply: r.text.trim().slice(0, 60), usage: r.usage || null, checks }
+      : { ...base, ok: false, ms: r.ms, error: r.error, code: r.code, checks, hint: HINT[r.code] || '' };
   }
 
   state() {
@@ -102,6 +119,7 @@ class PptAgentLlm {
   }
 }
 
+const HINT = { AUTH: '检查 API Key 是否正确、是否已过期', QUOTA: '到服务商平台充值或检查额度', RATE_LIMIT: '稍后再试', CONTEXT_WINDOW_EXCEEDED: '', INVALID_REQUEST: '检查模型名称是否正确（如 deepseek-flash）', SERVER: '服务商暂时不可用，稍后再试', TIMEOUT: '检查网络、代理或接口地址；也可调大超时', TRANSPORT: '检查网络连接、公司代理 / 防火墙，以及接口地址是否正确', MISSING_CREDENTIAL: '请先填写 API Key' };
 const CODE_TEXT = { AUTH: 'API Key 无效或没有权限', QUOTA: '账户余额 / 额度不足', RATE_LIMIT: '请求过于频繁（已按策略重试）', CONTEXT_WINDOW_EXCEEDED: '文档内容超过模型上下文长度', INVALID_REQUEST: '请求被拒绝', SERVER: '大模型服务暂时不可用（已按策略重试）', TIMEOUT: '大模型响应超时', TRANSPORT: '网络连接失败', ABORTED: '已取消', EMPTY_RESPONSE: '大模型没有返回内容', MALFORMED_RESPONSE: '大模型返回的数据格式不正确', MISSING_CREDENTIAL: '没有 API Key' };
 function describe(e) {
   const code = e && e.code;

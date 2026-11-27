@@ -1081,7 +1081,17 @@ test('PPT_Agent（v3.11）：DeepSeek Harness 大模型接入层 + harness 轮�
     assert.match(svc.summary.available().reason, /允许连接大模型接口/);
     assert.strictEqual(calls, 0);
     // 测试连接（允许联网前拒绝）
-    assert.strictEqual((await svc.pptAgentTest()).ok, false);
+    const pre = await svc.pptAgentTest();
+    assert.strictEqual(pre.ok, false);
+    assert.strictEqual(pre.code, 'PRECHECK');
+    assert.strictEqual(calls, 0, '未允许联网且未确认时不发请求');
+    // v3.14：用户确认“仅本次测试连接”时可以测试，不改变联网开关
+    const once = await svc.pptAgentTest({ once: true });
+    assert.ok(once.ok && once.checks.every((c) => c.ok), once.error);
+    assert.strictEqual(svc.getConfig().pptAgent.allowNetwork, false);
+    assert.strictEqual(svc.summary.available().ok, false, '测试后仍不允许其他调用');
+    const noKey = await svc.pptAgentTest({ once: true, model: '' , baseURL: 'not a url' });
+    assert.ok(!noKey.ok && /接口地址/.test(noKey.error));
     svc.pptAgentSetConfig({ allowNetwork: true });
     const t = await svc.pptAgentTest();
     assert.ok(t.ok, t.error);
